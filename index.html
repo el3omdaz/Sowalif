@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>المحادثة الذكية</title>
+  <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="المحادثة">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <aside id="side" class="side">
+      <div class="side-head">
+        <button id="newChat" class="btn primary wide">＋ محادثة جديدة</button>
+      </div>
+      <input id="search" class="side-search" type="search" placeholder="ابحث في المحادثات">
+      <nav id="chatList" class="chat-list"></nav>
+      <div class="side-foot">
+        <button id="openSettings" class="btn ghost wide">⚙️ الإعدادات</button>
+      </div>
+    </aside>
+    <div id="scrim" class="scrim"></div>
+
+    <main class="main">
+      <header class="top">
+        <button id="menuBtn" class="icon-btn" aria-label="المحادثات">☰</button>
+        <button id="modelBtn" class="model-btn"><span id="modelName">…</span> <span class="chev">▾</span></button>
+        <button id="newChatTop" class="icon-btn" aria-label="محادثة جديدة">✎</button>
+      </header>
+
+      <section id="messages" class="messages">
+        <div id="empty" class="empty">
+          <img src="icon-192.png" alt="" class="empty-logo">
+          <h2>شلون أقدر أساعدك؟</h2>
+          <p id="emptyModel"></p>
+          <div class="chips">
+            <button class="chip" data-p="اكتب لي فكرة إعلان قصير لعطر فخم باللهجة الخليجية">✍️ فكرة إعلان</button>
+            <button class="chip" data-p="شنو آخر الأخبار اليوم؟">🔎 أخبار اليوم</button>
+            <button class="chip" data-img="1" data-p="صورة منتج عطر فاخر على رخام أسود بإضاءة سينمائية">🎨 ارسم صورة</button>
+            <button class="chip" data-p="لخص لي الملف اللي بأرفقه بنقاط">📄 لخص ملف</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="composer-wrap">
+        <div id="attachRow" class="attach-row"></div>
+        <div id="status" class="status hidden"></div>
+        <div class="composer">
+          <textarea id="input" rows="1" placeholder="اكتب رسالتك…" enterkeyhint="send"></textarea>
+          <div class="tools">
+            <div class="tools-start">
+              <label class="icon-btn" title="أرفق صورة أو ملف">📎<input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt"></label>
+              <button id="searchBtn" class="toggle on" title="البحث في الإنترنت">🌐 بحث</button>
+              <button id="deepBtn" class="toggle" title="تفكير أعمق (أبطأ وأدق)">🧠 تفكير</button>
+              <button id="imgBtn" class="toggle" title="توليد صورة من الوصف">🎨 صورة</button>
+              <select id="aspect" class="aspect hidden" title="مقاس الصورة">
+                <option value="auto">تلقائي</option>
+                <option value="1:1">مربع 1:1</option>
+                <option value="9:16">ستوري 9:16</option>
+                <option value="4:5">بوست 4:5</option>
+                <option value="16:9">عريض 16:9</option>
+                <option value="3:4">3:4</option>
+                <option value="4:3">4:3</option>
+              </select>
+            </div>
+            <div class="tools-end">
+              <button id="micBtn" class="icon-btn mic" title="تكلم وأحوله نص">🎤</button>
+              <button id="sendBtn" class="send" title="إرسال" disabled>↑</button>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- اختيار النموذج -->
+  <div id="modelSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head"><h3>اختر النموذج</h3><button class="icon-btn" data-close>✕</button></div>
+      <div id="modelList" class="model-list"></div>
+    </div>
+  </div>
+
+  <!-- الإعدادات -->
+  <div id="settingsSheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-head"><h3>الإعدادات</h3><button class="icon-btn" data-close>✕</button></div>
+      <div class="settings">
+        <section>
+          <h4>مفتاح kie.ai</h4>
+          <p class="muted">من kie.ai ← API Key. يُحفظ في هذا الجهاز فقط ويُرسل لـ kie.ai مباشرة. حطه مرة على الكمبيوتر ومرة على الآيفون.</p>
+          <div class="row"><input id="keyInput" type="password" placeholder="الصق المفتاح هنا"><button id="saveKey" class="btn primary">حفظ</button></div>
+          <div class="row"><span id="keyNow" class="muted"></span><button id="checkKey" class="btn ghost">💰 الرصيد</button></div>
+          <p id="keyMsg" class="muted"></p>
+        </section>
+        <section>
+          <h4>النموذج التلقائي</h4>
+          <select id="defaultModel"></select>
+        </section>
+        <section>
+          <h4>📱 على الآيفون</h4>
+          <p class="muted">افتح الرابط في Safari ← زر المشاركة ⬆️ ← «إضافة إلى الشاشة الرئيسية». يصير تطبيق مستقل، ومحادثاته محفوظة في الآيفون.</p>
+        </section>
+        <section>
+          <h4>نقل المحادثات بين الأجهزة</h4>
+          <p class="muted">كل جهاز يحفظ محادثاته. صدّر نسخة من جهاز واستوردها في الثاني (أو احتفظ فيها كنسخة احتياطية).</p>
+          <div class="row"><button id="exportBtn" class="btn ghost">⬇️ تصدير</button><label class="btn ghost">⬆️ استيراد<input id="importInput" type="file" accept=".json,application/json" hidden></label></div>
+          <p id="backupMsg" class="muted"></p>
+        </section>
+        <section><button id="forgetKey" class="btn danger wide">مسح المفتاح من هذا الجهاز</button></section>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="vendor/marked.js"></script>
+  <script src="vendor/purify.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

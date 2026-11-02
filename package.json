@@ -1,0 +1,11 @@
+{
+  "name": "smart-chat",
+  "private": true,
+  "description": "يُستخدم محلياً فقط لتحديث مكتبات vendor/ — الموقع نفسه ملفات ثابتة بدون بناء",
+  "devDependencies": {
+    "dompurify": "^3",
+    "mammoth": "^1",
+    "marked": "^14",
+    "pdfjs-dist": "^4"
+  }
+}
