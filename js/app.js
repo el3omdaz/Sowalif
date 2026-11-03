@@ -13,7 +13,7 @@ const S = {
   chat: null,
   chats: [],
   attachments: [], // { id, name, kind, preview, meta, loading }
-  search: db.settings.get('search', true),
+  search: db.settings.get('search', false),
   deep: false,
   imageMode: false,
   controller: null,
@@ -297,6 +297,9 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
+  for (const [id, active] of [['searchBtn', S.search && !S.imageMode], ['deepBtn', S.deep && !S.imageMode], ['imgBtn', S.imageMode]]) {
+    $(`#${id}`).setAttribute('aria-pressed', String(active));
+  }
   $('#searchBtn').classList.toggle('on', S.search && !S.imageMode);
   $('#searchBtn').disabled = S.imageMode;
   $('#deepBtn').classList.toggle('on', S.deep && !S.imageMode);
@@ -340,10 +343,12 @@ function updateSend() {
   if (S.controller) {
     b.disabled = false;
     b.classList.add('stop');
+    b.setAttribute('aria-label', 'إيقاف الرد');
     b.textContent = '■';
     return;
   }
   b.classList.remove('stop');
+  b.setAttribute('aria-label', 'إرسال');
   b.textContent = '↑';
   b.disabled = S.attachments.some((a) => a.loading) || (!input.value.trim() && !S.attachments.length);
 }
@@ -411,6 +416,7 @@ $('#fileInput').addEventListener('change', (e) => {
   e.target.value = '';
 });
 // السحب والإفلات واللصق على الكمبيوتر
+$('#attachBtn').onclick = () => $('#fileInput').click();
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault();
@@ -447,6 +453,7 @@ async function run(opts) {
   let frame = 0;
   const paint = () => {
     frame = 0;
+    if (!el.isConnected) return;
     const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
     bubble.innerHTML = md(text);
     if (stick) box.scrollTop = box.scrollHeight;
@@ -471,6 +478,7 @@ async function run(opts) {
   try {
     await respond(chat, { model: S.model, search: S.search, deep: S.deep, aspect: $('#aspect').value, ...opts }, emit, ctrl.signal);
   } finally {
+    if (frame) cancelAnimationFrame(frame);
     S.controller = null;
     setStatus('');
     if (S.chat === chat) renderMessages();
@@ -481,6 +489,7 @@ async function run(opts) {
 
 async function send() {
   if (S.controller) return;
+  if (rec || mic.classList.contains('busy')) return toast('أوقف الإملاء وانتظر اكتمال النص أولاً');
   const text = input.value.trim();
   if ((!text && !S.attachments.length) || S.attachments.some((a) => a.loading)) return;
   if (S.imageMode && !text) return toast('اكتب وصف الصورة');
@@ -513,6 +522,71 @@ async function retry() {
 // ---------- المايكروفون: تسجيل ثم تحويله لنص ----------
 let rec = null;
 const mic = $('#micBtn');
+const micIcon = mic.innerHTML;
+let micStarting = false;
+
+function resetMic() {
+  mic.classList.remove('rec', 'busy');
+  mic.innerHTML = micIcon;
+  mic.setAttribute('aria-label', 'إملاء صوتي');
+  input.readOnly = false;
+  setStatus('');
+  autosize();
+}
+
+// يظهر النص أثناء الكلام، بدون انتظار رفع التسجيل وطلب نموذج.
+function startDictation() {
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Speech) return startRec();
+  const speech = new Speech();
+  speech.lang = 'ar-SA';
+  speech.continuous = true;
+  speech.interimResults = true;
+  const base = input.value;
+  let finalText = '';
+  let failure = '';
+  let heard = false;
+  rec = { speech, started: Date.now() };
+  const state = rec;
+  rec.timer = setInterval(tick, 500);
+  rec.limit = setTimeout(stopRec, 5 * 60 * 1000);
+  input.readOnly = true;
+  mic.classList.add('rec');
+  mic.setAttribute('aria-label', 'إيقاف الإملاء');
+  setStatus('أتسمعك… النص يظهر وأنت تتكلم');
+  tick();
+  speech.onresult = (e) => {
+    let interim = '';
+    finalText = '';
+    for (const result of e.results) {
+      if (result.isFinal) finalText += result[0].transcript + ' ';
+      else interim += result[0].transcript;
+    }
+    const text = (finalText + interim).trim();
+    heard ||= !!text;
+    input.value = base + (base && !/\s$/.test(base) && text ? ' ' : '') + text;
+    autosize();
+  };
+  speech.onerror = (e) => { failure = e.error; };
+  speech.onend = () => {
+    if (rec !== state) return;
+    clearInterval(state.timer);
+    clearTimeout(state.limit);
+    clearTimeout(state.endTimer);
+    rec = null;
+    resetMic();
+    if (failure === 'not-allowed' || failure === 'service-not-allowed') toast('اسمح بالإملاء والمايكروفون من إعدادات المتصفح، أو اختر «تسجيل ثم تحويل» من الإعدادات.', 6000);
+    else if (failure && failure !== 'aborted') toast(heard ? 'توقف الإملاء؛ النص الذي وصل موجود في مربع الكتابة.' : 'تعذّر الإملاء المباشر. اختر «تسجيل ثم تحويل» من الإعدادات وجرب مجدداً.', 5000);
+    else if (!heard) toast('ما سمعت كلام واضح — جرب مرة ثانية');
+  };
+  try { speech.start(); } catch {
+    clearInterval(state.timer);
+    clearTimeout(state.limit);
+    rec = null;
+    resetMic();
+    return startRec();
+  }
+}
 
 function pickMime() {
   for (const t of ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) if (window.MediaRecorder?.isTypeSupported?.(t)) return t;
@@ -529,12 +603,34 @@ async function startRec() {
     return toast('اسمح للتطبيق باستخدام المايكروفون من إعدادات المتصفح', 4000);
   }
   const mime = pickMime();
-  const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  let mr;
+  try { mr = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 64000 }); }
+  catch {
+    stream.getTracks().forEach((t) => t.stop());
+    return toast('تعذّر بدء التسجيل في هذا المتصفح');
+  }
   const chunks = [];
   mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   rec = { mr, stream, started: Date.now(), timer: setInterval(tick, 500) };
   mr.onstop = () => finishRec(new Blob(chunks, { type: (mr.mimeType || mime || 'audio/webm').split(';')[0] }));
-  mr.start(250);
+  try { mr.start(250); } catch {
+    clearInterval(rec.timer);
+    rec = null;
+    stream.getTracks().forEach((t) => t.stop());
+    resetMic();
+    return toast('تعذّر بدء التسجيل في هذا المتصفح');
+  }
+  mr.onerror = () => {
+    if (!rec || rec.mr !== mr) return;
+    clearInterval(rec.timer);
+    clearTimeout(rec.limit);
+    rec = null;
+    mr.onstop = null;
+    stream.getTracks().forEach((t) => t.stop());
+    resetMic();
+    toast('توقف تسجيل الصوت. جرب مرة ثانية.');
+  };
+  setStatus('أسجّل صوتك… اضغط المايك لإيقاف التسجيل');
   mic.classList.add('rec');
   tick();
   // حد أقصى 5 دقائق
@@ -551,6 +647,16 @@ function stopRec() {
   if (!rec) return;
   clearInterval(rec.timer);
   clearTimeout(rec.limit);
+  if (rec.speech) {
+    const state = rec;
+    state.speech.stop();
+    mic.classList.remove('rec');
+    mic.classList.add('busy');
+    mic.textContent = '…';
+    state.endTimer = setTimeout(() => { state.speech.abort(); state.speech.onend(); }, 5000);
+    return;
+  }
+  if (rec.mr.state === 'inactive') return;
   rec.mr.stop();
   rec.stream.getTracks().forEach((t) => t.stop());
 }
@@ -561,6 +667,7 @@ async function finishRec(blob) {
   mic.classList.remove('rec');
   mic.textContent = '⏳';
   mic.classList.add('busy');
+  setStatus('أحوّل التسجيل إلى نص…');
   try {
     if (dur < 700 || blob.size < 1500) throw new Error('التسجيل قصير — اضغط وتكلم ثم اضغط مرة ثانية للإيقاف');
     const text = await transcribe(blob);
@@ -572,15 +679,20 @@ async function finishRec(blob) {
   } catch (e) {
     toast(e.message, 3500);
   } finally {
-    mic.classList.remove('busy');
-    mic.textContent = '🎤';
+    resetMic();
   }
 }
 
-mic.onclick = () => {
-  if (mic.classList.contains('busy')) return;
+mic.onclick = async () => {
+  if (mic.classList.contains('busy') || micStarting || S.controller) return;
   if (rec) stopRec();
-  else startRec();
+  else {
+    micStarting = true;
+    try {
+      if (db.settings.get('speechMode', 'live') === 'record') await startRec();
+      else await startDictation();
+    } finally { micStarting = false; }
+  }
 };
 
 // ---------- الإعدادات ----------
@@ -591,9 +703,11 @@ function openSettings() {
   $('#settingsSheet').classList.remove('hidden');
   const k = db.settings.get('kieKey', '');
   $('#keyNow').textContent = k ? `المفتاح الحالي: ${mask(k)}` : 'لا يوجد مفتاح';
+  $('#speechMode').value = db.settings.get('speechMode', 'live');
   $('#defaultModel').innerHTML = MODELS.map((m) => `<option value="${m.id}"${m.id === S.defaultModel ? ' selected' : ''}>${esc(m.name)}${m.badge ? ` — ${m.badge}` : ''}</option>`).join('');
 }
 $('#openSettings').onclick = openSettings;
+$('#speechMode').onchange = (e) => db.settings.set('speechMode', e.target.value);
 
 $('#saveKey').onclick = () => {
   const k = $('#keyInput').value.trim();

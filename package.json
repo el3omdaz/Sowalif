@@ -1,6 +1,8 @@
 {
   "name": "smart-chat",
   "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test tests/*.test.mjs" },
   "description": "يُستخدم محلياً فقط لتحديث مكتبات vendor/ — الموقع نفسه ملفات ثابتة بدون بناء",
   "devDependencies": {
     "dompurify": "^3",

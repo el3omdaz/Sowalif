@@ -209,17 +209,24 @@ export async function respond(chat, opts, emit, signal) {
   }
 }
 
-// تحويل الصوت إلى نص عبر Gemini Flash (kie.ai ما فيه نموذج خاص للنسخ)
+// المسار الاحتياطي: رفع التسجيل وتحويله إلى نص عبر Gemini Flash
 export async function transcribe(blob) {
-  const t = blob.type;
-  const ext = /mp4|m4a|aac/.test(t) ? 'm4a' : /ogg/.test(t) ? 'ogg' : /wav/.test(t) ? 'wav' : /mpeg|mp3/.test(t) ? 'mp3' : 'webm';
-  const url = await uploadFile(blob, `voice-${Date.now()}.${ext}`);
-  const { text } = await ask(
-    SEARCH_MODEL,
-    'You are a precise speech-to-text transcriber. Transcribe the audio exactly as spoken, in the original language and dialect (often Gulf Arabic, sometimes mixed with English). Add natural punctuation. Output ONLY the transcript, nothing else. If there is no speech, output nothing.',
-    { role: 'user', text: 'Transcribe this audio.', files: [{ kind: 'audio', url }] },
-  );
-  return (text || '').trim();
+  const signal = AbortSignal.timeout(120000);
+  try {
+    const t = blob.type;
+    const ext = /mp4|m4a|aac/.test(t) ? 'm4a' : /ogg/.test(t) ? 'ogg' : /wav/.test(t) ? 'wav' : /mpeg|mp3/.test(t) ? 'mp3' : 'webm';
+    const url = await uploadFile(blob, `voice-${Date.now()}.${ext}`, signal);
+    const { text } = await ask(
+      SEARCH_MODEL,
+      'You are a precise speech-to-text transcriber. Transcribe the audio exactly as spoken, in the original language and dialect (often Gulf Arabic, sometimes mixed with English). Add natural punctuation. Output ONLY the transcript, nothing else. If there is no speech, output nothing.',
+      { role: 'user', text: 'Transcribe this audio.', files: [{ kind: 'audio', url }] },
+      { signal },
+    );
+    return (text || '').trim();
+  } catch (e) {
+    if (signal.aborted) throw new Error('تحويل التسجيل أخذ وقتاً طويلاً. جرّب الإملاء المباشر من الإعدادات.');
+    throw e;
+  }
 }
 
 // ---------- المرفقات ----------

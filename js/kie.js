@@ -14,6 +14,7 @@ const key = () => {
 };
 
 function friendly(code, msg = '') {
+  if (code >= 500) return 'خدمة kie.ai تواجه مشكلة مؤقتة. جرّب مرة ثانية أو اختر نموذجاً آخر.';
   if (code === 401) return 'مفتاح kie.ai غير صالح — غيّره من الإعدادات';
   if (code === 402 || /insufficient|credit|balance/i.test(msg)) return 'رصيدك في kie.ai خلص — اشحن الرصيد وجرب مرة ثانية';
   if (code === 429) return 'طلبات كثيرة على kie.ai — انتظر شوي وجرب';
@@ -21,29 +22,49 @@ function friendly(code, msg = '') {
   return `kie.ai (${code}): ${String(msg).slice(0, 300)}`;
 }
 
-const netError = (e) => (e.name === 'AbortError' ? e : new Error(navigator.onLine === false ? 'ما فيه إنترنت' : `تعذّر الاتصال بـ kie.ai (${e.message})`));
+const netError = (e) => (e.name === 'AbortError' ? e : new Error(navigator.onLine === false ? 'ما فيه إنترنت — تأكد من اتصالك ثم أعد المحاولة.' : 'انقطع الاتصال بـ kie.ai. تأكد من الشبكة؛ إذا تكرر الخطأ فقد تكون الخدمة غير متاحة أو تمنع اتصال المتصفح.'));
+
+const apiError = (code, msg) => Object.assign(new Error(friendly(code, msg)), { status: code });
 
 // الأخطاء تصل أحياناً بحالة 200 ورمز داخل الجسم، فنفحص الرد قبل قراءته كبث
 async function post(url, body, signal, extraHeaders = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await postOnce(url, body, signal, extraHeaders);
+    } catch (e) {
+      // نعيد فقط رفض الخادم الصريح، ولا نكرر طلباً انقطع بعد إرسال الرد.
+      if (attempt || ![429, 500, 502, 503, 504].includes(e.status) || signal?.aborted) throw e;
+      await wait(800, signal);
+    }
+  }
+}
+
+async function postOnce(url, body, signal, extraHeaders) {
+  const apiKey = key();
   let res;
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), 60000);
   try {
     res = await fetch(`${BASE()}${url}`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json', ...extraHeaders },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...extraHeaders },
       body: JSON.stringify(body),
-      signal,
+      signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
     });
+    if (res.ok && (res.headers.get('content-type') || '').includes('text/event-stream')) return { stream: res };
+    const text = await res.text();
+    const json = safeJSON(text);
+    const code = Number(json?.code) || res.status;
+    if (!res.ok || !json || json.type === 'error' || json.error || (json.code && code !== 200)) {
+      throw apiError(code, json?.error?.message || json?.msg || json?.message || text.slice(0, 300));
+    }
+    return { json };
   } catch (e) {
-    throw netError(e);
+    if (timeout.signal.aborted && !signal?.aborted) throw new Error('الخدمة تأخرت في بدء الرد. أعد المحاولة أو اختر نموذجاً أسرع.');
+    throw e instanceof TypeError ? netError(e) : e;
+  } finally {
+    clearTimeout(timer);
   }
-  if (res.ok && (res.headers.get('content-type') || '').includes('text/event-stream')) return { stream: res };
-  const text = await res.text();
-  const json = safeJSON(text);
-  const code = Number(json?.code) || res.status;
-  if (!res.ok || !json || json.type === 'error' || json.error || (json.code && code !== 200)) {
-    throw new Error(friendly(code, json?.error?.message || json?.msg || json?.message || text.slice(0, 300)));
-  }
-  return { json };
 }
 
 function safeJSON(s) {
@@ -60,22 +81,42 @@ async function readSSE(res, onEvent) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, idx).trim();
-      buffer = buffer.slice(idx + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === '[DONE]') continue;
-      const ev = safeJSON(data);
-      if (!ev) continue;
-      if (ev.code && Number(ev.code) !== 200 && !ev.type) throw new Error(friendly(Number(ev.code), ev.msg));
-      onEvent(ev);
+  let dataLines = [];
+  const dispatch = () => {
+    const data = dataLines.join('\n').trim();
+    dataLines = [];
+    if (!data || data === '[DONE]') return;
+    const ev = safeJSON(data);
+    if (!ev) throw new Error('وصل رد غير مكتمل من الخدمة. أعد المحاولة.');
+    if (ev.error || ev.type === 'error' || (ev.code && Number(ev.code) !== 200)) throw apiError(Number(ev.code) || 500, ev.error?.message || ev.msg || ev.message);
+    onEvent(ev);
+  };
+  const line = (s) => {
+    if (!s.trim()) dispatch();
+    else if (s.startsWith('data:')) dataLines.push(s.slice(5).trimStart());
+  };
+  try {
+    for (;;) {
+      let timer;
+      const { value, done } = await Promise.race([
+        reader.read(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('توقف وصول الرد من الخدمة. يمكنك إعادة المحاولة.')), 60000); }),
+      ]).finally(() => clearTimeout(timer));
+      buffer += decoder.decode(value, { stream: !done });
+      let idx;
+      while ((idx = buffer.indexOf('\n')) >= 0) {
+        line(buffer.slice(0, idx).replace(/\r$/, ''));
+        buffer = buffer.slice(idx + 1);
+      }
+      if (done) break;
     }
+    if (buffer) line(buffer.replace(/\r$/, ''));
+    dispatch();
+  } catch (e) {
+    throw e instanceof TypeError ? netError(e) : e;
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 
@@ -144,7 +185,7 @@ function toChat(messages) {
 // ---------- البث ----------
 // يعيد { text, calls, credits } ويمرر النص أولاً بأول عبر onDelta، والتفكير عبر onThinking
 async function runAnthropic(model, { system, messages, tools, deep, signal, onDelta, onThinking }) {
-  const body = { model: model.id, max_tokens: 16000, system, messages: toAnthropic(messages), stream: true };
+  const body = { model: model.id, max_tokens: 16000, system, messages: toAnthropic(messages), stream: true, thinkingFlag: !!deep };
   if (tools?.length) body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
   if (deep) body.thinkingFlag = true;
   const r = await post('/claude/v1/messages', body, signal, { 'anthropic-version': '2023-06-01' });
@@ -157,7 +198,9 @@ async function runAnthropic(model, { system, messages, tools, deep, signal, onDe
   const blocks = [];
   let text = '';
   let credits = 0;
+  let completed = false;
   await readSSE(r.stream, (ev) => {
+    if (ev.type === 'message_stop') completed = true;
     if (ev.type === 'error') throw new Error(friendly(500, ev.error?.message));
     credits = creditsOf(ev) || credits;
     if (ev.type === 'content_block_start') {
@@ -176,6 +219,7 @@ async function runAnthropic(model, { system, messages, tools, deep, signal, onDe
       else if (d.type === 'thinking_delta' && d.thinking) onThinking?.(d.thinking);
     }
   });
+  if (!completed) throw new Error('انقطع الرد قبل اكتماله. النص الذي وصل محفوظ؛ أعد المحاولة للرد الكامل.');
   const calls = blocks.filter((b) => b?.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: safeJSON(b.json) || b.input || {} }));
   return { text, calls, credits };
 }
@@ -221,6 +265,7 @@ async function runResponses(model, { system, messages, tools, deep, signal, onDe
       throw new Error(friendly(500, resp.error?.message || resp.incomplete_details?.reason || 'لم يكتمل الرد'));
     }
   });
+  if (!final) throw new Error('انقطع الرد قبل اكتماله. النص الذي وصل محفوظ؛ أعد المحاولة للرد الكامل.');
   if (!text && final) {
     text = textFromOutput(final.output);
     if (text) onDelta(text);
@@ -239,7 +284,9 @@ async function runChat(model, { system, messages, search, deep, signal, onDelta,
   }
   let text = '';
   let credits = 0;
+  let completed = false;
   await readSSE(r.stream, (ev) => {
+    if (ev.choices?.some((c) => c.finish_reason)) completed = true;
     credits = creditsOf(ev) || credits;
     const d = ev.choices?.[0]?.delta || {};
     if (d.reasoning_content) onThinking?.(d.reasoning_content);
@@ -248,13 +295,16 @@ async function runChat(model, { system, messages, search, deep, signal, onDelta,
       onDelta(d.content);
     }
   });
+  if (!completed) throw new Error('انقطع الرد قبل اكتماله. النص الذي وصل محفوظ؛ أعد المحاولة للرد الكامل.');
   return { text, calls: [], credits };
 }
 
-export function runModel(modelId, opts) {
+export async function runModel(modelId, opts) {
   const model = modelById(modelId);
   const fn = model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
-  return fn(model, { onDelta: () => {}, ...opts });
+  const out = await fn(model, { onDelta: () => {}, ...opts });
+  if (!out.text.trim() && !out.calls.length) throw new Error('الخدمة رجعت رداً فارغاً. أعد المحاولة أو اختر نموذجاً آخر.');
+  return out;
 }
 
 // طلب واحد بدون عرض متدفق (البحث وتحويل الصوت)
@@ -264,14 +314,14 @@ export async function ask(modelId, system, user, { search = false, signal } = {}
 }
 
 // ---------- الرفع: رابط عام مؤقت من kie.ai (مجاني، يُحذف بعد أيام) ----------
-export async function uploadFile(blob, fileName) {
+export async function uploadFile(blob, fileName, signal) {
   const form = new FormData();
   form.append('file', blob, fileName);
   form.append('uploadPath', 'smart-chat');
   form.append('fileName', fileName);
   let res;
   try {
-    res = await fetch(UPLOAD(), { method: 'POST', headers: { Authorization: `Bearer ${key()}` }, body: form });
+    res = await fetch(UPLOAD(), { method: 'POST', headers: { Authorization: `Bearer ${key()}` }, body: form, signal });
   } catch (e) {
     throw netError(e);
   }
@@ -300,8 +350,10 @@ async function taskCall(method, p, body, signal) {
 
 const wait = (ms, signal) =>
   new Promise((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => (clearTimeout(t), reject(new DOMException('أُلغي', 'AbortError'))), { once: true });
+    const abort = () => { clearTimeout(t); reject(new DOMException('أُلغي', 'AbortError')); };
+    const t = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
+    if (signal?.aborted) return abort();
+    signal?.addEventListener('abort', abort, { once: true });
   });
 
 export async function generateImage({ prompt, aspect = 'auto', refs = [], model, signal }) {

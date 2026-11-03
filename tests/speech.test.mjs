@@ -1,0 +1,87 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+function app() {
+  const nodes = new Map();
+  const node = (s) => {
+    if (!nodes.has(s)) {
+      const classes = new Set();
+      nodes.set(s, { value: '', innerHTML: '<svg>mic</svg>', textContent: '', style: {}, scrollHeight: 48,
+        classList: { add: (...a) => a.forEach((v) => classes.add(v)), remove: (...a) => a.forEach((v) => classes.delete(v)), contains: (v) => classes.has(v), toggle: () => {} },
+        setAttribute() {}, addEventListener() {}, focus() {},
+      });
+    }
+    return nodes.get(s);
+  };
+  let speech;
+  class Speech {
+    constructor() { speech = this; }
+    start() {}
+    stop() {}
+    abort() {}
+  }
+  const timers = new Set();
+  let timerId = 0;
+  const setTimer = () => { timers.add(++timerId); return timerId; };
+  const clearTimer = (id) => timers.delete(id);
+  const ctx = vm.createContext({
+    document: { querySelector: node, querySelectorAll: () => [], addEventListener() {} },
+    window: { SpeechRecognition: Speech, addEventListener() {} },
+    navigator: {}, matchMedia: () => ({ matches: false }),
+    db: { settings: { get: (_, d) => d } },
+    MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test',
+    marked: { setOptions() {} },
+    setTimeout: setTimer, setInterval: setTimer, clearTimeout: clearTimer, clearInterval: clearTimer,
+    Date, innerHeight: 800,
+  });
+  const source = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '')
+    .replace(/boot\(\)\.catch\([^\n]+/, '');
+  vm.runInContext(source, ctx);
+  return { ctx, node, timers, speech: () => speech, run: (s) => vm.runInContext(s, ctx) };
+}
+
+test('live dictation keeps the draft, replaces interim text, and cleans up on stop', () => {
+  const a = app();
+  a.node('#input').value = 'مسودة';
+  a.run('startDictation()');
+  const speech = a.speech();
+  assert.equal(speech.lang, 'ar-SA');
+  const interim = [{ transcript: 'أهلا' }];
+  interim.isFinal = false;
+  speech.onresult({ results: [interim] });
+  assert.equal(a.node('#input').value, 'مسودة أهلا');
+  const final = [{ transcript: 'أهلاً وسهلاً' }];
+  final.isFinal = true;
+  speech.onresult({ results: [final] });
+  assert.equal(a.node('#input').value, 'مسودة أهلاً وسهلاً');
+  assert.equal(a.node('#input').readOnly, true);
+  a.run('stopRec()');
+  speech.onend();
+  assert.equal(a.node('#input').readOnly, false);
+  assert.equal(a.node('#micBtn').innerHTML, '<svg>mic</svg>');
+  assert.equal(a.timers.size, 0);
+});
+
+test('permission or service failure restores controls and preserves existing draft', () => {
+  for (const error of ['not-allowed', 'network']) {
+    const a = app();
+    a.node('#input').value = 'كلام مكتوب';
+    a.run('startDictation()');
+    a.speech().onerror({ error });
+    a.speech().onend();
+    assert.equal(a.node('#input').value, 'كلام مكتوب');
+    assert.equal(a.node('#input').readOnly, false);
+    assert.equal(a.run('rec'), null);
+    assert.ok(a.node('#toast').textContent.length > 0);
+  }
+});
+
+test('unsupported live dictation uses the recording path', () => {
+  const a = app();
+  a.run('window.SpeechRecognition = undefined; startDictation()');
+  assert.match(a.node('#toast').textContent, /ما يدعم التسجيل/);
+  assert.equal(a.run('rec'), null);
+});

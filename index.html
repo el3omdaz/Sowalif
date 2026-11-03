@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>المحادثة الذكية</title>
-  <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#212121" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -18,7 +18,7 @@
 <body>
   <div id="app" class="app">
     <aside id="side" class="side">
-      <div class="side-head">
+      <div class="side-head"><div class="wordmark">سوالف <span>مساحة لأفكارك</span></div>
         <button id="newChat" class="btn primary wide">＋ محادثة جديدة</button>
       </div>
       <input id="search" class="side-search" type="search" placeholder="ابحث في المحادثات">
@@ -31,14 +31,14 @@
 
     <main class="main">
       <header class="top">
-        <button id="menuBtn" class="icon-btn" aria-label="المحادثات">☰</button>
+        <button id="menuBtn" class="icon-btn" aria-label="المحادثات"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h16"/></svg></button>
         <button id="modelBtn" class="model-btn"><span id="modelName">…</span> <span class="chev">▾</span></button>
-        <button id="newChatTop" class="icon-btn" aria-label="محادثة جديدة">✎</button>
+        <button id="newChatTop" class="icon-btn" aria-label="محادثة جديدة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M15 4l5 5M10 14l1-5 7-7 5 5-7 7-6 1Z"/></svg></button>
       </header>
 
-      <section id="messages" class="messages">
+      <section id="messages" class="messages" aria-label="المحادثة">
         <div id="empty" class="empty">
-          <img src="icon-192.png" alt="" class="empty-logo">
+          <div class="welcome-mark" aria-hidden="true">✳</div>
           <h2>شلون أقدر أساعدك؟</h2>
           <p id="emptyModel"></p>
           <div class="chips">
@@ -52,15 +52,15 @@
 
       <footer class="composer-wrap">
         <div id="attachRow" class="attach-row"></div>
-        <div id="status" class="status hidden"></div>
+        <div id="status" class="status hidden" role="status"></div>
         <div class="composer">
-          <textarea id="input" rows="1" placeholder="اكتب رسالتك…" enterkeyhint="send"></textarea>
+          <textarea id="input" aria-label="رسالتك" dir="auto" rows="1" placeholder="اكتب رسالتك…" enterkeyhint="send"></textarea>
           <div class="tools">
             <div class="tools-start">
-              <label class="icon-btn" title="أرفق صورة أو ملف">📎<input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt"></label>
-              <button id="searchBtn" class="toggle on" title="البحث في الإنترنت">🌐 بحث</button>
-              <button id="deepBtn" class="toggle" title="تفكير أعمق (أبطأ وأدق)">🧠 تفكير</button>
-              <button id="imgBtn" class="toggle" title="توليد صورة من الوصف">🎨 صورة</button>
+              <button id="attachBtn" class="icon-btn" aria-label="أرفق صورة أو ملف"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt">
+              <button id="searchBtn" class="toggle on" title="البحث في الإنترنت"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><span>بحث</span></button>
+              <button id="deepBtn" class="toggle" title="تفكير أعمق (أبطأ وأدق)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M9 21h6M8 14a7 7 0 1 1 8 0l-1 2H9l-1-2Z"/></svg><span>تفكير</span></button>
+              <button id="imgBtn" class="toggle" title="توليد صورة من الوصف"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg><span>صورة</span></button>
               <select id="aspect" class="aspect hidden" title="مقاس الصورة">
                 <option value="auto">تلقائي</option>
                 <option value="1:1">مربع 1:1</option>
@@ -72,12 +72,12 @@
               </select>
             </div>
             <div class="tools-end">
-              <button id="micBtn" class="icon-btn mic" title="تكلم وأحوله نص">🎤</button>
-              <button id="sendBtn" class="send" title="إرسال" disabled>↑</button>
+              <button id="micBtn" class="icon-btn mic" title="تكلم وأحوله نص" aria-label="إملاء صوتي"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg></button>
+              <button id="sendBtn" class="send" title="إرسال" aria-label="إرسال" disabled>↑</button>
             </div>
           </div>
         </div>
-      </footer>
+      <p class="composer-note">سوالف يساعدك تفكّر وتنجز. تحقّق من المعلومات المهمة.</p></footer>
     </main>
   </div>
 
@@ -104,6 +104,11 @@
         <section>
           <h4>النموذج التلقائي</h4>
           <select id="defaultModel"></select>
+        </section>
+        <section>
+          <h4>الإملاء الصوتي</h4>
+          <select id="speechMode" aria-label="طريقة تحويل الصوت"><option value="live">إملاء مباشر — النص أثناء الكلام</option><option value="record">تسجيل ثم تحويل عبر kie.ai</option></select>
+          <p class="muted">الإملاء المباشر يعتمد على خدمة التعرف على الكلام في متصفحك، وقد ترسل الصوت لمعالجته. إذا لم يدعمه المتصفح نستخدم التسجيل ثم التحويل. التسجيل يُرفع إلى kie.ai.</p>
         </section>
         <section>
           <h4>📱 على الآيفون</h4>

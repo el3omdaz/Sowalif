@@ -53,7 +53,7 @@ export const MODELS = [
     url: '/codex/v1/responses',
     tools: true,
     search: 'tool',
-    effort: ['medium', 'high'],
+    effort: ['low', 'high'],
     tagline: 'أحدث نموذج رئيسي من OpenAI',
     features: ['ذاكرة ضخمة: مليون توكن (كتب وملفات طويلة كاملة)', 'قوي في الرياضيات والمنطق والتحليل', 'تفكير قابل للتعميق', 'يقرأ الصور والملفات ويبحث ويرسم بنفسه'],
   },
@@ -130,7 +130,7 @@ export const MODELS = [
   },
 ];
 
-export const DEFAULT_MODEL = 'claude-fable-5';
+export const DEFAULT_MODEL = 'claude-sonnet-5-5';
 // البحث في الإنترنت لأي نموذج يمر عبر Gemini Flash مع بحث Google
 export const SEARCH_MODEL = 'gemini-3-8-flash';
 export const IMAGE_MODEL = 'nano-banana-2-1';
