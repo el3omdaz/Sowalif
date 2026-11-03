@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v3';
-const SHELL = ['./', 'index.html', 'style.css', 'js/app.js', 'js/db.js', 'js/kie.js', 'js/chat.js', 'js/models.js', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v4';
+const SHELL = ['./', 'index.html', 'style.css?v=4', 'js/app.js?v=4', 'js/db.js?v=4', 'js/kie.js?v=4', 'js/chat.js?v=4', 'js/models.js?v=4', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -15,7 +15,7 @@ self.addEventListener('fetch', (e) => {
   // طلبات kie.ai وغيرها تمر مباشرة بدون حفظ
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

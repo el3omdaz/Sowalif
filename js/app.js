@@ -1,8 +1,8 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js';
-import { MODELS, DEFAULT_MODEL, modelById } from './models.js';
-import { respond, transcribe, makeAttachment } from './chat.js';
-import { credits, CREDIT_USD } from './kie.js';
+import * as db from './db.js?v=4';
+import { MODELS, DEFAULT_MODEL, modelById } from './models.js?v=4';
+import { respond, transcribe, makeAttachment } from './chat.js?v=4';
+import { credits, CREDIT_USD } from './kie.js?v=4';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

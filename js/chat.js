@@ -1,7 +1,7 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob } from './db.js';
-import { modelById, SEARCH_MODEL, IMAGE_MODEL } from './models.js';
-import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js';
+import { saveChat, getBlob, putBlob } from './db.js?v=4';
+import { modelById, SEARCH_MODEL, IMAGE_MODEL } from './models.js?v=4';
+import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=4';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
