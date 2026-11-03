@@ -34,7 +34,7 @@ function app() {
     MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test',
     marked: { setOptions() {} },
     setTimeout: setTimer, setInterval: setTimer, clearTimeout: clearTimer, clearInterval: clearTimer,
-    Date, innerHeight: 800,
+    Date, Blob, AbortController, Uint8Array, innerHeight: 800,
   });
   const source = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
@@ -84,4 +84,70 @@ test('unsupported live dictation uses the recording path', () => {
   a.run('window.SpeechRecognition = undefined; startDictation()');
   assert.match(a.node('#toast').textContent, /ما يدعم التسجيل/);
   assert.equal(a.run('rec'), null);
+});
+
+function recorder(a) {
+  let stoppedTracks = 0;
+  class Recorder {
+    static isTypeSupported() { return true; }
+    state = 'inactive';
+    mimeType = 'audio/mp4';
+    start() { this.state = 'recording'; }
+    stop() { this.state = 'inactive'; this.onstop?.(); }
+  }
+  a.ctx.window.MediaRecorder = a.ctx.MediaRecorder = Recorder;
+  a.ctx.db.settings.get = (key, fallback) => key === 'kieKey' ? 'test' : fallback;
+  a.ctx.navigator.mediaDevices = { getUserMedia: async () => ({ getTracks: () => [{ stop() { stoppedTracks++; } }] }) };
+  return { stopped: () => stoppedTracks };
+}
+
+test('recording cancellation drops audio without transcription and preserves the draft', async () => {
+  const a = app();
+  const r = recorder(a);
+  let calls = 0;
+  a.ctx.transcribe = async () => { calls++; return 'نص'; };
+  a.node('#input').value = 'مسودة';
+  await a.run('startRec()');
+  assert.equal(a.node('#input').readOnly, true);
+  a.node('#voiceCancel').onclick();
+  assert.equal(a.run('rec'), null);
+  assert.equal(a.node('#input').value, 'مسودة');
+  assert.equal(a.node('#input').readOnly, false);
+  assert.equal(calls, 0);
+  assert.ok(r.stopped() > 0);
+  assert.equal(a.timers.size, 0);
+});
+
+test('failed transcription retains audio for retry and inserts text only after success', async () => {
+  const a = app();
+  recorder(a);
+  let calls = 0;
+  a.ctx.transcribe = async () => { if (++calls === 1) throw new Error('provider failed'); return 'الكلام المحوّل'; };
+  a.node('#input').value = 'مسودة';
+  await a.run('startRec()');
+  await a.run('rec.started -= 2000; finishRec(new Blob(["x".repeat(2000)], {type:"audio/mp4"}), rec)');
+  assert.ok(a.run('voiceJob.blob.size') > 1500);
+  assert.equal(a.node('#voiceAccept').disabled, false);
+  assert.equal(a.node('#input').value, 'مسودة');
+  await a.run('convertVoice(voiceJob)');
+  assert.equal(a.node('#input').value, 'مسودة الكلام المحوّل');
+  assert.equal(a.run('voiceJob'), null);
+  assert.equal(a.node('#input').readOnly, false);
+  assert.equal(calls, 2);
+});
+
+test('cancelled conversion cannot insert a late transcript', async () => {
+  const a = app();
+  recorder(a);
+  let resolve;
+  a.ctx.transcribe = () => new Promise((r) => { resolve = r; });
+  a.node('#input').value = 'مسودة';
+  await a.run('startRec()');
+  const pending = a.run('rec.started -= 2000; finishRec(new Blob(["x".repeat(2000)]), rec)');
+  a.node('#voiceCancel').onclick();
+  resolve('نص وصل بعد الإلغاء');
+  await pending;
+  assert.equal(a.node('#input').value, 'مسودة');
+  assert.equal(a.run('voiceJob'), null);
+  assert.equal(a.node('#input').readOnly, false);
 });

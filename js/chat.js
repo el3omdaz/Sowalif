@@ -1,17 +1,17 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob } from './db.js?v=4';
-import { modelById, SEARCH_MODEL, IMAGE_MODEL } from './models.js?v=4';
-import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=4';
+import { saveChat, getBlob, putBlob } from './db.js?v=5';
+import { modelById, SEARCH_MODEL, IMAGE_MODEL } from './models.js?v=5';
+import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=5';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
-function systemPrompt(model) {
+function systemPrompt(model, search) {
   const today = new Date().toLocaleDateString('ar', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   return [
     `أنت مساعد ذكي داخل تطبيق «المحادثة الذكية». النموذج الحالي: ${model.name}. تاريخ اليوم: ${today}.`,
     'رد بنفس لغة ولهجة المستخدم (غالباً عربي خليجي). اكتب بوضوح، واستخدم Markdown عند الحاجة (عناوين، قوائم، جداول، كود).',
     model.tools
-      ? 'عندك أداتان: web_search للمعلومات الحديثة أو اللي ما تعرفها يقيناً (أسعار، أخبار، أحداث بعد تاريخ معرفتك)، و generate_image لما يطلب المستخدم صورة أو تصميم أو تعديل صورة. اكتب برومبت الصورة بالإنجليزي بتفصيل. اذكر مصادر البحث كروابط.'
+      ? `${search ? 'استخدم web_search للمعلومات الحديثة والأسعار والأخبار، واذكر مصادر البحث كروابط. ' : 'البحث غير مفعّل. لا تدّعِ الاطلاع على أسعار أو أخبار حديثة؛ اطلب تفعيل البحث عند الحاجة. '}استخدم generate_image فقط عندما يطلب المستخدم صراحةً إنشاء صورة أو تعديلها. اكتب برومبت الصورة بالإنجليزي بتفصيل.`
       : '',
   ]
     .filter(Boolean)
@@ -141,7 +141,7 @@ export async function respond(chat, opts, emit, signal) {
       return reply;
     }
 
-    let system = systemPrompt(model);
+    let system = systemPrompt(model, opts.search);
     const messages = await history(chat, model);
 
     // نماذج بدون أدوات: نبحث قبل السؤال ونعطيها النتائج
@@ -161,6 +161,7 @@ export async function respond(chat, opts, emit, signal) {
         search: opts.search && model.search === 'native',
         deep: !!opts.deep,
         signal,
+        onState: (state) => emit('status', { text: state.phase === 'connecting' ? 'بانتظار بدء استجابة kie.ai…' : state.phase === 'retry' ? 'الخدمة رفضت الطلب مؤقتاً؛ أعيد المحاولة مرة واحدة…' : state.streaming ? 'اتصلت الخدمة؛ بانتظار النص…' : 'الخدمة ترسل الرد دفعة واحدة؛ بانتظار اكتماله…' }),
         onDelta: (t) => {
           reply.text += t;
           emit('delta', { text: t });
@@ -168,6 +169,7 @@ export async function respond(chat, opts, emit, signal) {
         onThinking: (t) => emit('thinking', { text: t }),
       });
       reply.credits += out.credits || 0;
+      reply.connection = out.connection;
       const calls = out.calls.filter((c) => tools.some((t) => t.name === c.name));
       if (!calls.length) break;
 
@@ -200,7 +202,10 @@ export async function respond(chat, opts, emit, signal) {
     if (signal?.aborted) {
       reply.stopped = true;
       if (!reply.text && !reply.images?.length) reply.text = '⏹️ تم الإيقاف';
-    } else reply.error = e.message;
+    } else {
+      reply.error = e.message;
+      reply.connection = e.connection;
+    }
     return reply;
   } finally {
     chat.messages.push(reply);
@@ -210,8 +215,9 @@ export async function respond(chat, opts, emit, signal) {
 }
 
 // المسار الاحتياطي: رفع التسجيل وتحويله إلى نص عبر Gemini Flash
-export async function transcribe(blob) {
-  const signal = AbortSignal.timeout(120000);
+export async function transcribe(blob, externalSignal) {
+  const timeout = AbortSignal.timeout(120000);
+  const signal = externalSignal ? AbortSignal.any([timeout, externalSignal]) : timeout;
   try {
     const t = blob.type;
     const ext = /mp4|m4a|aac/.test(t) ? 'm4a' : /ogg/.test(t) ? 'ogg' : /wav/.test(t) ? 'wav' : /mpeg|mp3/.test(t) ? 'mp3' : 'webm';
@@ -224,7 +230,8 @@ export async function transcribe(blob) {
     );
     return (text || '').trim();
   } catch (e) {
-    if (signal.aborted) throw new Error('تحويل التسجيل أخذ وقتاً طويلاً. جرّب الإملاء المباشر من الإعدادات.');
+    if (externalSignal?.aborted) throw new DOMException('أُلغي التحويل', 'AbortError');
+    if (timeout.aborted) throw new Error('تحويل التسجيل أخذ وقتاً طويلاً. يمكنك إعادة التحويل أو تجربة إملاء المتصفح من الإعدادات.');
     throw e;
   }
 }

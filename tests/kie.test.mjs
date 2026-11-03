@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.localStorage = { getItem: (k) => k === 'sc.kieKey' ? '"test-key"' : null };
-const { runModel } = await import('../js/kie.js');
+const { runModel, diagnoseModels } = await import('../js/kie.js');
 const opts = { system: 'Test', messages: [{ role: 'user', text: 'مرحبا' }] };
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 const sse = (text) => {
@@ -100,7 +100,7 @@ test('waiting for response headers times out with an actionable message', async 
   globalThis.setTimeout = (fn, ms, ...args) => original(fn, ms === 60000 ? 5 : ms, ...args);
   try {
     globalThis.fetch = (_, { signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
-    await assert.rejects(runModel('gpt-6-1-sol', opts), /تأخرت في بدء الرد/);
+    await assert.rejects(runModel('gpt-6-1-sol', opts), (e) => e.code === 'PROVIDER_TIMEOUT' && e.connection.headersMs == null && e.connection.path === '/codex/v1/responses');
   } finally { globalThis.setTimeout = original; }
 });
 
@@ -113,4 +113,28 @@ test('a stalled stream times out and releases its reader', async () => {
     await assert.rejects(runModel('gpt-6-1-sol', opts), /توقف وصول الرد/);
     assert.equal(cancelled, true);
   } finally { globalThis.setTimeout = original; }
+});
+
+test('diagnostics compares providers using fixed prompts and records connection phases', async () => {
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) });
+    return url.includes('/claude/') ? json({ content: [{ type: 'text', text: 'OK' }] }) : json({ choices: [{ message: { content: 'OK' } }] });
+  };
+  const results = await diagnoseModels(['claude-sonnet-5-5', 'gemini-3-8-flash', 'gemini-3-8-flash']);
+  assert.equal(results.length, 2);
+  assert.ok(results.every((r) => r.ok && r.status === 200 && r.firstTextMs !== null && r.headersMs >= 0));
+  assert.equal(requests[0].body.max_tokens, 128);
+  assert.equal(requests[0].body.tools, undefined);
+  assert.equal(requests[1].body.tools, undefined);
+  assert.ok(requests.every((r) => JSON.stringify(r.body).includes('Connection test. Reply OK.')));
+});
+
+test('diagnostics stops between requests when cancelled', async () => {
+  const ctrl = new AbortController();
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; ctrl.abort(); throw new DOMException('Cancelled', 'AbortError'); };
+  const results = await diagnoseModels(['claude-sonnet-5-5', 'gemini-3-8-flash'], { signal: ctrl.signal });
+  assert.equal(results.length, 0);
+  assert.equal(calls, 1);
 });

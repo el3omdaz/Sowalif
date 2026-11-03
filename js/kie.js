@@ -1,6 +1,6 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
-import { settings, putBlob } from './db.js?v=4';
-import { modelById } from './models.js?v=4';
+import { settings, putBlob } from './db.js?v=5';
+import { modelById } from './models.js?v=5';
 
 // sc.base / sc.upload لتجربة التطبيق على خادم وهمي فقط
 const BASE = () => settings.get('base', 'https://api.kie.ai');
@@ -27,30 +27,33 @@ const netError = (e) => (e.name === 'AbortError' ? e : new Error(navigator.onLin
 const apiError = (code, msg) => Object.assign(new Error(friendly(code, msg)), { status: code });
 
 // الأخطاء تصل أحياناً بحالة 200 ورمز داخل الجسم، فنفحص الرد قبل قراءته كبث
-async function post(url, body, signal, extraHeaders = {}) {
+async function post(url, body, signal, extraHeaders = {}, onTransport) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await postOnce(url, body, signal, extraHeaders);
+      return await postOnce(url, body, signal, extraHeaders, onTransport);
     } catch (e) {
       // نعيد فقط رفض الخادم الصريح، ولا نكرر طلباً انقطع بعد إرسال الرد.
       if (attempt || ![429, 500, 502, 503, 504].includes(e.status) || signal?.aborted) throw e;
+      onTransport?.({ phase: 'retry', path: url, status: e.status });
       await wait(800, signal);
     }
   }
 }
 
-async function postOnce(url, body, signal, extraHeaders) {
+async function postOnce(url, body, signal, extraHeaders, onTransport) {
   const apiKey = key();
   let res;
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), 60000);
   try {
+    onTransport?.({ phase: 'connecting', path: url });
     res = await fetch(`${BASE()}${url}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...extraHeaders },
       body: JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
     });
+    onTransport?.({ phase: 'headers', path: url, status: res.status, streaming: (res.headers.get('content-type') || '').includes('text/event-stream') });
     if (res.ok && (res.headers.get('content-type') || '').includes('text/event-stream')) return { stream: res };
     const text = await res.text();
     const json = safeJSON(text);
@@ -60,7 +63,7 @@ async function postOnce(url, body, signal, extraHeaders) {
     }
     return { json };
   } catch (e) {
-    if (timeout.signal.aborted && !signal?.aborted) throw new Error('الخدمة تأخرت في بدء الرد. أعد المحاولة أو اختر نموذجاً أسرع.');
+    if (timeout.signal.aborted && !signal?.aborted) throw Object.assign(new Error(res ? 'وصل اتصال بالخدمة، لكنها لم ترسل الرد كاملاً خلال دقيقة.' : 'لم يصل بدء استجابة من kie.ai خلال دقيقة. جرّب Gemini Flash أو شغّل فحص الاتصال من الإعدادات.'), { code: 'PROVIDER_TIMEOUT' });
     throw e instanceof TypeError ? netError(e) : e;
   } finally {
     clearTimeout(timer);
@@ -184,11 +187,11 @@ function toChat(messages) {
 
 // ---------- البث ----------
 // يعيد { text, calls, credits } ويمرر النص أولاً بأول عبر onDelta، والتفكير عبر onThinking
-async function runAnthropic(model, { system, messages, tools, deep, signal, onDelta, onThinking }) {
-  const body = { model: model.id, max_tokens: 16000, system, messages: toAnthropic(messages), stream: true, thinkingFlag: !!deep };
+async function runAnthropic(model, { system, messages, tools, deep, signal, onDelta, onThinking, onTransport, maxOutputTokens }) {
+  const body = { model: model.id, max_tokens: maxOutputTokens || (deep ? 16000 : 4096), system, messages: toAnthropic(messages), stream: true, thinkingFlag: !!deep };
   if (tools?.length) body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
   if (deep) body.thinkingFlag = true;
-  const r = await post('/claude/v1/messages', body, signal, { 'anthropic-version': '2023-06-01' });
+  const r = await post('/claude/v1/messages', body, signal, { 'anthropic-version': '2023-06-01' }, onTransport);
   if (r.json) {
     const content = r.json.content || [];
     const text = content.filter((b) => b.type === 'text').map((b) => b.text).join('');
@@ -234,14 +237,15 @@ const textFromOutput = (output = []) =>
     .map((c) => c.text)
     .join('');
 
-async function runResponses(model, { system, messages, tools, deep, signal, onDelta, onThinking }) {
+async function runResponses(model, { system, messages, tools, deep, signal, onDelta, onThinking, onTransport, maxOutputTokens }) {
   const body = { model: model.id, instructions: system, input: toResponses(messages), stream: true };
   if (tools?.length) {
     body.tools = tools.map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters }));
     body.tool_choice = 'auto';
   }
   if (model.effort) body.reasoning = { effort: deep ? model.effort[1] : model.effort[0] };
-  const r = await post(model.url, body, signal);
+  if (maxOutputTokens) body.max_output_tokens = maxOutputTokens;
+  const r = await post(model.url, body, signal, {}, onTransport);
   if (r.json) {
     const resp = r.json.response || r.json;
     const text = textFromOutput(resp.output);
@@ -273,10 +277,10 @@ async function runResponses(model, { system, messages, tools, deep, signal, onDe
   return { text, calls: callsFromOutput(final?.output), credits };
 }
 
-async function runChat(model, { system, messages, search, deep, signal, onDelta, onThinking }) {
+async function runChat(model, { system, messages, search, deep, signal, onDelta, onThinking, onTransport }) {
   const body = { messages: [{ role: 'system', content: system }, ...toChat(messages)], stream: true, reasoning_effort: deep ? 'high' : 'low' };
   if (search) body.tools = [{ type: 'function', function: { name: 'googleSearch' } }];
-  const r = await post(model.url, body, signal);
+  const r = await post(model.url, body, signal, {}, onTransport);
   if (r.json) {
     const text = r.json.choices?.[0]?.message?.content || '';
     if (text) onDelta(text);
@@ -302,9 +306,46 @@ async function runChat(model, { system, messages, search, deep, signal, onDelta,
 export async function runModel(modelId, opts) {
   const model = modelById(modelId);
   const fn = model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
-  const out = await fn(model, { onDelta: () => {}, ...opts });
-  if (!out.text.trim() && !out.calls.length) throw new Error('الخدمة رجعت رداً فارغاً. أعد المحاولة أو اختر نموذجاً آخر.');
-  return out;
+  const started = Date.now();
+  const connection = { model: model.id, phase: 'preparing', firstTextMs: null };
+  const onTransport = (state) => {
+    Object.assign(connection, state);
+    if (state.phase === 'headers') connection.headersMs = Date.now() - started;
+    opts.onState?.(state);
+  };
+  try {
+    const out = await fn(model, { ...opts, onTransport, onDelta: (text) => {
+      if (text && connection.firstTextMs === null) connection.firstTextMs = Date.now() - started;
+      opts.onDelta?.(text);
+    } });
+    if (!out.text.trim() && !out.calls.length) throw new Error('الخدمة رجعت رداً فارغاً. أعد المحاولة أو اختر نموذجاً آخر.');
+    return { ...out, connection: { ...connection, totalMs: Date.now() - started } };
+  } catch (e) {
+    e.connection = { ...connection, apiStatus: e.status, totalMs: Date.now() - started };
+    throw e;
+  }
+}
+
+// فحص من جهاز المستخدم بنفس مفتاحه. لا يرسل المحادثة أو المرفقات.
+export async function diagnoseModels(ids, { signal, onProgress } = {}) {
+  const results = [];
+  for (const id of [...new Set(ids)]) {
+    if (signal?.aborted) break;
+    const timeout = AbortSignal.timeout(25000);
+    onProgress?.(modelById(id).name);
+    try {
+      const out = await runModel(id, {
+        system: 'Reply with exactly: OK', messages: [{ role: 'user', text: 'Connection test. Reply OK.' }],
+        tools: [], deep: false, search: false, maxOutputTokens: 128,
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      });
+      results.push({ ok: true, ...out.connection });
+    } catch (e) {
+      if (signal?.aborted) break;
+      results.push({ ok: false, ...e.connection, error: timeout.aborted ? 'لم يبدأ الرد خلال 25 ثانية' : e.message });
+    }
+  }
+  return results;
 }
 
 // طلب واحد بدون عرض متدفق (البحث وتحويل الصوت)

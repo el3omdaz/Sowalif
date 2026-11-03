@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <div id="app" class="app">
@@ -54,6 +54,11 @@
         <div id="attachRow" class="attach-row"></div>
         <div id="status" class="status hidden" role="status"></div>
         <div class="composer">
+          <div id="voiceCapture" class="voice-capture hidden" role="group" aria-label="تسجيل صوتي">
+            <button id="voiceCancel" class="icon-btn" aria-label="إلغاء التسجيل والتحويل">✕</button>
+            <div class="voice-center"><div id="voiceWave" class="voice-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><span id="voiceLabel" role="status">تكلم…</span></div>
+            <button id="voiceAccept" class="send" aria-label="اعتماد التسجيل وتحويله لنص">✓</button>
+          </div>
           <textarea id="input" aria-label="رسالتك" dir="auto" rows="1" placeholder="اكتب رسالتك…" enterkeyhint="send"></textarea>
           <div class="tools">
             <div class="tools-start">
@@ -102,12 +107,19 @@
           <p id="keyMsg" class="muted"></p>
         </section>
         <section>
+          <h4>فحص بطء الرد</h4>
+          <p class="muted">يقارن النموذج الحالي مع Gemini Flash من جهازك. يرسل عبارة اختبار قصيرة لكل نموذج بدون محادثاتك أو ملفاتك، وتُحسب الطلبات على رصيد kie.ai.</p>
+          <div class="row"><button id="diagnoseBtn" class="btn ghost">فحص الاتصال والنماذج</button><button id="cancelDiagnosis" class="btn ghost hidden">إلغاء</button></div>
+          <pre id="diagnosisReport" class="diagnosis-report" dir="auto" role="status"></pre>
+          <button id="copyDiagnosis" class="btn ghost hidden">نسخ نتيجة الفحص</button>
+        </section>
+        <section>
           <h4>النموذج التلقائي</h4>
           <select id="defaultModel"></select>
         </section>
         <section>
           <h4>الإملاء الصوتي</h4>
-          <select id="speechMode" aria-label="طريقة تحويل الصوت"><option value="live">إملاء مباشر — النص أثناء الكلام</option><option value="record">تسجيل ثم تحويل عبر kie.ai</option></select>
+          <select id="speechMode" aria-label="طريقة تحويل الصوت"><option value="record">تسجيل واعتماد — ثم إدراج النص</option><option value="live">إملاء المتصفح — النص أثناء الكلام</option></select>
           <p class="muted">الإملاء المباشر يعتمد على خدمة التعرف على الكلام في متصفحك، وقد ترسل الصوت لمعالجته. إذا لم يدعمه المتصفح نستخدم التسجيل ثم التحويل. التسجيل يُرفع إلى kie.ai.</p>
         </section>
         <section>
@@ -129,6 +141,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=4"></script>
+  <script type="module" src="js/app.js?v=5"></script>
 </body>
 </html>

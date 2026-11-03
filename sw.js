@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v4';
-const SHELL = ['./', 'index.html', 'style.css?v=4', 'js/app.js?v=4', 'js/db.js?v=4', 'js/kie.js?v=4', 'js/chat.js?v=4', 'js/models.js?v=4', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v5';
+const SHELL = ['./', 'index.html', 'style.css?v=5', 'js/app.js?v=5', 'js/db.js?v=5', 'js/kie.js?v=5', 'js/chat.js?v=5', 'js/models.js?v=5', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

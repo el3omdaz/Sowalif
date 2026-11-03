@@ -166,6 +166,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .model-tag { color: var(--muted); font-size: 14px; }
 .model ul { margin: 2px 0 0; padding-inline-start: 18px; font-size: 13.5px; line-height: 1.7; }
 .settings { display: grid; gap: 18px; }
+.diagnosis-report { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; margin: 0; }
+.voice-capture { display: flex; align-items: center; gap: 12px; min-height: 86px; padding: 8px; }
+.voice-center { flex: 1; min-width: 0; display: grid; justify-items: center; gap: 8px; }
+.voice-center [role=status] { font-size: 12px; color: var(--muted); text-align: center; overflow-wrap: anywhere; }
+.voice-wave { display: flex; align-items: center; justify-content: center; gap: 3px; height: 30px; width: 100%; direction: ltr; }
+.voice-wave span { width: 3px; height: 3px; border-radius: 3px; background: var(--text); transition: height .08s; }
+.composer.voice-active > textarea, .composer.voice-active > .tools { display: none; }
+.voice-capture .send { flex: none; }
 .settings h4 { margin: 0 0 6px; }
 .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: grid; place-items: center; z-index: 30; padding: 12px; }

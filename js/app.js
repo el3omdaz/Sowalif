@@ -1,8 +1,8 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=4';
-import { MODELS, DEFAULT_MODEL, modelById } from './models.js?v=4';
-import { respond, transcribe, makeAttachment } from './chat.js?v=4';
-import { credits, CREDIT_USD } from './kie.js?v=4';
+import * as db from './db.js?v=5';
+import { MODELS, DEFAULT_MODEL, modelById } from './models.js?v=5';
+import { respond, transcribe, makeAttachment } from './chat.js?v=5';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=5';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -129,6 +129,7 @@ $('#scrim').onclick = closeSide;
 // ---------- المحادثة ----------
 function newChat() {
   if (S.controller) return;
+  if (rec || voiceJob || micStarting) return toast('اعتمد التسجيل أو ألغِه قبل فتح محادثة جديدة');
   S.chat = db.newChat(S.defaultModel);
   S.model = S.defaultModel;
   history.replaceState(null, '', location.pathname);
@@ -143,6 +144,7 @@ $('#newChatTop').onclick = newChat;
 
 async function openChat(id) {
   if (S.controller) return toast('انتظر يخلص الرد');
+  if (rec || voiceJob || micStarting) return toast('اعتمد التسجيل أو ألغِه قبل تغيير المحادثة');
   const chat = await db.getChat(id);
   if (!chat) return toast('المحادثة غير موجودة');
   S.chat = chat;
@@ -202,6 +204,8 @@ function messageHTML(m, i) {
     <div class="meta"><span>${esc(modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
       ${m.text ? '<button data-copy>📋 نسخ</button>' : ''}
       ${isLast ? '<button data-retry>🔄 أعد</button>' : ''}
+      ${isLast && m.error && m.model !== 'gemini-3-8-flash' ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
+      ${m.error && m.connection ? `<span>مدة الانتظار: ${Math.round(m.connection.totalMs / 1000)} ث · ${m.connection.headersMs == null ? 'بدون بدء استجابة' : 'وصلت استجابة من الخدمة'}</span>` : ''}
     </div></div>`;
 }
 
@@ -236,6 +240,11 @@ $('#messages').addEventListener('click', async (e) => {
   if (e.target.closest('[data-copy]')) {
     await copy(m.text);
     toast('تم النسخ');
+  } else if (e.target.closest('[data-fast-retry]')) {
+    if (S.controller) return;
+    S.model = 'gemini-3-8-flash';
+    renderModelName();
+    retry();
   } else if (e.target.closest('[data-retry]')) retry();
 });
 
@@ -489,7 +498,8 @@ async function run(opts) {
 
 async function send() {
   if (S.controller) return;
-  if (rec || mic.classList.contains('busy')) return toast('أوقف الإملاء وانتظر اكتمال النص أولاً');
+  if (diagnosisController) return toast('انتظر انتهاء فحص الاتصال أو ألغِ الفحص');
+  if (rec || voiceJob || mic.classList.contains('busy')) return toast('أوقف الإملاء وانتظر اكتمال النص أولاً');
   const text = input.value.trim();
   if ((!text && !S.attachments.length) || S.attachments.some((a) => a.loading)) return;
   if (S.imageMode && !text) return toast('اكتب وصف الصورة');
@@ -524,8 +534,51 @@ let rec = null;
 const mic = $('#micBtn');
 const micIcon = mic.innerHTML;
 let micStarting = false;
+let voiceJob = null;
+
+function showVoice() {
+  $('.composer').classList.add('voice-active');
+  $('#voiceCapture').classList.remove('hidden');
+  $('#voiceAccept').disabled = false;
+  $('#voiceAccept').textContent = '✓';
+  $('#voiceAccept').setAttribute('aria-label', 'اعتماد التسجيل وتحويله لنص');
+  input.readOnly = true;
+}
+
+function stopMeter(state) {
+  if (state.meterFrame) cancelAnimationFrame(state.meterFrame);
+  state.audioContext?.close().catch(() => {});
+}
+
+function startMeter(state) {
+  const Audio = window.AudioContext || window.webkitAudioContext;
+  if (!Audio) return;
+  try {
+    const ctx = state.audioContext = new Audio();
+    const source = ctx.createMediaStreamSource(state.stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    ctx.resume().catch(() => {});
+    const values = new Uint8Array(analyser.fftSize);
+    const bars = document.querySelectorAll('#voiceWave span');
+    const draw = () => {
+      if (rec !== state) return;
+      analyser.getByteTimeDomainData(values);
+      bars.forEach((bar, i) => {
+        let energy = 0;
+        for (let n = i * 10; n < i * 10 + 10; n++) energy += ((values[n] - 128) / 128) ** 2;
+        bar.style.height = `${Math.min(30, 3 + Math.sqrt(energy / 10) * 110)}px`;
+      });
+      state.meterFrame = requestAnimationFrame(draw);
+    };
+    draw();
+  } catch { /* يبقى التسجيل متاحاً حتى لو تعذّر قياس الصوت */ }
+}
 
 function resetMic() {
+  $('.composer').classList.remove('voice-active');
+  $('#voiceCapture').classList.add('hidden');
   mic.classList.remove('rec', 'busy');
   mic.innerHTML = micIcon;
   mic.setAttribute('aria-label', 'إملاء صوتي');
@@ -612,7 +665,8 @@ async function startRec() {
   const chunks = [];
   mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   rec = { mr, stream, started: Date.now(), timer: setInterval(tick, 500) };
-  mr.onstop = () => finishRec(new Blob(chunks, { type: (mr.mimeType || mime || 'audio/webm').split(';')[0] }));
+  const state = rec;
+  mr.onstop = () => finishRec(new Blob(chunks, { type: (mr.mimeType || mime || 'audio/webm').split(';')[0] }), state);
   try { mr.start(250); } catch {
     clearInterval(rec.timer);
     rec = null;
@@ -624,13 +678,16 @@ async function startRec() {
     if (!rec || rec.mr !== mr) return;
     clearInterval(rec.timer);
     clearTimeout(rec.limit);
+    stopMeter(rec);
     rec = null;
     mr.onstop = null;
     stream.getTracks().forEach((t) => t.stop());
     resetMic();
     toast('توقف تسجيل الصوت. جرب مرة ثانية.');
   };
-  setStatus('أسجّل صوتك… اضغط المايك لإيقاف التسجيل');
+  showVoice();
+  startMeter(state);
+  setStatus('اضغط ✓ لاعتماد التسجيل وتحويله إلى نص، أو × للإلغاء');
   mic.classList.add('rec');
   tick();
   // حد أقصى 5 دقائق
@@ -641,6 +698,7 @@ function tick() {
   if (!rec) return;
   const s = Math.floor((Date.now() - rec.started) / 1000);
   mic.textContent = `■ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  if (rec.mr) $('#voiceLabel').textContent = `تكلم… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function stopRec() {
@@ -657,39 +715,84 @@ function stopRec() {
     return;
   }
   if (rec.mr.state === 'inactive') return;
+  stopMeter(rec);
   rec.mr.stop();
   rec.stream.getTracks().forEach((t) => t.stop());
 }
 
-async function finishRec(blob) {
-  const dur = Date.now() - rec.started;
+async function finishRec(blob, state) {
+  if (rec !== state) return;
+  clearInterval(state.timer);
+  clearTimeout(state.limit);
+  stopMeter(state);
+  state.stream.getTracks().forEach((t) => t.stop());
+  const dur = Date.now() - state.started;
   rec = null;
+  if (dur < 700 || blob.size < 1500) {
+    resetMic();
+    return toast('التسجيل قصير — تكلم ثم اضغط ✓');
+  }
+  voiceJob = { blob, controller: null };
+  await convertVoice(voiceJob);
+}
+
+async function convertVoice(job) {
+  const ctrl = job.controller = new AbortController();
   mic.classList.remove('rec');
   mic.textContent = '⏳';
   mic.classList.add('busy');
+  $('#voiceAccept').disabled = true;
+  $('#voiceLabel').textContent = 'أحوّل الصوت إلى نص…';
   setStatus('أحوّل التسجيل إلى نص…');
   try {
-    if (dur < 700 || blob.size < 1500) throw new Error('التسجيل قصير — اضغط وتكلم ثم اضغط مرة ثانية للإيقاف');
-    const text = await transcribe(blob);
+    const text = await transcribe(job.blob, ctrl.signal);
+    if (voiceJob !== job || ctrl.signal.aborted) return;
     if (!text) throw new Error('ما سمعت كلام واضح — جرب مرة ثانية');
     const v = input.value;
     input.value = v && !/\s$/.test(v) ? `${v} ${text}` : v + text;
     autosize();
+    voiceJob = null;
+    resetMic();
     input.focus();
   } catch (e) {
-    toast(e.message, 3500);
-  } finally {
-    resetMic();
+    if (voiceJob !== job || ctrl.signal.aborted) return;
+    job.controller = null;
+    mic.classList.remove('busy');
+    $('#voiceLabel').textContent = 'تعذّر التحويل. تسجيلك موجود؛ اضغط ↻ لإعادة التحويل أو × للإلغاء.';
+    $('#voiceAccept').disabled = false;
+    $('#voiceAccept').textContent = '↻';
+    $('#voiceAccept').setAttribute('aria-label', 'إعادة تحويل التسجيل');
+    setStatus(e.message);
   }
 }
 
+$('#voiceAccept').onclick = () => {
+  if (rec?.mr) stopRec();
+  else if (voiceJob && !voiceJob.controller) convertVoice(voiceJob);
+};
+$('#voiceCancel').onclick = () => {
+  if (rec?.mr) {
+    const state = rec;
+    rec = null;
+    clearInterval(state.timer);
+    clearTimeout(state.limit);
+    stopMeter(state);
+    state.mr.onstop = null;
+    if (state.mr.state !== 'inactive') state.mr.stop();
+    state.stream.getTracks().forEach((t) => t.stop());
+  }
+  voiceJob?.controller?.abort();
+  voiceJob = null;
+  resetMic();
+};
+
 mic.onclick = async () => {
-  if (mic.classList.contains('busy') || micStarting || S.controller) return;
+  if (mic.classList.contains('busy') || micStarting || S.controller || diagnosisController || voiceJob) return;
   if (rec) stopRec();
   else {
     micStarting = true;
     try {
-      if (db.settings.get('speechMode', 'live') === 'record') await startRec();
+      if (db.settings.get('speechMode', 'record') === 'record') await startRec();
       else await startDictation();
     } finally { micStarting = false; }
   }
@@ -703,11 +806,39 @@ function openSettings() {
   $('#settingsSheet').classList.remove('hidden');
   const k = db.settings.get('kieKey', '');
   $('#keyNow').textContent = k ? `المفتاح الحالي: ${mask(k)}` : 'لا يوجد مفتاح';
-  $('#speechMode').value = db.settings.get('speechMode', 'live');
+  $('#speechMode').value = db.settings.get('speechMode', 'record');
   $('#defaultModel').innerHTML = MODELS.map((m) => `<option value="${m.id}"${m.id === S.defaultModel ? ' selected' : ''}>${esc(m.name)}${m.badge ? ` — ${m.badge}` : ''}</option>`).join('');
 }
 $('#openSettings').onclick = openSettings;
 $('#speechMode').onchange = (e) => db.settings.set('speechMode', e.target.value);
+
+let diagnosisController = null;
+$('#diagnoseBtn').onclick = async () => {
+  if (diagnosisController || S.controller || rec || voiceJob) return toast('انتظر انتهاء الرد أو التسجيل أولاً');
+  if (!db.settings.get('kieKey', '')) return toast('أضف مفتاح kie.ai أول');
+  diagnosisController = new AbortController();
+  const ctrl = diagnosisController;
+  $('#diagnoseBtn').disabled = true;
+  $('#cancelDiagnosis').classList.remove('hidden');
+  $('#copyDiagnosis').classList.add('hidden');
+  try {
+    const results = await diagnoseModels([S.model, 'gemini-3-8-flash'], { signal: ctrl.signal, onProgress: (name) => { $('#diagnosisReport').textContent = `أفحص ${name}… (حتى 25 ثانية لكل نموذج)`; } });
+    $('#diagnosisReport').textContent = (ctrl.signal.aborted ? 'أُلغي الفحص.\n' : '') + results.map((r) => [
+      `${modelOf(r.model).name}: ${r.ok ? 'نجح' : r.error}`,
+      `بدء الاستجابة: ${r.headersMs == null ? 'لم تصل' : (r.headersMs / 1000).toFixed(1) + ' ث'} · أول نص: ${r.firstTextMs == null ? 'لم يصل' : (r.firstTextMs / 1000).toFixed(1) + ' ث'}`,
+      `المدة: ${(r.totalMs / 1000).toFixed(1)} ث · ${r.path || ''}${r.status ? ' · HTTP ' + r.status : ''}${r.apiStatus ? ' · API ' + r.apiStatus : ''}`,
+    ].join('\n')).join('\n\n');
+    $('#copyDiagnosis').classList.toggle('hidden', !results.length);
+  } catch (e) {
+    $('#diagnosisReport').textContent = e.message;
+  } finally {
+    diagnosisController = null;
+    $('#diagnoseBtn').disabled = false;
+    $('#cancelDiagnosis').classList.add('hidden');
+  }
+};
+$('#cancelDiagnosis').onclick = () => diagnosisController?.abort();
+$('#copyDiagnosis').onclick = async () => { await copy($('#diagnosisReport').textContent); toast('تم نسخ نتيجة الفحص'); };
 
 $('#saveKey').onclick = () => {
   const k = $('#keyInput').value.trim();
