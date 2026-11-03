@@ -1,7 +1,7 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob } from './db.js?v=5';
-import { modelById, SEARCH_MODEL, IMAGE_MODEL } from './models.js?v=5';
-import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=5';
+import { saveChat, getBlob, putBlob, settings } from './db.js?v=6';
+import { modelById, SEARCH_MODEL, IMAGE_MODEL, OR_AUDIO_MODEL } from './models.js?v=6';
+import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=6';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -12,7 +12,7 @@ function systemPrompt(model, search) {
     'رد بنفس لغة ولهجة المستخدم (غالباً عربي خليجي). اكتب بوضوح، واستخدم Markdown عند الحاجة (عناوين، قوائم، جداول، كود).',
     model.tools
       ? `${search ? 'استخدم web_search للمعلومات الحديثة والأسعار والأخبار، واذكر مصادر البحث كروابط. ' : 'البحث غير مفعّل. لا تدّعِ الاطلاع على أسعار أو أخبار حديثة؛ اطلب تفعيل البحث عند الحاجة. '}استخدم generate_image فقط عندما يطلب المستخدم صراحةً إنشاء صورة أو تعديلها. اكتب برومبت الصورة بالإنجليزي بتفصيل.`
-      : '',
+      : model.provider === 'openrouter' ? (search ? 'البحث متاح عبر أداة OpenRouter. استخدمه للأخبار والأسعار والمعلومات الحديثة، وأدرج روابط المصادر.' : 'البحث غير مفعّل. لا تدّعِ الاطلاع على أسعار أو أخبار حديثة؛ اطلب تفعيل البحث عند الحاجة.') : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -136,6 +136,7 @@ export async function respond(chat, opts, emit, signal) {
   try {
     // وضع الرسم المباشر: نص المستخدم هو البرومبت، والصور المرفقة معه مرجع
     if (opts.imageMode) {
+      if (model.provider === 'openrouter') throw new Error('توليد الصور متاح حالياً مع kie.ai؛ اختره من الإعدادات لهذا الوضع.');
       const attached = (userMsg.files || []).some((f) => f.kind === 'image');
       await drawImage(chat, reply, { prompt: userMsg.text, aspect_ratio: opts.aspect, reference: attached ? 'attached' : 'none' }, emit, signal);
       return reply;
@@ -158,10 +159,10 @@ export async function respond(chat, opts, emit, signal) {
         system,
         messages,
         tools,
-        search: opts.search && model.search === 'native',
+        search: opts.search && (model.search === 'native' || model.search === 'openrouter'),
         deep: !!opts.deep,
         signal,
-        onState: (state) => emit('status', { text: state.phase === 'connecting' ? 'بانتظار بدء استجابة kie.ai…' : state.phase === 'retry' ? 'الخدمة رفضت الطلب مؤقتاً؛ أعيد المحاولة مرة واحدة…' : state.streaming ? 'اتصلت الخدمة؛ بانتظار النص…' : 'الخدمة ترسل الرد دفعة واحدة؛ بانتظار اكتماله…' }),
+        onState: (state) => emit('status', { text: state.phase === 'connecting' ? `بانتظار بدء استجابة ${model.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'}…` : state.phase === 'retry' ? 'الخدمة رفضت الطلب مؤقتاً؛ أعيد المحاولة مرة واحدة…' : state.streaming ? 'اتصلت الخدمة؛ بانتظار النص…' : 'الخدمة ترسل الرد دفعة واحدة؛ بانتظار اكتماله…' }),
         onDelta: (t) => {
           reply.text += t;
           emit('delta', { text: t });
@@ -215,12 +216,20 @@ export async function respond(chat, opts, emit, signal) {
 }
 
 // المسار الاحتياطي: رفع التسجيل وتحويله إلى نص عبر Gemini Flash
-export async function transcribe(blob, externalSignal) {
+export async function transcribe(blob, externalSignal, provider = settings.get('provider', 'kie')) {
   const timeout = AbortSignal.timeout(120000);
   const signal = externalSignal ? AbortSignal.any([timeout, externalSignal]) : timeout;
   try {
     const t = blob.type;
     const ext = /mp4|m4a|aac/.test(t) ? 'm4a' : /ogg/.test(t) ? 'ogg' : /wav/.test(t) ? 'wav' : /mpeg|mp3/.test(t) ? 'mp3' : 'webm';
+    if (provider === 'openrouter') {
+      const dataUrl = await toDataUrl(blob);
+      if (signal.aborted) throw new DOMException('أُلغي التحويل', 'AbortError');
+      const { text } = await ask(OR_AUDIO_MODEL,
+        'Transcribe the audio exactly as spoken, in the original language and dialect (often Gulf Arabic). Output ONLY the transcript, nothing else. If there is no speech, output nothing.',
+        { role: 'user', text: 'Transcribe this audio.', files: [{ kind: 'audio', data: dataUrl.slice(dataUrl.indexOf(',') + 1), format: ext }] }, { signal });
+      return (text || '').trim();
+    }
     const url = await uploadFile(blob, `voice-${Date.now()}.${ext}`, signal);
     const { text } = await ask(
       SEARCH_MODEL,

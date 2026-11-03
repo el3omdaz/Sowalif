@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <div id="app" class="app">
@@ -32,7 +32,7 @@
     <main class="main">
       <header class="top">
         <button id="menuBtn" class="icon-btn" aria-label="المحادثات"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h16"/></svg></button>
-        <button id="modelBtn" class="model-btn"><span id="modelName">…</span> <span class="chev">▾</span></button>
+        <button id="modelBtn" class="model-btn"><span id="modelName">…</span> <span class="chev">▾</span><small id="providerBadge"></small></button>
         <button id="newChatTop" class="icon-btn" aria-label="محادثة جديدة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M15 4l5 5M10 14l1-5 7-7 5 5-7 7-6 1Z"/></svg></button>
       </header>
 
@@ -90,6 +90,7 @@
   <div id="modelSheet" class="sheet hidden">
     <div class="sheet-card">
       <div class="sheet-head"><h3>اختر النموذج</h3><button class="icon-btn" data-close>✕</button></div>
+      <input id="modelSearch" type="search" placeholder="ابحث عن نموذج" aria-label="ابحث عن نموذج">
       <div id="modelList" class="model-list"></div>
     </div>
   </div>
@@ -100,15 +101,20 @@
       <div class="sheet-head"><h3>الإعدادات</h3><button class="icon-btn" data-close>✕</button></div>
       <div class="settings">
         <section>
-          <h4>مفتاح kie.ai</h4>
-          <p class="muted">من kie.ai ← API Key. يُحفظ في هذا الجهاز فقط ويُرسل لـ kie.ai مباشرة. حطه مرة على الكمبيوتر ومرة على الآيفون.</p>
-          <div class="row"><input id="keyInput" type="password" placeholder="الصق المفتاح هنا"><button id="saveKey" class="btn primary">حفظ</button></div>
-          <div class="row"><span id="keyNow" class="muted"></span><button id="checkKey" class="btn ghost">💰 الرصيد</button></div>
+          <h4>مزوّد الخدمة</h4>
+          <select id="providerSelect" aria-label="مزوّد الخدمة"><option value="kie">kie.ai</option><option value="openrouter">OpenRouter</option></select>
+          <p class="muted">المفتاح منفصل لكل مزوّد. عند الإرسال تذهب المحادثة والمرفقات للمزوّد المختار. يُحفظ المفتاح على هذا الجهاز فقط، ولا يُرفع إلى GitHub.</p>
+        </section>
+        <section>
+          <h4 id="keyTitle">مفتاح kie.ai</h4>
+          <p id="keyHelp" class="muted"></p>
+          <div class="row"><input id="keyInput" type="password" aria-label="مفتاح المزوّد" autocomplete="off" spellcheck="false" placeholder="الصق المفتاح هنا"><button id="saveKey" class="btn primary">حفظ</button></div>
+          <div class="row"><span id="keyNow" class="muted"></span><button id="checkKey" class="btn ghost">فحص المفتاح</button></div>
           <p id="keyMsg" class="muted"></p>
         </section>
         <section>
           <h4>فحص بطء الرد</h4>
-          <p class="muted">يقارن النموذج الحالي مع Gemini Flash من جهازك. يرسل عبارة اختبار قصيرة لكل نموذج بدون محادثاتك أو ملفاتك، وتُحسب الطلبات على رصيد kie.ai.</p>
+          <p id="diagnoseHelp" class="muted">يفحص النموذج الحالي وGemini Flash عبر المزوّد المختار. يرسل عبارة اختبار قصيرة لكل نموذج بدون محادثاتك أو ملفاتك، وتُحسب الطلبات على رصيد المزوّد.</p>
           <div class="row"><button id="diagnoseBtn" class="btn ghost">فحص الاتصال والنماذج</button><button id="cancelDiagnosis" class="btn ghost hidden">إلغاء</button></div>
           <pre id="diagnosisReport" class="diagnosis-report" dir="auto" role="status"></pre>
           <button id="copyDiagnosis" class="btn ghost hidden">نسخ نتيجة الفحص</button>
@@ -116,11 +122,13 @@
         <section>
           <h4>النموذج التلقائي</h4>
           <select id="defaultModel"></select>
+          <button id="refreshModels" class="btn ghost hidden">تحديث نماذج OpenRouter</button>
+          <p id="catalogMsg" class="muted"></p>
         </section>
         <section>
           <h4>الإملاء الصوتي</h4>
           <select id="speechMode" aria-label="طريقة تحويل الصوت"><option value="record">تسجيل واعتماد — ثم إدراج النص</option><option value="live">إملاء المتصفح — النص أثناء الكلام</option></select>
-          <p class="muted">الإملاء المباشر يعتمد على خدمة التعرف على الكلام في متصفحك، وقد ترسل الصوت لمعالجته. إذا لم يدعمه المتصفح نستخدم التسجيل ثم التحويل. التسجيل يُرفع إلى kie.ai.</p>
+          <p class="muted">التسجيل ثم التحويل يستخدم المزوّد المختار، ويُدرج النص قبل الإرسال. إملاء المتصفح الاختياري قد يرسل الصوت لخدمة التعرف على الكلام الخاصة بالمتصفح.</p>
         </section>
         <section>
           <h4>📱 على الآيفون</h4>
@@ -141,6 +149,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=5"></script>
+  <script type="module" src="js/app.js?v=6"></script>
 </body>
 </html>

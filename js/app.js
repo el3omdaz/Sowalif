@@ -1,15 +1,24 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=5';
-import { MODELS, DEFAULT_MODEL, modelById } from './models.js?v=5';
-import { respond, transcribe, makeAttachment } from './chat.js?v=5';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=5';
+import * as db from './db.js?v=6';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=6';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=6';
+import { respond, transcribe, makeAttachment } from './chat.js?v=6';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=6';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+const initialProvider = db.settings.get('provider', 'kie') === 'openrouter' ? 'openrouter' : 'kie';
+const keySetting = (provider) => provider === 'openrouter' ? 'openRouterKey' : 'kieKey';
+const defaultFor = (provider) => {
+  const fallback = provider === 'openrouter' ? OR_DEFAULT_MODEL : DEFAULT_MODEL;
+  const saved = db.settings.get(provider === 'openrouter' ? 'orDefaultModel' : 'defaultModel', fallback);
+  return providerOf(saved) === provider && MODELS.some((m) => m.id === saved) ? saved : fallback;
+};
 const S = {
+  provider: initialProvider,
   model: '',
-  defaultModel: db.settings.get('defaultModel', DEFAULT_MODEL),
+  defaultModel: defaultFor(initialProvider),
   chat: null,
   chats: [],
   attachments: [], // { id, name, kind, preview, meta, loading }
@@ -18,7 +27,6 @@ const S = {
   imageMode: false,
   controller: null,
 };
-if (!MODELS.some((m) => m.id === S.defaultModel)) S.defaultModel = DEFAULT_MODEL;
 
 function toast(text, ms = 2600) {
   const t = $('#toast');
@@ -35,9 +43,9 @@ async function boot() {
   const id = location.hash.slice(1);
   if (id && S.chats.some((c) => c.id === id)) await openChat(id);
   else newChat();
-  if (!db.settings.get('kieKey', '')) {
+  if (!db.settings.get(keySetting(S.provider), '')) {
     openSettings();
-    toast('أضف مفتاح kie.ai عشان تبدأ', 4000);
+    toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} عشان تبدأ`, 4000);
   }
 }
 
@@ -46,6 +54,7 @@ const modelOf = (id) => modelById(id);
 function renderModelName() {
   const m = modelOf(S.model);
   $('#modelName').textContent = m.name;
+  $('#providerBadge').textContent = m.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai';
   $('#emptyModel').textContent = `${m.name} — ${m.tagline}`;
 }
 
@@ -149,6 +158,11 @@ async function openChat(id) {
   if (!chat) return toast('المحادثة غير موجودة');
   S.chat = chat;
   S.model = chat.model || S.defaultModel;
+  S.provider = providerOf(S.model);
+  S.defaultModel = defaultFor(S.provider);
+  db.settings.set('provider', S.provider);
+  S.imageMode = false;
+  syncToggles();
   history.replaceState(null, '', `#${id}`);
   renderModelName();
   renderMessages();
@@ -204,7 +218,7 @@ function messageHTML(m, i) {
     <div class="meta"><span>${esc(modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
       ${m.text ? '<button data-copy>📋 نسخ</button>' : ''}
       ${isLast ? '<button data-retry>🔄 أعد</button>' : ''}
-      ${isLast && m.error && m.model !== 'gemini-3-8-flash' ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
+      ${isLast && m.error && !['gemini-3-8-flash', OR_AUDIO_MODEL].includes(m.model) ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
       ${m.error && m.connection ? `<span>مدة الانتظار: ${Math.round(m.connection.totalMs / 1000)} ث · ${m.connection.headersMs == null ? 'بدون بدء استجابة' : 'وصلت استجابة من الخدمة'}</span>` : ''}
     </div></div>`;
 }
@@ -242,7 +256,8 @@ $('#messages').addEventListener('click', async (e) => {
     toast('تم النسخ');
   } else if (e.target.closest('[data-fast-retry]')) {
     if (S.controller) return;
-    S.model = 'gemini-3-8-flash';
+    S.provider = providerOf(m.model);
+    S.model = S.provider === 'openrouter' ? OR_AUDIO_MODEL : 'gemini-3-8-flash';
     renderModelName();
     retry();
   } else if (e.target.closest('[data-retry]')) retry();
@@ -273,11 +288,12 @@ async function copy(text) {
 // ---------- اختيار النموذج ----------
 function openModels() {
   const groups = {};
-  for (const m of MODELS) (groups[m.maker] ||= []).push(m);
+  const query = $('#modelSearch').value.trim().toLowerCase();
+  for (const m of modelsFor(S.provider).filter((m) => !query || `${m.name} ${m.remoteId || m.id}`.toLowerCase().includes(query))) (groups[m.maker] ||= []).push(m);
   $('#modelList').innerHTML = Object.entries(groups)
     .map(
       ([maker, list]) =>
-        `<div class="maker">${maker}</div>` +
+        `<div class="maker">${esc(maker)}</div>` +
         list
           .map(
             (m) => `<button class="model${m.id === S.model ? ' active' : ''}" data-id="${m.id}">
@@ -290,7 +306,8 @@ function openModels() {
     .join('');
   $('#modelSheet').classList.remove('hidden');
 }
-$('#modelBtn').onclick = openModels;
+$('#modelBtn').onclick = () => { $('#modelSearch').value = ''; openModels(); };
+$('#modelSearch').addEventListener('input', openModels);
 $('#modelList').addEventListener('click', (e) => {
   const b = e.target.closest('.model');
   if (!b) return;
@@ -306,6 +323,7 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
+  if (S.provider === 'openrouter') S.imageMode = false;
   for (const [id, active] of [['searchBtn', S.search && !S.imageMode], ['deepBtn', S.deep && !S.imageMode], ['imgBtn', S.imageMode]]) {
     $(`#${id}`).setAttribute('aria-pressed', String(active));
   }
@@ -314,6 +332,8 @@ function syncToggles() {
   $('#deepBtn').classList.toggle('on', S.deep && !S.imageMode);
   $('#deepBtn').disabled = S.imageMode;
   $('#imgBtn').classList.toggle('on', S.imageMode);
+  $('#imgBtn').disabled = S.provider === 'openrouter';
+  $('#imgBtn').title = S.provider === 'openrouter' ? 'توليد الصور متاح حالياً مع kie.ai' : 'توليد صورة من الوصف';
   $('#aspect').classList.toggle('hidden', !S.imageMode);
   input.placeholder = S.imageMode ? 'صف الصورة اللي تبيها… (أرفق صورة لتعديلها)' : 'اكتب رسالتك…';
 }
@@ -327,6 +347,7 @@ $('#deepBtn').onclick = () => {
   syncToggles();
 };
 $('#imgBtn').onclick = () => {
+  if (S.provider === 'openrouter') return toast('توليد الصور متاح حالياً مع kie.ai');
   S.imageMode = !S.imageMode;
   syncToggles();
 };
@@ -503,9 +524,9 @@ async function send() {
   const text = input.value.trim();
   if ((!text && !S.attachments.length) || S.attachments.some((a) => a.loading)) return;
   if (S.imageMode && !text) return toast('اكتب وصف الصورة');
-  if (!db.settings.get('kieKey', '')) {
+  if (!db.settings.get(keySetting(S.provider), '')) {
     openSettings();
-    return toast('أضف مفتاح kie.ai أول');
+    return toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} أول`);
   }
   const files = S.attachments.map((a) => a.meta);
   S.chat.messages.push({ role: 'user', text, files, at: Date.now() });
@@ -648,7 +669,7 @@ function pickMime() {
 
 async function startRec() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('المتصفح ما يدعم التسجيل');
-  if (!db.settings.get('kieKey', '')) return toast('أضف مفتاح kie.ai أول');
+  if (!db.settings.get(keySetting(S.provider), '')) return toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} أول`);
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
@@ -745,7 +766,7 @@ async function convertVoice(job) {
   $('#voiceLabel').textContent = 'أحوّل الصوت إلى نص…';
   setStatus('أحوّل التسجيل إلى نص…');
   try {
-    const text = await transcribe(job.blob, ctrl.signal);
+    const text = await transcribe(job.blob, ctrl.signal, S.provider);
     if (voiceJob !== job || ctrl.signal.aborted) return;
     if (!text) throw new Error('ما سمعت كلام واضح — جرب مرة ثانية');
     const v = input.value;
@@ -804,27 +825,65 @@ const mask = (k) => (k ? `${k.slice(0, 4)}…${k.slice(-4)}` : '');
 function openSettings() {
   closeSide();
   $('#settingsSheet').classList.remove('hidden');
-  const k = db.settings.get('kieKey', '');
+  const isOR = S.provider === 'openrouter';
+  const k = db.settings.get(keySetting(S.provider), '');
+  $('#providerSelect').value = S.provider;
+  $('#keyTitle').textContent = `مفتاح ${isOR ? 'OpenRouter' : 'kie.ai'}`;
+  $('#keyHelp').innerHTML = isOR ? 'أضف مفتاحك من <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouter ← Keys</a>. تُحسب المحادثة والبحث والصوت على رصيد OpenRouter. توليد الصور حالياً متاح مع kie.ai.' : 'أضف مفتاحك من kie.ai ← API Key. تُحسب المحادثة والصوت والصور على رصيد kie.ai.';
+  $('#keyInput').placeholder = isOR ? 'sk-or-v1-…' : 'الصق مفتاح kie.ai هنا';
+  $('#checkKey').textContent = isOR ? 'فحص المفتاح' : '💰 الرصيد';
+  $('#forgetKey').textContent = `مسح مفتاح ${isOR ? 'OpenRouter' : 'kie.ai'} من هذا الجهاز`;
+  $('#refreshModels').classList.toggle('hidden', !isOR);
   $('#keyNow').textContent = k ? `المفتاح الحالي: ${mask(k)}` : 'لا يوجد مفتاح';
   $('#speechMode').value = db.settings.get('speechMode', 'record');
-  $('#defaultModel').innerHTML = MODELS.map((m) => `<option value="${m.id}"${m.id === S.defaultModel ? ' selected' : ''}>${esc(m.name)}${m.badge ? ` — ${m.badge}` : ''}</option>`).join('');
+  $('#defaultModel').innerHTML = modelsFor(S.provider).map((m) => `<option value="${esc(m.id)}"${m.id === S.defaultModel ? ' selected' : ''}>${esc(m.name)}${m.badge ? ` — ${m.badge}` : ''}</option>`).join('');
 }
 $('#openSettings').onclick = openSettings;
+$('#providerSelect').onchange = (e) => {
+  if (S.controller || rec || voiceJob || micStarting || diagnosisController) {
+    e.target.value = S.provider;
+    return toast('انتظر انتهاء الرد أو التسجيل أو الفحص قبل تغيير المزوّد');
+  }
+  S.provider = e.target.value === 'openrouter' ? 'openrouter' : 'kie';
+  db.settings.set('provider', S.provider);
+  S.defaultModel = defaultFor(S.provider);
+  S.model = S.defaultModel;
+  S.imageMode = false;
+  $('#keyInput').value = '';
+  $('#keyMsg').textContent = '';
+  $('#catalogMsg').textContent = '';
+  $('#diagnosisReport').textContent = '';
+  $('#copyDiagnosis').classList.add('hidden');
+  syncToggles();
+  renderModelName();
+  openSettings();
+};
+$('#refreshModels').onclick = async () => {
+  const button = $('#refreshModels');
+  button.disabled = true;
+  $('#catalogMsg').textContent = 'أحدّث قائمة OpenRouter…';
+  try {
+    const count = await refreshOpenRouterModels();
+    $('#catalogMsg').textContent = `تم تحميل ${count} نموذج محادثة. ابحث عنها من قائمة النماذج أعلى الصفحة.`;
+    if (S.provider === 'openrouter') openSettings();
+  } catch (e) { $('#catalogMsg').textContent = e.message; }
+  finally { button.disabled = false; }
+};
 $('#speechMode').onchange = (e) => db.settings.set('speechMode', e.target.value);
 
 let diagnosisController = null;
 $('#diagnoseBtn').onclick = async () => {
   if (diagnosisController || S.controller || rec || voiceJob) return toast('انتظر انتهاء الرد أو التسجيل أولاً');
-  if (!db.settings.get('kieKey', '')) return toast('أضف مفتاح kie.ai أول');
+  if (!db.settings.get(keySetting(S.provider), '')) return toast('أضف مفتاح المزوّد المختار أول');
   diagnosisController = new AbortController();
   const ctrl = diagnosisController;
   $('#diagnoseBtn').disabled = true;
   $('#cancelDiagnosis').classList.remove('hidden');
   $('#copyDiagnosis').classList.add('hidden');
   try {
-    const results = await diagnoseModels([S.model, 'gemini-3-8-flash'], { signal: ctrl.signal, onProgress: (name) => { $('#diagnosisReport').textContent = `أفحص ${name}… (حتى 25 ثانية لكل نموذج)`; } });
+    const results = await diagnoseModels([S.model, S.provider === 'openrouter' ? OR_AUDIO_MODEL : 'gemini-3-8-flash'], { signal: ctrl.signal, onProgress: (name) => { $('#diagnosisReport').textContent = `أفحص ${name} عبر ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'}… (حتى 25 ثانية لكل نموذج)`; } });
     $('#diagnosisReport').textContent = (ctrl.signal.aborted ? 'أُلغي الفحص.\n' : '') + results.map((r) => [
-      `${modelOf(r.model).name}: ${r.ok ? 'نجح' : r.error}`,
+      `${modelOf(r.model).name} · ${r.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'}: ${r.ok ? 'نجح' : r.error}`,
       `بدء الاستجابة: ${r.headersMs == null ? 'لم تصل' : (r.headersMs / 1000).toFixed(1) + ' ث'} · أول نص: ${r.firstTextMs == null ? 'لم يصل' : (r.firstTextMs / 1000).toFixed(1) + ' ث'}`,
       `المدة: ${(r.totalMs / 1000).toFixed(1)} ث · ${r.path || ''}${r.status ? ' · HTTP ' + r.status : ''}${r.apiStatus ? ' · API ' + r.apiStatus : ''}`,
     ].join('\n')).join('\n\n');
@@ -843,23 +902,33 @@ $('#copyDiagnosis').onclick = async () => { await copy($('#diagnosisReport').tex
 $('#saveKey').onclick = () => {
   const k = $('#keyInput').value.trim();
   if (!k) return;
-  db.settings.set('kieKey', k);
+  db.settings.set(keySetting(S.provider), k);
   $('#keyInput').value = '';
   openSettings();
   $('#checkKey').click();
 };
 $('#checkKey').onclick = async () => {
+  const provider = S.provider;
   $('#keyMsg').textContent = '…';
   try {
+    if (provider === 'openrouter') {
+      const data = await checkOpenRouterKey();
+      if (S.provider !== provider) return;
+      const remaining = data?.limit_remaining;
+      $('#keyMsg').textContent = `✓ مفتاح OpenRouter صالح${typeof remaining === 'number' ? ` — المتبقي من حد المفتاح $${remaining.toFixed(2)}` : ' — رصيد الحساب متاح في لوحة OpenRouter'}`;
+      return;
+    }
     const c = await credits();
+    if (S.provider !== provider) return;
     $('#keyMsg').textContent = `✓ المفتاح شغال — الرصيد ${Math.round(c).toLocaleString('en')} نقطة (≈ $${(c * CREDIT_USD).toFixed(2)})`;
   } catch (e) {
+    if (S.provider !== provider) return;
     $('#keyMsg').textContent = `⚠️ ${e.message}`;
   }
 };
 $('#defaultModel').onchange = (e) => {
   S.defaultModel = e.target.value;
-  db.settings.set('defaultModel', S.defaultModel);
+  db.settings.set(S.provider === 'openrouter' ? 'orDefaultModel' : 'defaultModel', S.defaultModel);
   if (!S.chat?.messages.length) {
     S.model = S.defaultModel;
     renderModelName();
@@ -895,7 +964,7 @@ $('#importInput').onchange = async (e) => {
 };
 $('#forgetKey').onclick = () => {
   if (!confirm('تمسح المفتاح من هذا الجهاز؟ المحادثات تبقى.')) return;
-  db.settings.set('kieKey', '');
+  db.settings.set(keySetting(S.provider), '');
   openSettings();
 };
 

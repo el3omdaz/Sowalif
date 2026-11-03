@@ -10,7 +10,7 @@ function app() {
       const classes = new Set();
       nodes.set(s, { value: '', innerHTML: '<svg>mic</svg>', textContent: '', style: {}, scrollHeight: 48,
         classList: { add: (...a) => a.forEach((v) => classes.add(v)), remove: (...a) => a.forEach((v) => classes.delete(v)), contains: (v) => classes.has(v), toggle: () => {} },
-        setAttribute() {}, addEventListener() {}, focus() {},
+        setAttribute() {}, addEventListener() {}, focus() {}, click() { return this.onclick?.(); },
       });
     }
     return nodes.get(s);
@@ -31,7 +31,8 @@ function app() {
     window: { SpeechRecognition: Speech, addEventListener() {} },
     navigator: {}, matchMedia: () => ({ matches: false }),
     db: { settings: { get: (_, d) => d } },
-    MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test',
+    MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test', OR_DEFAULT_MODEL: 'or:test/model', OR_AUDIO_MODEL: 'or:google/test',
+    providerOf: (id) => String(id).startsWith('or:') ? 'openrouter' : 'kie',
     marked: { setOptions() {} },
     setTimeout: setTimer, setInterval: setTimer, clearTimeout: clearTimer, clearInterval: clearTimer,
     Date, Blob, AbortController, Uint8Array, innerHeight: 800,
@@ -150,4 +151,31 @@ test('cancelled conversion cannot insert a late transcript', async () => {
   assert.equal(a.node('#input').value, 'مسودة');
   assert.equal(a.run('voiceJob'), null);
   assert.equal(a.node('#input').readOnly, false);
+});
+
+test('provider switching keeps keys and defaults independent in settings', async () => {
+  const a = app();
+  const saved = new Map([['kieKey', 'original-kie-key']]);
+  a.ctx.db.settings = { get: (k, d) => saved.has(k) ? saved.get(k) : d, set: (k, v) => saved.set(k, v) };
+  const catalog = [{ id: 'test', name: 'KIE model', tagline: 'KIE', features: [] }, { id: 'or:test/model', name: 'OR model', tagline: 'OR', features: [], provider: 'openrouter' }];
+  a.ctx.modelsFor = (provider) => catalog.filter((m) => (m.provider || 'kie') === provider);
+  a.ctx.modelById = (id) => catalog.find((m) => m.id === id) || catalog[0];
+  a.ctx.checkOpenRouterKey = async () => ({ limit_remaining: null });
+  a.ctx.credits = async () => { throw new Error('KIE check must not run'); };
+  a.ctx.confirm = () => true;
+  a.node('#providerSelect').value = 'openrouter';
+  a.node('#providerSelect').onchange({ target: a.node('#providerSelect') });
+  assert.equal(a.run('S.provider'), 'openrouter');
+  assert.equal(a.run('S.model'), 'or:test/model');
+  assert.equal(a.node('#imgBtn').disabled, true);
+  a.node('#keyInput').value = 'new-openrouter-key';
+  a.node('#saveKey').onclick();
+  await new Promise(setImmediate);
+  assert.equal(saved.get('openRouterKey'), 'new-openrouter-key');
+  assert.equal(saved.get('kieKey'), 'original-kie-key');
+  assert.equal(a.node('#keyInput').value, '');
+  assert.match(a.node('#keyMsg').textContent, /OpenRouter صالح/);
+  a.node('#forgetKey').onclick();
+  assert.equal(saved.get('openRouterKey'), '');
+  assert.equal(saved.get('kieKey'), 'original-kie-key');
 });

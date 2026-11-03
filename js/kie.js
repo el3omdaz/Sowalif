@@ -1,6 +1,6 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
-import { settings, putBlob } from './db.js?v=5';
-import { modelById } from './models.js?v=5';
+import { settings, putBlob } from './db.js?v=6';
+import { modelById } from './models.js?v=6';
 
 // sc.base / sc.upload لتجربة التطبيق على خادم وهمي فقط
 const BASE = () => settings.get('base', 'https://api.kie.ai');
@@ -80,7 +80,7 @@ function safeJSON(s) {
 }
 
 // يقرأ أحداث SSE سطراً سطراً ويمرر كل حدث JSON
-async function readSSE(res, onEvent) {
+export async function readSSE(res, onEvent, { errorFor = apiError, networkError = netError } = {}) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -91,7 +91,7 @@ async function readSSE(res, onEvent) {
     if (!data || data === '[DONE]') return;
     const ev = safeJSON(data);
     if (!ev) throw new Error('وصل رد غير مكتمل من الخدمة. أعد المحاولة.');
-    if (ev.error || ev.type === 'error' || (ev.code && Number(ev.code) !== 200)) throw apiError(Number(ev.code) || 500, ev.error?.message || ev.msg || ev.message);
+    if (ev.error || ev.type === 'error' || (ev.code && Number(ev.code) !== 200)) throw errorFor(Number(ev.error?.code || ev.code) || 500, ev.error?.message || ev.msg || ev.message);
     onEvent(ev);
   };
   const line = (s) => {
@@ -116,7 +116,7 @@ async function readSSE(res, onEvent) {
     if (buffer) line(buffer.replace(/\r$/, ''));
     dispatch();
   } catch (e) {
-    throw e instanceof TypeError ? netError(e) : e;
+    throw e instanceof TypeError ? networkError(e) : e;
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();
@@ -305,9 +305,9 @@ async function runChat(model, { system, messages, search, deep, signal, onDelta,
 
 export async function runModel(modelId, opts) {
   const model = modelById(modelId);
-  const fn = model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
+  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=6')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
   const started = Date.now();
-  const connection = { model: model.id, phase: 'preparing', firstTextMs: null };
+  const connection = { model: model.id, provider: model.provider || 'kie', phase: 'preparing', firstTextMs: null };
   const onTransport = (state) => {
     Object.assign(connection, state);
     if (state.phase === 'headers') connection.headersMs = Date.now() - started;
