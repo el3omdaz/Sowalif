@@ -41,6 +41,11 @@ export async function listChats() {
 }
 
 export const getChat = (id) => tx('chats', 'readonly', (s) => s.get(id));
+// النصوص فقط للاسترجاع المحلي؛ لا نعيد المرفقات أو مفاتيح المزوّدين.
+export async function recallChats() {
+  const all = await tx('chats', 'readonly', (s) => s.getAll());
+  return all.map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: (c.messages || []).filter((m) => !m.error && ['user', 'assistant'].includes(m.role)).map((m) => ({ role: m.role, text: String(m.text || ''), at: m.at })) }));
+}
 
 export async function saveChat(chat, touch = true) {
   if (touch) chat.updatedAt = Date.now();
@@ -95,8 +100,9 @@ export const settings = {
   set(k, v) {
     try {
       localStorage.setItem(`sc.${k}`, JSON.stringify(v));
+      return true;
     } catch {
-      /* التخزين غير متاح */
+      return false;
     }
   },
 };
@@ -111,13 +117,14 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
+  const { readPersonalization } = await import('./memory.js?v=7');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
     const b = await getBlob(id);
     if (b) blobs[id] = await toB64(b);
   }
-  return new Blob([JSON.stringify({ app: 'smart-chat', version: 1, exportedAt: Date.now(), chats, blobs })], { type: 'application/json' });
+  return new Blob([JSON.stringify({ app: 'smart-chat', version: 2, exportedAt: Date.now(), chats, blobs, personalization: readPersonalization() })], { type: 'application/json' });
 }
 
 // الدمج: المحادثات الموجودة بنفس الرقم تُستبدل بالأحدث
@@ -135,6 +142,10 @@ export async function importAll(file) {
       await saveChat(c, false);
       n++;
     }
+  }
+  if (data.personalization) {
+    const { mergePersonalization } = await import('./memory.js?v=7');
+    mergePersonalization(data.personalization);
   }
   return n;
 }

@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <div id="app" class="app">
@@ -101,6 +101,38 @@
       <div class="sheet-head"><h3>الإعدادات</h3><button class="icon-btn" data-close>✕</button></div>
       <div class="settings">
         <section>
+          <details id="personalizationPanel" class="personalization-panel">
+            <summary>تعليمات خاصة وذاكرة مشتركة</summary>
+            <p class="muted">تُحفظ على هذا الجهاز وتُستخدم مع كل النماذج والمزوّدين. عند سؤالك يُرسل السياق المناسب للمزوّد المختار؛ لا توجد مزامنة تلقائية بين الأجهزة.</p>
+            <label for="customInstructions">تعليماتك الخاصة</label>
+            <textarea id="customInstructions" rows="4" maxlength="8000" placeholder="مثلاً: رد باللهجة الكويتية، اختصر، واذكر مصادر الأخبار."></textarea>
+            <label for="personalNotes">معلومات تتذكرها النماذج عنك</label>
+            <textarea id="personalNotes" rows="4" maxlength="12000" placeholder="اكتب معلوماتك وتفضيلاتك هنا، أو قل في المحادثة: تذكر أن…"></textarea>
+            <label class="check-row"><input id="memoryEnabled" type="checkbox" checked> استخدام الذاكرة والربط بين محادثات هذا الجهاز</label>
+            <p class="muted">يسترجع مقاطع نصية مرتبطة بسؤالك من المحادثات السابقة، بدون رفع الملفات القديمة. تستطيع مراجعة مصادر السياق تحت الرد. تعليماتك الخاصة تطبّق حتى لو عطّلت الذاكرة.</p>
+            <button id="savePersonalization" class="btn primary">حفظ التعليمات والذاكرة</button>
+            <p id="personalizationMsg" class="muted" role="status"></p>
+            <h4>اختصاراتك المحفوظة</h4>
+            <p class="muted">تعمل عندما ترسل الكلمة وحدها في أي محادثة، حتى لو غيّرت النموذج. مثال: «ذهب» ← آخر أخبار الذهب وتأثير الدولار والعوائد. تقدر تقول أيضاً: متى ما قلت كلمة ذهب، جيب لي آخر أخباره.</p>
+            <label for="memoryTrigger">الكلمة أو العبارة</label>
+            <input id="memoryTrigger" type="text" maxlength="80" placeholder="ذهب">
+            <label for="memoryAction">الطلب المرتبط بها</label>
+            <textarea id="memoryAction" rows="3" maxlength="1500" placeholder="ابحث عن آخر أخبار الذهب، ولخّص تأثير الدولار والعوائد مع المصادر."></textarea>
+            <label class="check-row"><input id="memorySearch" type="checkbox" checked> تفعيل البحث عند استخدام الاختصار</label>
+            <div class="row"><button id="saveMemoryRule" class="btn ghost">حفظ الاختصار</button><button id="cancelMemoryEdit" class="btn ghost hidden">إلغاء التعديل</button></div>
+            <p id="memoryRuleMsg" class="muted" role="status"></p>
+            <div id="memoryRules" class="memory-rules"></div>
+            <button id="clearSavedMemory" class="btn danger">مسح الملاحظات والاختصارات</button>
+            <p class="muted">المسح لا يحذف المحادثات السابقة. لإيقاف الاسترجاع منها عطّل خيار الربط واحفظ.</p>
+          </details>
+        </section>
+        <section>
+          <h4>وضوح النص</h4>
+          <label for="chatFontSize">حجم خط المحادثة</label>
+          <select id="chatFontSize"><option value="16">مدمج — 16</option><option value="17" selected>عادي — 17</option><option value="18">أكبر — 18</option><option value="20">كبير — 20</option></select>
+          <p class="font-preview">نص واضح ومريح للقراءة. <strong>وهذا مثال للنص العريض.</strong></p>
+        </section>
+        <section>
           <h4>مزوّد الخدمة</h4>
           <select id="providerSelect" aria-label="مزوّد الخدمة"><option value="kie">kie.ai</option><option value="openrouter">OpenRouter</option></select>
           <p class="muted">المفتاح منفصل لكل مزوّد. عند الإرسال تذهب المحادثة والمرفقات للمزوّد المختار. يُحفظ المفتاح على هذا الجهاز فقط، ولا يُرفع إلى GitHub.</p>
@@ -149,6 +181,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=6"></script>
+  <script type="module" src="js/app.js?v=7"></script>
 </body>
 </html>

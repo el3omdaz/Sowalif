@@ -27,12 +27,13 @@ function app() {
   const setTimer = () => { timers.add(++timerId); return timerId; };
   const clearTimer = (id) => timers.delete(id);
   const ctx = vm.createContext({
-    document: { querySelector: node, querySelectorAll: () => [], addEventListener() {} },
+    document: { querySelector: node, querySelectorAll: () => [], addEventListener() {}, documentElement: { style: { setProperty() {} } } },
     window: { SpeechRecognition: Speech, addEventListener() {} },
     navigator: {}, matchMedia: () => ({ matches: false }),
     db: { settings: { get: (_, d) => d } },
     MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test', OR_DEFAULT_MODEL: 'or:test/model', OR_AUDIO_MODEL: 'or:google/test',
     providerOf: (id) => String(id).startsWith('or:') ? 'openrouter' : 'kie',
+    readPersonalization: () => ({ instructions: '', notes: '', enabled: true, rules: [] }),
     marked: { setOptions() {} },
     setTimeout: setTimer, setInterval: setTimer, clearTimeout: clearTimer, clearInterval: clearTimer,
     Date, Blob, AbortController, Uint8Array, innerHeight: 800,

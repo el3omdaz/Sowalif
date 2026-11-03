@@ -1,7 +1,8 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, settings } from './db.js?v=6';
-import { modelById, SEARCH_MODEL, IMAGE_MODEL, OR_AUDIO_MODEL } from './models.js?v=6';
-import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=6';
+import { saveChat, getBlob, putBlob, settings } from './db.js?v=7';
+import { modelById, SEARCH_MODEL, IMAGE_MODEL, OR_AUDIO_MODEL } from './models.js?v=7';
+import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=7';
+import { preparePersonalContext } from './memory.js?v=7';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -134,6 +135,11 @@ export async function respond(chat, opts, emit, signal) {
   const userMsg = chat.messages[chat.messages.length - 1];
 
   try {
+    const personal = await preparePersonalContext(chat, userMsg.text || '');
+    reply.contextSources = personal.sources;
+    if (personal.action) reply.memoryAction = personal.action.text;
+    if (personal.recallUnavailable) reply.recallUnavailable = true;
+    const search = !!opts.search || personal.search;
     // وضع الرسم المباشر: نص المستخدم هو البرومبت، والصور المرفقة معه مرجع
     if (opts.imageMode) {
       if (model.provider === 'openrouter') throw new Error('توليد الصور متاح حالياً مع kie.ai؛ اختره من الإعدادات لهذا الوضع.');
@@ -142,24 +148,26 @@ export async function respond(chat, opts, emit, signal) {
       return reply;
     }
 
-    let system = systemPrompt(model, opts.search);
+    let system = [systemPrompt(model, search), personal.prompt].filter(Boolean).join('\n\n');
     const messages = await history(chat, model);
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    if (lastUser) lastUser.text = personal.expanded;
 
     // نماذج بدون أدوات: نبحث قبل السؤال ونعطيها النتائج
-    if (opts.search && model.search === 'pre' && userMsg.text?.trim()) {
+    if (search && model.search === 'pre' && userMsg.text?.trim()) {
       emit('status', { text: '🔎 يبحث في الإنترنت…' });
-      const found = await webSearch(userMsg.text, signal);
+      const found = await webSearch(personal.expanded, signal);
       system += `\n\nنتائج بحث حديثة في الإنترنت عن سؤال المستخدم (استخدمها واذكر المصادر):\n${found}`;
     }
 
-    const tools = model.tools ? TOOLS.filter((t) => opts.search || t.name !== 'web_search') : [];
+    const tools = model.tools ? TOOLS.filter((t) => search || t.name !== 'web_search') : [];
     for (let step = 0; step < 6; step++) {
       emit('status', { text: step ? '✍️ يكمل الرد…' : '' });
       const out = await runModel(model.id, {
         system,
         messages,
         tools,
-        search: opts.search && (model.search === 'native' || model.search === 'openrouter'),
+        search: search && (model.search === 'native' || model.search === 'openrouter'),
         deep: !!opts.deep,
         signal,
         onState: (state) => emit('status', { text: state.phase === 'connecting' ? `بانتظار بدء استجابة ${model.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'}…` : state.phase === 'retry' ? 'الخدمة رفضت الطلب مؤقتاً؛ أعيد المحاولة مرة واحدة…' : state.streaming ? 'اتصلت الخدمة؛ بانتظار النص…' : 'الخدمة ترسل الرد دفعة واحدة؛ بانتظار اكتماله…' }),

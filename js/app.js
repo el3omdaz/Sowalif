@@ -1,9 +1,10 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=6';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=6';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=6';
-import { respond, transcribe, makeAttachment } from './chat.js?v=6';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=6';
+import * as db from './db.js?v=7';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=7';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=7';
+import { respond, transcribe, makeAttachment } from './chat.js?v=7';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=7';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=7';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -38,6 +39,7 @@ function toast(text, ms = 2600) {
 
 // ---------- البداية ----------
 async function boot() {
+  applyTypography();
   syncToggles();
   S.chats = await db.listChats();
   const id = location.hash.slice(1);
@@ -215,6 +217,9 @@ function messageHTML(m, i) {
     ${imgs ? `<div class="gen">${imgs}</div>` : ''}
     ${m.text ? `<div class="bubble md">${md(m.text)}</div>` : ''}
     ${m.error ? `<div class="err-box">⚠️ ${esc(m.error)}</div>` : ''}
+    ${m.memoryAction ? `<div class="memory-notice">✓ ${esc(m.memoryAction)}</div>` : ''}
+    ${m.recallUnavailable ? '<div class="memory-notice">تعذّر استرجاع المحادثات السابقة في هذا الرد.</div>' : ''}
+    ${m.contextSources?.length ? `<details class="context-sources"><summary>سياق من ${m.contextSources.length} محادثة سابقة</summary>${m.contextSources.map((c) => `<a href="#${encodeURIComponent(c.id)}">${esc(c.title)}</a>`).join('')}</details>` : ''}
     <div class="meta"><span>${esc(modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
       ${m.text ? '<button data-copy>📋 نسخ</button>' : ''}
       ${isLast ? '<button data-retry>🔄 أعد</button>' : ''}
@@ -234,6 +239,11 @@ function renderMessages() {
 }
 
 $('#messages').addEventListener('click', async (e) => {
+  const sourceLink = e.target.closest('.context-sources a');
+  if (sourceLink) {
+    e.preventDefault();
+    return openChat(decodeURIComponent(sourceLink.hash.slice(1)));
+  }
   const zoom = e.target.closest('[data-zoom]');
   if (zoom) {
     const lb = document.createElement('div');
@@ -822,7 +832,92 @@ mic.onclick = async () => {
 // ---------- الإعدادات ----------
 const mask = (k) => (k ? `${k.slice(0, 4)}…${k.slice(-4)}` : '');
 
+let personalizationDirty = false;
+let editingRuleId = null;
+function applyTypography() {
+  const stored = Number(db.settings.get('chatFontSize', 17));
+  const size = [16, 17, 18, 20].includes(stored) ? stored : 17;
+  document.documentElement.style.setProperty('--chat-font-size', `${size}px`);
+  $('#chatFontSize').value = String(size);
+}
+$('#chatFontSize').onchange = (e) => {
+  const size = Number(e.target.value);
+  if (![16, 17, 18, 20].includes(size)) return;
+  db.settings.set('chatFontSize', size);
+  applyTypography();
+};
+function renderMemoryRules() {
+  const rules = readPersonalization().rules;
+  $('#memoryRules').innerHTML = rules.length ? rules.map((r) => `<div class="memory-rule"><strong>${esc(r.trigger)}</strong>${r.search ? '<span class="muted"> · بحث</span>' : ''}<p>${esc(r.action)}</p><div class="row"><button class="btn ghost" data-edit-rule="${esc(r.id)}">تعديل</button><button class="btn danger" data-delete-rule="${esc(r.id)}">حذف</button></div></div>`).join('') : '<p class="muted">ما عندك اختصارات محفوظة بعد.</p>';
+}
+function loadPersonalSettings() {
+  const config = readPersonalization();
+  if (!personalizationDirty) {
+    $('#customInstructions').value = config.instructions;
+    $('#personalNotes').value = config.notes;
+    $('#memoryEnabled').checked = config.enabled;
+  }
+  applyTypography();
+  renderMemoryRules();
+}
+for (const id of ['customInstructions', 'personalNotes', 'memoryEnabled']) {
+  $(`#${id}`).addEventListener('input', () => { personalizationDirty = true; $('#personalizationMsg').textContent = 'تغييرات غير محفوظة'; });
+}
+$('#savePersonalization').onclick = () => {
+  try {
+    savePersonalization({ instructions: $('#customInstructions').value, notes: $('#personalNotes').value, enabled: $('#memoryEnabled').checked });
+    personalizationDirty = false;
+    $('#personalizationMsg').textContent = '✓ محفوظة على هذا الجهاز، وتطبّق من الرسالة القادمة مع كل النماذج.';
+  } catch (e) { $('#personalizationMsg').textContent = e.message; }
+};
+function resetRuleEditor() {
+  editingRuleId = null;
+  $('#memoryTrigger').value = '';
+  $('#memoryAction').value = '';
+  $('#memorySearch').checked = true;
+  $('#saveMemoryRule').textContent = 'حفظ الاختصار';
+  $('#cancelMemoryEdit').classList.add('hidden');
+}
+$('#saveMemoryRule').onclick = () => {
+  try {
+    saveRule({ ...(editingRuleId ? { id: editingRuleId } : {}), trigger: $('#memoryTrigger').value, action: $('#memoryAction').value, search: $('#memorySearch').checked });
+    resetRuleEditor();
+    renderMemoryRules();
+    $('#memoryRuleMsg').textContent = '✓ حُفظ الاختصار لكل المحادثات والنماذج. يعمل عند إرسال الكلمة وحدها والذاكرة مفعّلة.';
+  } catch (e) { $('#memoryRuleMsg').textContent = e.message; }
+};
+$('#cancelMemoryEdit').onclick = resetRuleEditor;
+$('#memoryRules').addEventListener('click', (e) => {
+  const edit = e.target.closest('[data-edit-rule]');
+  const del = e.target.closest('[data-delete-rule]');
+  if (edit) {
+    const rule = readPersonalization().rules.find((r) => r.id === edit.dataset.editRule);
+    if (!rule) return;
+    editingRuleId = rule.id;
+    $('#memoryTrigger').value = rule.trigger;
+    $('#memoryAction').value = rule.action;
+    $('#memorySearch').checked = rule.search;
+    $('#saveMemoryRule').textContent = 'حفظ التعديل';
+    $('#cancelMemoryEdit').classList.remove('hidden');
+    $('#memoryAction').focus();
+  } else if (del) {
+    try { removeRule(del.dataset.deleteRule); resetRuleEditor(); renderMemoryRules(); }
+    catch (err) { $('#memoryRuleMsg').textContent = err.message; }
+  }
+});
+$('#clearSavedMemory').onclick = () => {
+  if (!confirm('تمسح الملاحظات والاختصارات المحفوظة؟ التعليمات الخاصة والمحادثات تبقى. يمكنك إيقاف استرجاع المحادثات من خيار الربط.')) return;
+  try {
+    clearSavedMemory();
+    $('#personalNotes').value = '';
+    resetRuleEditor();
+    renderMemoryRules();
+    $('#personalizationMsg').textContent = 'مُسحت الملاحظات والاختصارات. استرجاع المحادثات السابقة يبقى حسب خيار الربط.';
+  } catch (e) { $('#personalizationMsg').textContent = e.message; }
+};
+
 function openSettings() {
+  loadPersonalSettings();
   closeSide();
   $('#settingsSheet').classList.remove('hidden');
   const isOR = S.provider === 'openrouter';

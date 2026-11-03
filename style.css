@@ -2,7 +2,7 @@
   --bg: #ffffff;
   --panel: #ffffff;
   --side: #f9f9f9;
-  --text: #202123;
+  --text: #0d0d0d;
   --muted: #777777;
   --line: #e8e8e8;
   --accent: #202123;
@@ -14,7 +14,10 @@
   --radius: 18px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
-  font-family: -apple-system, "SF Arabic", "Segoe UI", Tahoma, "Noto Naskh Arabic", sans-serif;
+  --chat-font-size: 17px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Arabic", "Segoe UI", Arial, sans-serif;
+  font-synthesis: none;
+  -webkit-text-size-adjust: 100%;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -168,6 +171,21 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .model-tag { color: var(--muted); font-size: 14px; }
 .model ul { margin: 2px 0 0; padding-inline-start: 18px; font-size: 13.5px; line-height: 1.7; }
 .settings { display: grid; gap: 18px; }
+.personalization-panel > summary { font-weight: 600; cursor: pointer; padding-block: 6px; }
+.personalization-panel > label { display: block; font-size: 14px; margin: 12px 0 6px; }
+.personalization-panel h4 { margin-top: 20px; }
+.personalization-panel textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--panel); line-height: 1.7; font-size: 16px; }
+.personalization-panel .check-row { display: flex; align-items: flex-start; gap: 8px; }
+.check-row input { margin-top: 6px; accent-color: var(--text); width: 17px; height: 17px; flex: none; }
+.memory-rules { display: grid; gap: 10px; margin: 12px 0; }
+.memory-rule { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.memory-rule p { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.memory-rule .btn { font-size: 12px; padding: 4px 10px; }
+.context-sources { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.context-sources summary { cursor: pointer; }
+.context-sources a { display: block; color: inherit; padding-block: 4px; }
+.memory-notice { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.font-preview { font-size: var(--chat-font-size); line-height: 1.7; }
 .diagnosis-report { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; margin: 0; }
 .voice-capture { display: flex; align-items: center; gap: 12px; min-height: 86px; padding: 8px; }
 .voice-center { flex: 1; min-width: 0; display: grid; justify-items: center; gap: 8px; }
@@ -212,7 +230,10 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 .messages { padding-top: 30px; }
 .msg { max-width: 780px; margin-bottom: 30px; }
 .msg.user .bubble { border-radius: 24px; padding: 11px 20px; max-width: 82%; }
-.msg.assistant .bubble { line-height: 1.95; }
+.msg .bubble { font-size: var(--chat-font-size); font-weight: 400; letter-spacing: normal; -webkit-font-smoothing: antialiased; }
+.msg.assistant .bubble { line-height: 1.7; }
+.msg.user .bubble { line-height: 1.65; }
+.msg .bubble strong { font-weight: 700; }
 .msg .meta { margin-top: 10px; opacity: .75; gap: 6px; flex-wrap: wrap; }
 .msg .err-box { background: var(--code); color: var(--text); border-color: var(--line); line-height: 1.8; }
 .welcome-mark { font-size: 45px; line-height: 1; color: var(--text); margin-bottom: 24px; }
@@ -224,7 +245,7 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 .composer-wrap { padding: 10px 24px calc(6px + var(--safe-b)); }
 .composer { max-width: 800px; background: var(--code); border-color: transparent; border-radius: 28px; padding: 12px 12px 10px; box-shadow: none; }
 .composer:focus-within { border-color: var(--line); }
-.composer textarea { min-height: 44px; padding-inline: 10px; }
+.composer textarea { min-height: 44px; padding-inline: 10px; font-size: var(--chat-font-size); }
 .tools { gap: 4px; }
 .tools-start { gap: 3px; }
 .toggle { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 38px; border-color: transparent; padding-inline: 9px; }

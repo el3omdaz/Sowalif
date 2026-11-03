@@ -1,6 +1,6 @@
-import { settings } from './db.js?v=6';
-import { readSSE } from './kie.js?v=6';
-import { registerOpenRouterModels } from './models.js?v=6';
+import { settings } from './db.js?v=7';
+import { readSSE } from './kie.js?v=7';
+import { registerOpenRouterModels } from './models.js?v=7';
 
 const BASE = 'https://openrouter.ai/api/v1';
 export const openRouterKey = () => {
