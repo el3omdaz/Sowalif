@@ -15,8 +15,8 @@ globalThis.indexedDB = { open() {
   });
   return request;
 } };
-const { savePersonalization, saveRule } = await import('../js/memory.js?v=7');
-const { respond } = await import('../js/chat.js?v=7');
+const { savePersonalization, saveRule } = await import('../js/memory.js?v=8');
+const { respond } = await import('../js/chat.js?v=8');
 
 test('custom instructions, cross-chat context and gold rule reach both providers without extra model requests', async () => {
   savePersonalization({ instructions: 'رد باللهجة الكويتية وبنقاط واضحة', notes: 'أفضل توقيت الكويت', enabled: true });
@@ -48,7 +48,7 @@ test('custom instructions, cross-chat context and gold rule reach both providers
 });
 
 test('personalization backup excludes API keys and can be exported with chats', async () => {
-  const { exportAll } = await import('../js/db.js?v=7');
+  const { exportAll } = await import('../js/db.js?v=8');
   const text = await (await exportAll()).text();
   const backup = JSON.parse(text);
   assert.equal(backup.version, 2);
@@ -56,4 +56,68 @@ test('personalization backup excludes API keys and can be exported with chats', 
   assert.equal(backup.personalization.rules[0].trigger, 'ذهب');
   assert.equal(text.includes('fake-kie'), false);
   assert.equal(text.includes('fake-or'), false);
+});
+
+test('OpenRouter chat routes video straight to PiAPI and resumes an existing task after polling failure', async () => {
+  local.set('sc.piapiKey', '"fake-piapi"');
+  local.delete('sc.kieKey');
+  local.delete('sc.openRouterKey');
+  const calls = [];
+  let failPoll = true;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, method: init.method });
+    assert.match(url, /^https:\/\/api.piapi.ai\//);
+    assert.equal(init.headers['X-API-Key'], 'fake-piapi');
+    if (init.method === 'POST') {
+      assert.equal(JSON.parse(init.body).model, 'kling');
+      return Response.json({ code: 200, data: { task_id: 'persistent-video' } });
+    }
+    // The task ID must already survive a reload before the first status request.
+    assert.equal(chats.get('media').messages.at(-1).mediaTask.id, 'persistent-video');
+    if (failPoll) throw new TypeError('offline');
+    return Response.json({ code: 200, data: { status: 'completed', output: { video: 'https://cdn.test/result.mp4' } } });
+  };
+  const chat = { id: 'media', title: 'محادثة جديدة', messages: [{ role: 'user', text: 'سوي فيديو للبحر' }] };
+  const reply = await respond(chat, { model: 'or:anthropic/claude-sonnet-5.5' }, () => {});
+  assert.equal(reply.mediaTask.id, 'persistent-video');
+  assert.match(reply.error, /نفس المهمة/);
+  failPoll = false;
+  const { resumeMedia } = await import('../js/chat.js?v=8');
+  await resumeMedia(chat, reply, () => {});
+  assert.equal(reply.error, undefined);
+  assert.equal(reply.videos[0].url, 'https://cdn.test/result.mp4');
+  assert.equal(reply.mediaTask.done, true);
+  assert.deepEqual(calls.map(c => c.method), ['POST', 'GET', 'GET']);
+  assert.equal(chat.messages.length, 2);
+  const { exportAll } = await import('../js/db.js?v=8');
+  assert.equal((await (await exportAll()).text()).includes('fake-piapi'), false);
+});
+
+test('kie.ai media works under OpenRouter and resumed jobs retain their original provider', async () => {
+  local.set('sc.mediaProvider', '"kie"');
+  local.set('sc.kieKey', '"fake-kie-media"');
+  const calls = [];
+  let failed = true;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, method: init.method });
+    assert.match(url, /^https:\/\/api.kie.ai\//);
+    assert.equal(init.headers.Authorization, 'Bearer fake-kie-media');
+    if (init.method === 'POST') {
+      assert.equal(JSON.parse(init.body).model, 'kling-2.6/text-to-video');
+      return Response.json({ code: 200, data: { taskId: 'kie-video' } });
+    }
+    if (failed) throw new TypeError('offline');
+    return Response.json({ code: 200, data: { state: 'success', resultJson: JSON.stringify({ resultUrls: ['https://cdn.test/kie.mp4'] }) } });
+  };
+  const chat = { id: 'kie-media', title: 'محادثة جديدة', messages: [{ role: 'user', text: 'سوي فيديو عن البحر' }] };
+  const reply = await respond(chat, { model: 'or:anthropic/claude-sonnet-5.5' }, () => {});
+  assert.equal(reply.mediaTask.provider, 'kie');
+  assert.ok(reply.error);
+  local.set('sc.mediaProvider', '"piapi"');
+  failed = false;
+  const { resumeMedia } = await import('../js/chat.js?v=8');
+  await resumeMedia(chat, reply, () => {});
+  assert.equal(reply.error, undefined);
+  assert.equal(reply.videos[0].url, 'https://cdn.test/kie.mp4');
+  assert.deepEqual(calls.map(c => c.method), ['POST', 'GET', 'GET']);
 });

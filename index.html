@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <div id="app" class="app">
@@ -52,7 +52,9 @@
 
       <footer class="composer-wrap">
         <div id="attachRow" class="attach-row"></div>
+        <input id="mediaReference" class="hidden" type="url" dir="ltr" aria-label="رابط صورة مرجعية اختياري" placeholder="رابط صورة عام اختياري https://…">
         <div id="status" class="status hidden" role="status"></div>
+        <div id="wakeStatus" class="status hidden" role="status"></div>
         <div class="composer">
           <div id="voiceCapture" class="voice-capture hidden" role="group" aria-label="تسجيل صوتي">
             <button id="voiceCancel" class="icon-btn" aria-label="إلغاء التسجيل والتحويل">✕</button>
@@ -66,7 +68,8 @@
               <button id="searchBtn" class="toggle on" title="البحث في الإنترنت"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><span>بحث</span></button>
               <button id="deepBtn" class="toggle" title="تفكير أعمق (أبطأ وأدق)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M9 21h6M8 14a7 7 0 1 1 8 0l-1 2H9l-1-2Z"/></svg><span>تفكير</span></button>
               <button id="imgBtn" class="toggle" title="توليد صورة من الوصف"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg><span>صورة</span></button>
-              <select id="aspect" class="aspect hidden" title="مقاس الصورة">
+              <button id="videoBtn" class="toggle" title="إنشاء فيديو أو تحريك صورة"><span>▷ فيديو</span></button>
+              <select id="aspect" class="aspect hidden" title="مقاس الصورة أو الفيديو">
                 <option value="auto">تلقائي</option>
                 <option value="1:1">مربع 1:1</option>
                 <option value="9:16">ستوري 9:16</option>
@@ -145,6 +148,27 @@
           <p id="keyMsg" class="muted"></p>
         </section>
         <section>
+          <h4>مزوّد الصور والفيديو</h4>
+          <select id="mediaProvider" aria-label="مزوّد الصور والفيديو"><option value="auto">تلقائي — PiAPI إن توفر مفتاحه، وإلا kie.ai</option><option value="piapi">PiAPI</option><option value="kie">kie.ai</option></select>
+          <p class="muted">اختيار مستقل عن المحادثة؛ يمكنك استخدام OpenRouter للدردشة وkie.ai أو PiAPI للوسائط. لا يغيّر التطبيق المزوّد بعد إرسال مهمة لتجنب تكرار التكلفة.</p>
+          <label for="mediaKieKey">مفتاح kie.ai للصور والفيديو</label><input id="mediaKieKey" type="password" dir="ltr" autocomplete="off" placeholder="الصق مفتاح kie.ai هنا">
+          <div class="row"><button id="saveMediaKie" class="btn ghost">حفظ مفتاح kie.ai</button><button id="forgetMediaKie" class="btn ghost">مسح مفتاح kie.ai</button></div>
+          <p id="mediaKieKeyState" class="muted" role="status"></p>
+          <label for="kieImageModel">نموذج الصور · kie.ai</label><select id="kieImageModel"><option value="auto">تلقائي — Nano Banana 2.1</option><option value="nano-banana-2-1">Nano Banana 2.1</option><option value="nano-banana-pro">Nano Banana Pro</option></select>
+          <label for="kieVideoModel">نموذج الفيديو · kie.ai</label><select id="kieVideoModel"><option value="auto">تلقائي — Kling 2.6</option><option value="kling-2.6">Kling 2.6 — نص أو صورة إلى فيديو</option><option value="wan-2.6">Wan 2.6 — صورة إلى فيديو مع صوت</option></select>
+          <p class="muted">مفتاح kie.ai مشترك مع إعدادات محادثة kie.ai. يدعم رفع الصورة المحلية للرسم والتحريك. Kling بدون صوت؛ Wan يولّد الصوت أيضاً.</p>
+          <h4>PiAPI</h4>
+          <p class="muted">مستقل عن مزوّد المحادثة ويعمل مع OpenRouter وkie.ai. اكتب «ارسم صورة…» أو «سوي فيديو…»، أو استخدم أزرار صورة وفيديو. لتحريك صورة أرفقها واكتب وصف الحركة. تُحسب الوسائط على رصيد PiAPI.</p>
+          <label for="piapiKey">مفتاح PiAPI</label>
+          <input id="piapiKey" type="password" dir="ltr" autocomplete="off" placeholder="الصق مفتاح PiAPI هنا">
+          <div class="row"><button id="savePiapi" class="btn ghost">حفظ مفتاح PiAPI</button><button id="forgetPiapi" class="btn ghost">مسح مفتاح PiAPI</button></div>
+          <p id="piapiKeyState" class="muted" role="status"></p>
+          <label for="piapiImageModel">نموذج الصور</label><select id="piapiImageModel"><option value="auto">تلقائي — Flux Schnell / Kontext</option><option value="schnell">Flux Schnell — رسم سريع</option><option value="dev">Flux Dev — رسم</option><option value="kontext">Flux Kontext — تعديل صورة</option></select>
+          <label for="piapiVideoModel">نموذج الفيديو وتحريك الصور</label><select id="piapiVideoModel"><option value="auto">تلقائي — Kling / Framepack</option><option value="framepack">Framepack — تحريك صورة · 10 ثوانٍ</option><option value="2.6">Kling 2.6</option><option value="3.0">Kling 3.0</option><option value="4.0-flash">Kling 4.0 Flash</option><option value="4.0">Kling 4.0</option></select>
+          <label for="piapiDuration">مدة الفيديو · للمزوّدين (Framepack ثابت 10 ثوانٍ)</label><select id="piapiDuration"><option value="5">5 ثوانٍ</option><option value="10">10 ثوانٍ</option></select>
+          <p class="muted">التلقائي يستخدم Flux Schnell للرسم وKling 2.6 للفيديو من النص، وFramepack لتحريك صورة (10 ثوانٍ، بدون صوت). يتم استخدام آخر صورة مرفقة واحدة. Kling وKontext يحتاجان رابط صورة عام؛ ضعه في خانة المرجع بعد تفعيل وضع الصورة أو الفيديو. خدمة رفع PiAPI لا تدعم المتصفح حالياً؛ Framepack يستقبل الصورة المحلية مباشرة. روابط الفيديو مؤقتة؛ احفظ النتيجة بعد اكتمالها. المفتاح محفوظ على هذا الجهاز ولا يدخل في النسخة الاحتياطية. <a href="https://app.piapi.ai" target="_blank" rel="noopener noreferrer">حساب PiAPI</a></p>
+        </section>
+        <section>
           <h4>فحص بطء الرد</h4>
           <p id="diagnoseHelp" class="muted">يفحص النموذج الحالي وGemini Flash عبر المزوّد المختار. يرسل عبارة اختبار قصيرة لكل نموذج بدون محادثاتك أو ملفاتك، وتُحسب الطلبات على رصيد المزوّد.</p>
           <div class="row"><button id="diagnoseBtn" class="btn ghost">فحص الاتصال والنماذج</button><button id="cancelDiagnosis" class="btn ghost hidden">إلغاء</button></div>
@@ -181,6 +205,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=7"></script>
+  <script type="module" src="js/app.js?v=8"></script>
 </body>
 </html>

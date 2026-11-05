@@ -278,3 +278,6 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+.gen video { display: block; width: 100%; max-height: 65vh; border-radius: 14px; background: #111; }
+#piapiKey { width: 100%; }

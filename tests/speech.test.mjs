@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 function app() {
   const nodes = new Map();
+  const documentEvents = {};
   const node = (s) => {
     if (!nodes.has(s)) {
       const classes = new Set();
@@ -27,7 +28,7 @@ function app() {
   const setTimer = () => { timers.add(++timerId); return timerId; };
   const clearTimer = (id) => timers.delete(id);
   const ctx = vm.createContext({
-    document: { querySelector: node, querySelectorAll: () => [], addEventListener() {}, documentElement: { style: { setProperty() {} } } },
+    document: { visibilityState: 'visible', querySelector: node, querySelectorAll: () => [], addEventListener(name, fn) { documentEvents[name] = fn; }, documentElement: { style: { setProperty() {} } } },
     window: { SpeechRecognition: Speech, addEventListener() {} },
     navigator: {}, matchMedia: () => ({ matches: false }),
     db: { settings: { get: (_, d) => d } },
@@ -42,7 +43,7 @@ function app() {
     .replace(/^import .*;\r?\n/gm, '')
     .replace(/boot\(\)\.catch\([^\n]+/, '');
   vm.runInContext(source, ctx);
-  return { ctx, node, timers, speech: () => speech, run: (s) => vm.runInContext(s, ctx) };
+  return { ctx, node, timers, documentEvents, speech: () => speech, run: (s) => vm.runInContext(s, ctx) };
 }
 
 test('live dictation keeps the draft, replaces interim text, and cleans up on stop', () => {
@@ -168,7 +169,7 @@ test('provider switching keeps keys and defaults independent in settings', async
   a.node('#providerSelect').onchange({ target: a.node('#providerSelect') });
   assert.equal(a.run('S.provider'), 'openrouter');
   assert.equal(a.run('S.model'), 'or:test/model');
-  assert.equal(a.node('#imgBtn').disabled, true);
+  assert.equal(a.node('#imgBtn').disabled, false);
   a.node('#keyInput').value = 'new-openrouter-key';
   a.node('#saveKey').onclick();
   await new Promise(setImmediate);
@@ -179,4 +180,43 @@ test('provider switching keeps keys and defaults independent in settings', async
   a.node('#forgetKey').onclick();
   assert.equal(saved.get('openRouterKey'), '');
   assert.equal(saved.get('kieKey'), 'original-kie-key');
+});
+
+test('microphone wake lock releases on stop and reacquires when visible again', async () => {
+  const a = app();
+  const locks = [];
+  a.ctx.navigator.wakeLock = { request: async (type) => {
+    assert.equal(type, 'screen');
+    const lock = { released: false, addEventListener(_, fn) { this.onrelease = fn; }, async release() { this.released = true; this.onrelease?.(); } };
+    locks.push(lock);
+    return lock;
+  } };
+  a.run('startDictation()');
+  await a.run('acquireMicWake()');
+  assert.equal(locks.length, 1);
+  assert.match(a.node('#wakeStatus').textContent, /تبقى شغالة/);
+  await locks[0].release();
+  a.documentEvents.visibilitychange();
+  await a.run('acquireMicWake()');
+  assert.equal(locks.length, 2);
+  a.run('stopRec()');
+  assert.equal(locks[1].released, true);
+  assert.equal(a.run('micWakeOwner'), null);
+});
+test('late wake lock grant after cancellation is released, and rejection leaves dictation usable', async () => {
+  const a = app();
+  let grant;
+  a.ctx.navigator.wakeLock = { request: () => new Promise(resolve => { grant = resolve; }) };
+  a.run('startDictation()');
+  a.run('stopRec()');
+  const late = { released: false, async release() { this.released = true; } };
+  grant(late);
+  await new Promise(setImmediate);
+  assert.equal(late.released, true);
+  const b = app();
+  b.ctx.navigator.wakeLock = { request: async () => { throw new Error('denied'); } };
+  b.run('startDictation()');
+  await b.run('acquireMicWake()');
+  assert.match(b.node('#wakeStatus').textContent, /لم يسمح/);
+  assert.ok(b.run('rec'));
 });

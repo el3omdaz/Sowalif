@@ -1,8 +1,10 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, settings } from './db.js?v=7';
-import { modelById, SEARCH_MODEL, IMAGE_MODEL, OR_AUDIO_MODEL } from './models.js?v=7';
-import { runModel, ask, uploadFile, generateImage, saveRemote } from './kie.js?v=7';
-import { preparePersonalContext } from './memory.js?v=7';
+import { saveChat, getBlob, putBlob, settings } from './db.js?v=8';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=8';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=8';
+import { preparePersonalContext } from './memory.js?v=8';
+import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=8';
+import { mediaProvider, kieMediaSpec } from './media.js?v=8';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -83,7 +85,7 @@ async function history(chat, model) {
       }
       out.push({ role: 'user', text: m.text, files });
     } else if (m.role === 'assistant' && !m.error) {
-      const note = (m.images || []).length ? `\n\n[ولّدتُ ${m.images.length} صورة بالبرومبت: ${m.imagePrompt || ''}]` : '';
+      const note = ((m.images || []).length ? `\n\n[ولّدتُ ${m.images.length} صورة بالبرومبت: ${m.imagePrompt || ''}]` : '') + (m.videos?.length ? `\n\n[أنشأت فيديو: ${m.mediaTask?.prompt || ''}]` : '');
       out.push({ role: 'assistant', text: `${m.text || ''}${note}` });
     }
   }
@@ -100,30 +102,62 @@ async function webSearch(query, signal) {
   return text || 'لا توجد نتائج';
 }
 
-async function refsFor(chat, which) {
-  const files = [];
-  if (which === 'attached') for (const m of chat.messages) if (m.role === 'user') files.push(...(m.files || []).filter((f) => f.kind === 'image'));
-  if (which === 'last_generated') {
-    const last = [...chat.messages].reverse().find((m) => m.role === 'assistant' && m.images?.length);
-    if (last) files.push(last.images[last.images.length - 1]);
-  }
-  return Promise.all(files.slice(-4).map(publicUrl));
+async function drawImage(chat, reply, { prompt, aspect_ratio, reference }, emit, signal) {
+  return drawMedia(chat, reply, { kind: 'image', prompt, aspect: aspect_ratio, useLast: reference === 'last_generated' }, emit, signal);
 }
 
-async function drawImage(chat, reply, { prompt, aspect_ratio, reference }, emit, signal) {
-  emit('status', { text: '🎨 يرسم الصورة…' });
-  const refs = await refsFor(chat, reference || 'none');
-  const aspect = ASPECTS.includes(aspect_ratio) ? aspect_ratio : 'auto';
-  const { urls } = await generateImage({ prompt, aspect, refs, model: IMAGE_MODEL, signal });
-  const saved = [];
-  for (const url of urls) {
-    const img = { kind: 'image', ...(await saveRemote(url)) };
-    saved.push(img);
-    emit('image', img);
+async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, referenceUrl }, emit, signal) {
+  if (!resume) {
+    const provider = mediaProvider();
+    if (!settings.get(provider === 'kie' ? 'kieKey' : 'piapiKey', '')) throw new Error(`أضف مفتاح ${provider === 'kie' ? 'kie.ai' : 'PiAPI'} للصور والفيديو من الإعدادات`);
+    const current = chat.messages.at(-1);
+    let file = current?.files?.filter(f => f.kind === 'image').at(-1);
+    if (!file && (useLast || /(?:هذي|هذه|الصورة|صورتك|حرك|حرّك|animate|this image)/i.test(prompt))) {
+      for (const message of [...chat.messages].reverse()) {
+        file = [...(message.files || []), ...(message.images || [])].filter(f => f.kind === 'image').at(-1);
+        if (file) break;
+      }
+    }
+    let reference = referenceUrl;
+    if (!reference && file) {
+      reference = file.url && (!file.blob || Date.now() - (file.urlAt || 0) < URL_TTL) ? file.url : null;
+      if (!reference && file.blob) {
+        const blob = await getBlob(file.blob);
+        if (!blob) throw new Error('الصورة غير موجودة على هذا الجهاز؛ أرفقها مرة ثانية');
+        const ext = blob.type === 'image/jpeg' ? 'jpg' : blob.type.split('/')[1] || 'png';
+        reference = provider === 'kie' ? await uploadFile(blob, `reference.${ext}`, signal) : await toDataUrl(blob);
+      }
+    }
+    const spec = (provider === 'kie' ? kieMediaSpec : mediaSpec)(kind, prompt, { aspect, reference });
+    emit('status', { text: `ينشئ المهمة عبر ${provider === 'kie' ? 'kie.ai' : 'PiAPI'} · ${spec.name}…` });
+    reply.mediaTask = { provider, kind, name: spec.name, prompt, submitting: true };
+    // Persist submission state, including uncertain network outcomes, before the paid POST.
+    await saveChat({ ...chat, messages: [...chat.messages, reply] });
+    reply.mediaTask.id = await (provider === 'kie' ? createKieMediaTask : createMedia)(spec, signal);
+    reply.mediaTask.submitting = false;
+    await saveChat({ ...chat, messages: [...chat.messages, reply] });
   }
-  reply.images = [...(reply.images || []), ...saved];
-  reply.imagePrompt = prompt;
-  return saved;
+  const task = reply.mediaTask;
+  const url = await waitMedia(task, { signal, ...(task.provider === 'kie' ? { readTask: readKieMediaTask } : {}), onStatus: text => emit('status', { text }) });
+  const media = { kind: task.kind, url, model: task.name };
+  // Images are small enough to keep offline; videos retain the provider download URL.
+  if (task.kind === 'image') Object.assign(media, await saveRemote(url));
+  if (task.kind === 'video') reply.videos = [media];
+  else { reply.images = [media]; reply.imagePrompt = task.prompt; }
+  task.done = true;
+  reply.text = `تم الإنشاء باستخدام ${task.name}.`;
+  emit(task.kind, media);
+  return [media];
+}
+
+export async function resumeMedia(chat, reply, emit, signal) {
+  try {
+    delete reply.error;
+    delete reply.stopped;
+    await drawMedia(chat, reply, { resume: true }, emit, signal);
+  } catch (e) {
+    reply.error = signal?.aborted ? 'توقف الانتظار؛ المهمة قد تستمر لدى المزوّد. تابعها لاحقاً بنفس الرقم.' : e.message;
+  } finally { await saveChat(chat); }
 }
 
 // ---------- الرد ----------
@@ -141,10 +175,9 @@ export async function respond(chat, opts, emit, signal) {
     if (personal.recallUnavailable) reply.recallUnavailable = true;
     const search = !!opts.search || personal.search;
     // وضع الرسم المباشر: نص المستخدم هو البرومبت، والصور المرفقة معه مرجع
-    if (opts.imageMode) {
-      if (model.provider === 'openrouter') throw new Error('توليد الصور متاح حالياً مع kie.ai؛ اختره من الإعدادات لهذا الوضع.');
-      const attached = (userMsg.files || []).some((f) => f.kind === 'image');
-      await drawImage(chat, reply, { prompt: userMsg.text, aspect_ratio: opts.aspect, reference: attached ? 'attached' : 'none' }, emit, signal);
+    const kind = opts.videoMode ? 'video' : opts.imageMode ? 'image' : mediaIntent(personal.expanded);
+    if (kind) {
+      await drawMedia(chat, reply, { kind, prompt: personal.expanded, aspect: opts.aspect, referenceUrl: userMsg.mediaReferenceUrl }, emit, signal);
       return reply;
     }
 
@@ -210,7 +243,7 @@ export async function respond(chat, opts, emit, signal) {
   } catch (e) {
     if (signal?.aborted) {
       reply.stopped = true;
-      if (!reply.text && !reply.images?.length) reply.text = '⏹️ تم الإيقاف';
+      if (!reply.text && !reply.images?.length) reply.text = reply.mediaTask ? 'توقف الانتظار؛ مهمة التوليد قد تستمر. تابع نفس المهمة من الزر أدناه.' : '⏹️ تم الإيقاف';
     } else {
       reply.error = e.message;
       reply.connection = e.connection;

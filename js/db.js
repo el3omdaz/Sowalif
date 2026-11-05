@@ -58,7 +58,7 @@ export function newChat(model) {
   return { id: uid(), title: 'محادثة جديدة', model, createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
 }
 
-const blobIds = (chat) => chat.messages.flatMap((m) => [...(m.files || []), ...(m.images || [])]).map((f) => f.blob).filter(Boolean);
+const blobIds = (chat) => chat.messages.flatMap((m) => [...(m.files || []), ...(m.images || []), ...(m.videos || [])]).map((f) => f.blob).filter(Boolean);
 
 export async function deleteChat(id) {
   const chat = await getChat(id);
@@ -117,7 +117,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=7');
+  const { readPersonalization } = await import('./memory.js?v=8');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -144,7 +144,7 @@ export async function importAll(file) {
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=7');
+    const { mergePersonalization } = await import('./memory.js?v=8');
     mergePersonalization(data.personalization);
   }
   return n;

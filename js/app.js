@@ -1,10 +1,12 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=7';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=7';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=7';
-import { respond, transcribe, makeAttachment } from './chat.js?v=7';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=7';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=7';
+import * as db from './db.js?v=8';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=8';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=8';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=8';
+import { mediaIntent } from './piapi.js?v=8';
+import { mediaProvider } from './media.js?v=8';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=8';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=8';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -26,6 +28,7 @@ const S = {
   search: db.settings.get('search', false),
   deep: false,
   imageMode: false,
+  videoMode: false,
   controller: null,
 };
 
@@ -164,6 +167,7 @@ async function openChat(id) {
   S.defaultModel = defaultFor(S.provider);
   db.settings.set('provider', S.provider);
   S.imageMode = false;
+  S.videoMode = false;
   syncToggles();
   history.replaceState(null, '', `#${id}`);
   renderModelName();
@@ -194,6 +198,7 @@ function md(text) {
 // الصور تُعرض من الجهاز (blob) أو من الرابط إن لم تُحفظ
 const imgAttrs = (f) => (f.blob ? `data-blob="${f.blob}"` : f.preview ? `src="${f.preview}"` : `src="${esc(f.url || '')}"`);
 const genFigure = (f) => `<figure><img ${imgAttrs(f)} alt="" data-zoom><a ${f.blob ? `data-blob-href="${f.blob}"` : `href="${esc(f.url)}"`} download="image.png">⬇️ حفظ</a></figure>`;
+const videoFigure = (f) => `<figure><video ${imgAttrs(f)} controls playsinline preload="metadata" aria-label="الفيديو المُنشأ"></video><a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" download="video.mp4">فتح وحفظ الفيديو ↗</a></figure>`;
 
 async function hydrate(root) {
   for (const el of root.querySelectorAll('[data-blob]')) {
@@ -211,7 +216,7 @@ function messageHTML(m, i) {
     const files = (m.files || []).map((f) => (f.kind === 'image' ? `<img ${imgAttrs(f)} alt="" data-zoom>` : `<span class="doc-chip">📄 ${esc(f.name)}</span>`)).join('');
     return `<div class="msg user">${files ? `<div class="files">${files}</div>` : ''}${m.text ? `<div class="bubble" dir="auto">${esc(m.text)}</div>` : ''}</div>`;
   }
-  const imgs = (m.images || []).map(genFigure).join('');
+  const imgs = (m.images || []).map(genFigure).join('') + (m.videos || []).map(videoFigure).join('');
   const isLast = i === S.chat.messages.length - 1;
   return `<div class="msg assistant" data-i="${i}">
     ${imgs ? `<div class="gen">${imgs}</div>` : ''}
@@ -220,10 +225,12 @@ function messageHTML(m, i) {
     ${m.memoryAction ? `<div class="memory-notice">✓ ${esc(m.memoryAction)}</div>` : ''}
     ${m.recallUnavailable ? '<div class="memory-notice">تعذّر استرجاع المحادثات السابقة في هذا الرد.</div>' : ''}
     ${m.contextSources?.length ? `<details class="context-sources"><summary>سياق من ${m.contextSources.length} محادثة سابقة</summary>${m.contextSources.map((c) => `<a href="#${encodeURIComponent(c.id)}">${esc(c.title)}</a>`).join('')}</details>` : ''}
-    <div class="meta"><span>${esc(modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
+    ${m.mediaTask ? `<div class="memory-notice">${m.mediaTask.provider === 'kie' ? 'kie.ai' : 'PiAPI'} · ${esc(m.mediaTask.name)}${m.mediaTask.id ? ` · المهمة: ${esc(m.mediaTask.id)}` : ' · لم يتأكد إنشاء المهمة؛ افحص سجل المزوّد قبل إعادة الطلب.'}</div>` : ''}
+    <div class="meta"><span>${esc(m.mediaTask?.name || modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
       ${m.text ? '<button data-copy>📋 نسخ</button>' : ''}
-      ${isLast ? '<button data-retry>🔄 أعد</button>' : ''}
-      ${isLast && m.error && !['gemini-3-8-flash', OR_AUDIO_MODEL].includes(m.model) ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
+      ${m.mediaTask?.id && !m.mediaTask.done ? '<button data-resume-media>متابعة المهمة</button>' : ''}
+      ${isLast && !m.mediaTask ? '<button data-retry>🔄 أعد</button>' : ''}
+      ${isLast && m.error && !m.mediaTask && !['gemini-3-8-flash', OR_AUDIO_MODEL].includes(m.model) ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
       ${m.error && m.connection ? `<span>مدة الانتظار: ${Math.round(m.connection.totalMs / 1000)} ث · ${m.connection.headersMs == null ? 'بدون بدء استجابة' : 'وصلت استجابة من الخدمة'}</span>` : ''}
     </div></div>`;
 }
@@ -264,6 +271,15 @@ $('#messages').addEventListener('click', async (e) => {
   if (e.target.closest('[data-copy]')) {
     await copy(m.text);
     toast('تم النسخ');
+  } else if (e.target.closest('[data-resume-media]')) {
+    if (S.controller) return;
+    const message = S.chat.messages[Number(e.target.closest('[data-i]').dataset.i)];
+    if (!message?.mediaTask?.id) return;
+    const ctrl = new AbortController();
+    S.controller = ctrl;
+    updateSend();
+    try { await resumeMedia(S.chat, message, (event, data) => { if (event === 'status') setStatus(data.text); }, ctrl.signal); }
+    finally { S.controller = null; setStatus(''); renderMessages(); updateSend(); }
   } else if (e.target.closest('[data-fast-retry]')) {
     if (S.controller) return;
     S.provider = providerOf(m.model);
@@ -333,7 +349,7 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
-  if (S.provider === 'openrouter') S.imageMode = false;
+  const media = S.imageMode || S.videoMode;
   for (const [id, active] of [['searchBtn', S.search && !S.imageMode], ['deepBtn', S.deep && !S.imageMode], ['imgBtn', S.imageMode]]) {
     $(`#${id}`).setAttribute('aria-pressed', String(active));
   }
@@ -342,10 +358,15 @@ function syncToggles() {
   $('#deepBtn').classList.toggle('on', S.deep && !S.imageMode);
   $('#deepBtn').disabled = S.imageMode;
   $('#imgBtn').classList.toggle('on', S.imageMode);
-  $('#imgBtn').disabled = S.provider === 'openrouter';
-  $('#imgBtn').title = S.provider === 'openrouter' ? 'توليد الصور متاح حالياً مع kie.ai' : 'توليد صورة من الوصف';
-  $('#aspect').classList.toggle('hidden', !S.imageMode);
-  input.placeholder = S.imageMode ? 'صف الصورة اللي تبيها… (أرفق صورة لتعديلها)' : 'اكتب رسالتك…';
+  $('#imgBtn').disabled = false;
+  $('#imgBtn').title = 'توليد صورة من الوصف';
+  $('#videoBtn').classList.toggle('on', S.videoMode);
+  $('#videoBtn').setAttribute('aria-pressed', String(S.videoMode));
+  $('#searchBtn').disabled = media;
+  $('#deepBtn').disabled = media;
+  $('#aspect').classList.toggle('hidden', !media);
+  $('#mediaReference').classList.toggle('hidden', !media);
+  input.placeholder = S.videoMode ? 'صف الفيديو… أو أرفق صورة وصف حركتها' : S.imageMode ? 'صف الصورة اللي تبيها… (أرفق صورة لتعديلها)' : 'اكتب رسالتك…';
 }
 $('#searchBtn').onclick = () => {
   S.search = !S.search;
@@ -357,10 +378,11 @@ $('#deepBtn').onclick = () => {
   syncToggles();
 };
 $('#imgBtn').onclick = () => {
-  if (S.provider === 'openrouter') return toast('توليد الصور متاح حالياً مع kie.ai');
   S.imageMode = !S.imageMode;
+  S.videoMode = false;
   syncToggles();
 };
+$('#videoBtn').onclick = () => { S.videoMode = !S.videoMode; S.imageMode = false; syncToggles(); };
 
 const input = $('#input');
 function autosize() {
@@ -508,9 +530,9 @@ async function run(opts) {
       think.classList.remove('hidden');
       think.textContent = (think.textContent + d.text).slice(-600);
     } else if (ev === 'status') setStatus(d.text);
-    else if (ev === 'image') {
+    else if (ev === 'image' || ev === 'video') {
       gen.classList.remove('hidden');
-      gen.insertAdjacentHTML('beforeend', genFigure(d));
+      gen.insertAdjacentHTML('beforeend', ev === 'video' ? videoFigure(d) : genFigure(d));
       hydrate(gen);
       box.scrollTop = box.scrollHeight;
     }
@@ -533,24 +555,35 @@ async function send() {
   if (rec || voiceJob || mic.classList.contains('busy')) return toast('أوقف الإملاء وانتظر اكتمال النص أولاً');
   const text = input.value.trim();
   if ((!text && !S.attachments.length) || S.attachments.some((a) => a.loading)) return;
-  if (S.imageMode && !text) return toast('اكتب وصف الصورة');
-  if (!db.settings.get(keySetting(S.provider), '')) {
+  if ((S.imageMode || S.videoMode) && !text) return toast('اكتب وصف الصورة أو الفيديو');
+  const mediaKind = S.videoMode ? 'video' : S.imageMode ? 'image' : mediaIntent(text);
+  const mediaKey = mediaProvider() === 'kie' ? 'kieKey' : 'piapiKey';
+  if (mediaKind && !db.settings.get(mediaKey, '')) {
+    openSettings();
+    return toast('أضف مفتاح مزوّد الصور والفيديو المحدد في الإعدادات');
+  }
+  if (!mediaKind && !db.settings.get(keySetting(S.provider), '')) {
     openSettings();
     return toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} أول`);
   }
   const files = S.attachments.map((a) => a.meta);
-  S.chat.messages.push({ role: 'user', text, files, at: Date.now() });
+  const mediaReferenceUrl = (S.imageMode || S.videoMode) ? $('#mediaReference').value.trim() : '';
+  if (mediaReferenceUrl && !/^https?:\/\//i.test(mediaReferenceUrl)) return toast('استخدم رابط صورة يبدأ بـ https://');
+  S.chat.messages.push({ role: 'user', text, files, ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), at: Date.now() });
+  $('#mediaReference').value = '';
   history.replaceState(null, '', `#${S.chat.id}`);
   input.value = '';
   S.attachments = [];
   renderAttachments();
   autosize();
   const imageMode = S.imageMode;
-  if (imageMode) {
+  const videoMode = S.videoMode;
+  if (imageMode || videoMode) {
     S.imageMode = false;
+    S.videoMode = false;
     syncToggles();
   }
-  await run({ imageMode });
+  await run({ imageMode, videoMode });
 }
 
 async function retry() {
@@ -566,6 +599,49 @@ const mic = $('#micBtn');
 const micIcon = mic.innerHTML;
 let micStarting = false;
 let voiceJob = null;
+let micWakeOwner = null;
+let micWakeLock = null;
+let micWakePending = null;
+
+async function acquireMicWake() {
+  const owner = micWakeOwner;
+  if (!owner || owner !== rec || document.visibilityState === 'hidden' || micWakeLock || micWakePending === owner) return;
+  $('#wakeStatus').classList.remove('hidden');
+  if (!navigator.wakeLock?.request) {
+    $('#wakeStatus').textContent = 'هذا المتصفح لا يدعم منع قفل الشاشة أثناء التسجيل.';
+    return;
+  }
+  micWakePending = owner;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (owner !== micWakeOwner || owner !== rec) { await lock.release(); return; }
+    micWakeLock = lock;
+    $('#wakeStatus').textContent = 'الشاشة تبقى شغالة أثناء استخدام المايك';
+    lock.addEventListener('release', () => {
+      if (micWakeLock !== lock) return;
+      micWakeLock = null;
+      if (micWakeOwner) $('#wakeStatus').textContent = 'النظام أوقف منع القفل؛ قد تقفل الشاشة تلقائياً.';
+    });
+  } catch {
+    if (micWakeOwner === owner) $('#wakeStatus').textContent = 'النظام لم يسمح بمنع قفل الشاشة؛ جرّب إيقاف وضع توفير الطاقة.';
+  } finally { if (micWakePending === owner) micWakePending = null; }
+}
+function startMicWake(state) { micWakeOwner = state; acquireMicWake(); }
+function releaseMicWake() {
+  micWakeOwner = null;
+  const lock = micWakeLock;
+  micWakeLock = null;
+  lock?.release().catch(() => {});
+  $('#wakeStatus').classList.add('hidden');
+  $('#wakeStatus').textContent = '';
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    if (micWakeLock?.released) micWakeLock = null;
+    acquireMicWake();
+  }
+});
+window.addEventListener('pagehide', releaseMicWake);
 
 function showVoice() {
   $('.composer').classList.add('voice-active');
@@ -608,6 +684,7 @@ function startMeter(state) {
 }
 
 function resetMic() {
+  releaseMicWake();
   $('.composer').classList.remove('voice-active');
   $('#voiceCapture').classList.add('hidden');
   mic.classList.remove('rec', 'busy');
@@ -663,7 +740,7 @@ function startDictation() {
     else if (failure && failure !== 'aborted') toast(heard ? 'توقف الإملاء؛ النص الذي وصل موجود في مربع الكتابة.' : 'تعذّر الإملاء المباشر. اختر «تسجيل ثم تحويل» من الإعدادات وجرب مجدداً.', 5000);
     else if (!heard) toast('ما سمعت كلام واضح — جرب مرة ثانية');
   };
-  try { speech.start(); } catch {
+  try { speech.start(); startMicWake(state); } catch {
     clearInterval(state.timer);
     clearTimeout(state.limit);
     rec = null;
@@ -717,6 +794,7 @@ async function startRec() {
     toast('توقف تسجيل الصوت. جرب مرة ثانية.');
   };
   showVoice();
+  startMicWake(state);
   startMeter(state);
   setStatus('اضغط ✓ لاعتماد التسجيل وتحويله إلى نص، أو × للإلغاء');
   mic.classList.add('rec');
@@ -734,6 +812,7 @@ function tick() {
 
 function stopRec() {
   if (!rec) return;
+  releaseMicWake();
   clearInterval(rec.timer);
   clearTimeout(rec.limit);
   if (rec.speech) {
@@ -753,6 +832,7 @@ function stopRec() {
 
 async function finishRec(blob, state) {
   if (rec !== state) return;
+  releaseMicWake();
   clearInterval(state.timer);
   clearTimeout(state.limit);
   stopMeter(state);
@@ -917,6 +997,11 @@ $('#clearSavedMemory').onclick = () => {
 };
 
 function openSettings() {
+  $('#mediaProvider').value = db.settings.get('mediaProvider', 'auto');
+  $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';
+  for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).value = db.settings.get(id, 'auto');
+  $('#piapiKeyState').textContent = db.settings.get('piapiKey', '') ? '✓ مفتاح PiAPI محفوظ؛ يُستخدم للصور والفيديو مع أي مزوّد محادثة' : 'لم يُحفظ مفتاح PiAPI بعد';
+  for (const [id, key, fallback] of [['piapiImageModel', 'piapiImageModel', 'auto'], ['piapiVideoModel', 'piapiVideoModel', 'auto'], ['piapiDuration', 'piapiDuration', 5]]) $(`#${id}`).value = db.settings.get(key, fallback);
   loadPersonalSettings();
   closeSide();
   $('#settingsSheet').classList.remove('hidden');
@@ -924,7 +1009,7 @@ function openSettings() {
   const k = db.settings.get(keySetting(S.provider), '');
   $('#providerSelect').value = S.provider;
   $('#keyTitle').textContent = `مفتاح ${isOR ? 'OpenRouter' : 'kie.ai'}`;
-  $('#keyHelp').innerHTML = isOR ? 'أضف مفتاحك من <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouter ← Keys</a>. تُحسب المحادثة والبحث والصوت على رصيد OpenRouter. توليد الصور حالياً متاح مع kie.ai.' : 'أضف مفتاحك من kie.ai ← API Key. تُحسب المحادثة والصوت والصور على رصيد kie.ai.';
+  $('#keyHelp').innerHTML = isOR ? 'أضف مفتاحك من <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouter ← Keys</a>. تُحسب المحادثة والبحث والصوت على رصيد OpenRouter. الصور والفيديو تستخدم مزوّد الوسائط المختار أدناه.' : 'أضف مفتاحك من kie.ai ← API Key. الصور والفيديو تستخدم مزوّد الوسائط المختار أدناه بشكل مستقل.';
   $('#keyInput').placeholder = isOR ? 'sk-or-v1-…' : 'الصق مفتاح kie.ai هنا';
   $('#checkKey').textContent = isOR ? 'فحص المفتاح' : '💰 الرصيد';
   $('#forgetKey').textContent = `مسح مفتاح ${isOR ? 'OpenRouter' : 'kie.ai'} من هذا الجهاز`;
@@ -934,6 +1019,26 @@ function openSettings() {
   $('#defaultModel').innerHTML = modelsFor(S.provider).map((m) => `<option value="${esc(m.id)}"${m.id === S.defaultModel ? ' selected' : ''}>${esc(m.name)}${m.badge ? ` — ${m.badge}` : ''}</option>`).join('');
 }
 $('#openSettings').onclick = openSettings;
+$('#mediaProvider').onchange = (e) => db.settings.set('mediaProvider', e.target.value);
+$('#saveMediaKie').onclick = () => {
+  const key = $('#mediaKieKey').value.trim();
+  if (!key) return toast('الصق مفتاح kie.ai أولاً');
+  if (!db.settings.set('kieKey', key)) return toast('تعذّر حفظ المفتاح');
+  $('#mediaKieKey').value = '';
+  openSettings();
+};
+$('#forgetMediaKie').onclick = () => { db.settings.set('kieKey', ''); $('#mediaKieKey').value = ''; openSettings(); };
+for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).onchange = (e) => db.settings.set(id, e.target.value);
+$('#savePiapi').onclick = () => {
+  const key = $('#piapiKey').value.trim();
+  if (!key) return toast('الصق مفتاح PiAPI أولاً');
+  if (!db.settings.set('piapiKey', key)) return toast('تعذّر حفظ المفتاح على هذا الجهاز');
+  $('#piapiKey').value = '';
+  openSettings();
+  toast('تم حفظ مفتاح PiAPI');
+};
+$('#forgetPiapi').onclick = () => { db.settings.set('piapiKey', ''); $('#piapiKey').value = ''; openSettings(); };
+for (const id of ['piapiImageModel', 'piapiVideoModel', 'piapiDuration']) $(`#${id}`).onchange = (e) => db.settings.set(id, e.target.value);
 $('#providerSelect').onchange = (e) => {
   if (S.controller || rec || voiceJob || micStarting || diagnosisController) {
     e.target.value = S.provider;
@@ -944,6 +1049,7 @@ $('#providerSelect').onchange = (e) => {
   S.defaultModel = defaultFor(S.provider);
   S.model = S.defaultModel;
   S.imageMode = false;
+  S.videoMode = false;
   $('#keyInput').value = '';
   $('#keyMsg').textContent = '';
   $('#catalogMsg').textContent = '';

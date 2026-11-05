@@ -1,6 +1,6 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
-import { settings, putBlob } from './db.js?v=7';
-import { modelById } from './models.js?v=7';
+import { settings, putBlob } from './db.js?v=8';
+import { modelById } from './models.js?v=8';
 
 // sc.base / sc.upload لتجربة التطبيق على خادم وهمي فقط
 const BASE = () => settings.get('base', 'https://api.kie.ai');
@@ -305,7 +305,7 @@ async function runChat(model, { system, messages, search, deep, signal, onDelta,
 
 export async function runModel(modelId, opts) {
   const model = modelById(modelId);
-  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=7')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
+  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=8')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
   const started = Date.now();
   const connection = { model: model.id, provider: model.provider || 'kie', phase: 'preparing', firstTextMs: null };
   const onTransport = (state) => {
@@ -396,6 +396,21 @@ const wait = (ms, signal) =>
     if (signal?.aborted) return abort();
     signal?.addEventListener('abort', abort, { once: true });
   });
+
+export async function createKieMediaTask(spec, signal) {
+  if (!settings.get('kieKey', '')) throw new Error('أضف مفتاح kie.ai للصور والفيديو من الإعدادات');
+  const timeout = AbortSignal.timeout(60000);
+  const data = await taskCall('POST', '/api/v1/jobs/createTask', spec.body, signal ? AbortSignal.any([signal, timeout]) : timeout);
+  if (!data?.taskId) throw new Error('لم يصل رقم مهمة kie.ai؛ افحص سجل المهام قبل إعادة الطلب');
+  return data.taskId;
+}
+export async function readKieMediaTask(id, signal) {
+  const timeout = AbortSignal.timeout(60000);
+  const data = await taskCall('GET', `/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(id)}`, null, signal ? AbortSignal.any([signal, timeout]) : timeout);
+  if (data?.state === 'fail') throw new Error(`kie.ai: ${data.failMsg || data.failCode || 'فشل التوليد'}`);
+  const urls = safeJSON(data?.resultJson)?.resultUrls || [];
+  return { status: data?.state === 'success' ? 'completed' : data?.state || 'pending', output: { image_url: urls[0], video: urls[0] } };
+}
 
 export async function generateImage({ prompt, aspect = 'auto', refs = [], model, signal }) {
   const input = { prompt: String(prompt).slice(0, 20000), aspect_ratio: aspect, resolution: '2K', output_format: 'png' };
