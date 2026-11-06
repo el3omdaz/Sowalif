@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
   <div id="app" class="app">
@@ -124,8 +124,29 @@
       <div class="project-actions">
         <label class="btn ghost">استيراد ملفات<input id="projectImport" type="file" multiple hidden></label>
         <label class="btn ghost">استيراد مجلد<input id="projectFolder" type="file" webkitdirectory multiple hidden></label>
+        <button id="projectLinkFolder" class="btn ghost hidden" type="button">ربط مجلد للتعديل</button>
+        <button id="projectWriteFolder" class="btn ghost hidden" type="button">حفظ في المجلد</button>
         <button id="projectExport" class="btn ghost" type="button">تنزيل ZIP</button>
       </div>
+      <details class="settings-group project-github">
+        <summary><span><strong>رفع إلى GitHub</strong><small>راجع الملفات وارفعها على فرع جديد</small></span></summary>
+        <div class="settings-body project-github-fields">
+          <label for="projectRepository">المستودع</label>
+          <input id="projectRepository" type="text" dir="ltr" placeholder="owner/repo" autocomplete="off" spellcheck="false">
+          <label for="projectGithubToken">رمز الوصول إلى GitHub</label>
+          <input id="projectGithubToken" type="password" dir="ltr" autocomplete="off" spellcheck="false">
+          <p class="muted">استخدم مستودعًا مهيّأً بملف README أو تعديل سابق. أعطِ الرمز صلاحية Contents: Read and write لهذا المستودع. يُستخدم الرمز مع GitHub مباشرة.</p>
+          <label for="projectCommitMessage">وصف التعديل</label>
+          <input id="projectCommitMessage" type="text" placeholder="Update project from Sowalif" maxlength="160">
+          <div class="project-actions">
+            <button id="projectReviewPush" class="btn ghost" type="button">راجع الملفات للرفع</button>
+            <button id="projectPush" class="btn primary hidden" type="button">ارفع على فرع جديد</button>
+          </div>
+          <p id="projectGithubStatus" class="muted" role="status"></p>
+          <ul id="projectPushFiles" class="project-push-files hidden"></ul>
+          <a id="projectGithubResult" class="hidden" target="_blank" rel="noopener noreferrer">عرض الفرع وفتح Pull Request في GitHub</a>
+        </div>
+      </details>
       <div class="project-editor">
         <label for="projectFiles">الملفات المحفوظة</label>
         <select id="projectFiles" dir="ltr"></select>
@@ -282,6 +303,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=14"></script>
+  <script type="module" src="js/app.js?v=15"></script>
 </body>
 </html>

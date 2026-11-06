@@ -143,7 +143,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=14');
+  const { readPersonalization } = await import('./memory.js?v=15');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -170,7 +170,7 @@ export async function importAll(file) {
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=14');
+    const { mergePersonalization } = await import('./memory.js?v=15');
     mergePersonalization(data.personalization);
   }
   return n;

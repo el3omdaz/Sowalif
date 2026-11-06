@@ -1,14 +1,16 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=14';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=14';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=14';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=14';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=14';
-import { mediaProvider } from './media.js?v=14';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=14';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=14';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=14';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=14';
+import * as db from './db.js?v=15';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=15';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=15';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=15';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=15';
+import { mediaProvider } from './media.js?v=15';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=15';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=15';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=15';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=15';
+import { prepareProjectPush, pushProject } from './project-github.js?v=15';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=15';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -535,6 +537,8 @@ document.querySelectorAll('.sheet').forEach((s) =>
     if (s.id === 'projectSheet') {
       if (projectSaving || !discardProjectDraft()) return;
       clearProjectPreview();
+      $('#projectGithubToken').value = '';
+      resetProjectPush();
     }
     s.classList.add('hidden');
   }),
@@ -825,11 +829,14 @@ function projectProposalHTML(proposal) {
     <button type="button" class="btn primary" data-apply-project>تطبيق التغييرات</button></div>`;
 }
 
-async function saveProjectFiles(files) {
+async function saveProjectFiles(files, removedPath) {
   if (projectSaving || S.controller || S.mode !== 'work') throw new Error('انتظر انتهاء الطلب أولاً.');
   projectSaving = true;
   const chat = S.chat;
-  const project = { files, revision: (chat.project?.revision || 0) + 1 };
+  const kept = new Set(files.map(file => file.path.toLowerCase()));
+  const removed = [...new Set([...(chat.project?.removed || []), ...(removedPath ? [removedPath] : [])])]
+    .filter(path => !kept.has(path.toLowerCase()));
+  const project = { files, removed, revision: (chat.project?.revision || 0) + 1 };
   try {
     await db.saveProject(chat, project);
     history.replaceState(null, '', `#${chat.id}`);
@@ -859,18 +866,25 @@ function renderProjectEditor(path = '') {
   $('#projectFiles').replaceChildren(new Option('ملف جديد', ''), ...files.map(file => new Option(file.path, file.path)));
   $('#projectFiles').value = path;
   $('#projectExport').disabled = !files.length;
+  $('#projectLinkFolder').classList.toggle('hidden', typeof window.showDirectoryPicker !== 'function');
+  $('#projectWriteFolder').classList.toggle('hidden', !linkedFolders.has(S.chat.id));
   loadProjectEditor(selectedProjectFile());
 }
 
 let editorPath = '';
-function discardProjectDraft() {
+const linkedFolders = new Map();
+let projectPushPlan = null;
+function projectDraftClean() {
   const file = projectFiles().find(item => item.path === editorPath);
-  return ($('#projectPath').value === (file?.path || '') && $('#projectCode').value === (file?.content || '')) ||
-    confirm('تبي تتجاهل التعديلات غير المحفوظة؟');
+  return $('#projectPath').value === (file?.path || '') && $('#projectCode').value === (file?.content || '');
+}
+function discardProjectDraft() {
+  return projectDraftClean() || confirm('تبي تتجاهل التعديلات غير المحفوظة؟');
 }
 
 $('#openProject').onclick = () => {
   if (S.controller || projectSaving) return toast('انتظر انتهاء الرد أولاً.');
+  resetProjectPush();
   editorPath = projectFiles().find(file => file.path === 'index.html')?.path || projectFiles()[0]?.path || '';
   renderProjectEditor(editorPath);
   $('#projectStatus').textContent = '';
@@ -907,7 +921,7 @@ $('#projectSave').onclick = () => editProject(async (status) => {
 });
 $('#projectRemove').onclick = () => editProject(async (status) => {
   if (!editorPath || !confirm(`تحذف الملف «${editorPath}»؟`)) return;
-  await saveProjectFiles(projectFiles().filter(file => file.path !== editorPath));
+  await saveProjectFiles(projectFiles().filter(file => file.path !== editorPath), editorPath);
   editorPath = '';
   renderProjectEditor();
   status.textContent = 'تم حذف الملف.';
@@ -948,6 +962,116 @@ $('#projectExport').onclick = () => editProject(async () => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 });
+
+$('#projectLinkFolder').onclick = () => {
+  if (!discardProjectDraft()) return;
+  void editProject(async (status) => {
+    const chat = S.chat;
+    let directory;
+    try {
+      directory = await window.showDirectoryPicker({ mode: 'readwrite' });
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      throw error;
+    }
+    const imported = await readProjectDirectory(directory);
+    if (S.chat !== chat || $('#projectSheet').classList.contains('hidden')) return;
+    const baseline = new Map(imported.map(file => [file.path, file.content]));
+    const existing = new Map(projectFiles().map(file => [file.path.toLowerCase(), file.content]));
+    if (imported.some(file => existing.has(file.path.toLowerCase()) && existing.get(file.path.toLowerCase()) !== file.content) &&
+        !confirm('بعض الملفات تختلف عن نسخة سوالف. تبي تستورد محتوى المجلد فوق الملفات المطابقة؟')) return;
+    const files = mergeProjectFiles(projectFiles(), imported);
+    await saveProjectFiles(files);
+    linkedFolders.set(chat.id, { directory, baseline });
+    editorPath = files[0].path;
+    renderProjectEditor(editorPath);
+    status.textContent = `تم ربط «${directory.name}». تقدر تحفظ التعديلات فيه بعد مراجعتها.`;
+  });
+};
+
+async function projectTransfer(status, action) {
+  if (projectSaving || S.controller) return;
+  if (!projectDraftClean()) {
+    status.textContent = 'احفظ الملف المفتوح أولاً.';
+    return;
+  }
+  projectSaving = true;
+  const fields = ['projectRepository', 'projectGithubToken', 'projectCommitMessage', 'projectPath', 'projectCode'];
+  for (const id of fields) $(`#${id}`).readOnly = true;
+  try {
+    await action();
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    for (const id of fields) $(`#${id}`).readOnly = false;
+    projectSaving = false;
+  }
+}
+
+$('#projectWriteFolder').onclick = () => {
+  const status = $('#projectStatus');
+  const linked = linkedFolders.get(S.chat.id);
+  if (!linked) return;
+  void projectTransfer(status, async () => {
+    if (!confirm(`تحفظ تغييرات سوالف في المجلد «${linked.directory.name}»؟`)) return;
+    const count = await writeProjectDirectory(linked.directory, linked.baseline, projectFiles(), S.chat.project?.removed || []);
+    status.textContent = count ? `تم حفظ ${count} تغيير في المجلد.` : 'ما فيه تغييرات جديدة للحفظ.';
+  });
+};
+
+function resetProjectPush() {
+  projectPushPlan = null;
+  for (const id of ['projectPush', 'projectPushFiles', 'projectGithubResult']) $(`#${id}`).classList.add('hidden');
+  $('#projectPushFiles').replaceChildren();
+  $('#projectGithubStatus').textContent = '';
+}
+
+for (const id of ['projectRepository', 'projectGithubToken']) $(`#${id}`).addEventListener('input', resetProjectPush);
+$('#projectReviewPush').onclick = () => {
+  if (projectSaving) return;
+  resetProjectPush();
+  const status = $('#projectGithubStatus');
+  void projectTransfer(status, async () => {
+    status.textContent = 'أقارن الملفات مع الفرع الأساسي في GitHub…';
+    const project = S.chat.project;
+    const plan = await prepareProjectPush({
+      repository: $('#projectRepository').value,
+      token: $('#projectGithubToken').value.trim(),
+      files: projectFiles(),
+      removed: project?.removed || [],
+    });
+    if (!plan.changes.length) {
+      status.textContent = 'ملفات المشروع مطابقة للنسخة الموجودة في GitHub.';
+      return;
+    }
+    projectPushPlan = { plan, project };
+    const list = $('#projectPushFiles');
+    for (const { action, entry } of plan.changes) {
+      const item = document.createElement('li');
+      item.textContent = `${action} · ${entry.path}`;
+      list.append(item);
+    }
+    list.classList.remove('hidden');
+    $('#projectPush').classList.remove('hidden');
+    status.textContent = `راجع التغييرات قبل رفعها إلى ${plan.repo} على الفرع ${plan.branch}.`;
+  });
+};
+$('#projectPush').onclick = () => {
+  const status = $('#projectGithubStatus');
+  void projectTransfer(status, async () => {
+    if (!projectPushPlan || projectPushPlan.project !== S.chat.project) throw new Error('تغيّرت ملفات المشروع. أعد مراجعة الرفع.');
+    const { plan } = projectPushPlan;
+    const message = $('#projectCommitMessage').value.trim() || 'Update project from Sowalif';
+    status.textContent = 'أرفع التغييرات إلى GitHub…';
+    const url = await pushProject(plan, $('#projectGithubToken').value.trim(), message);
+    resetProjectPush();
+    $('#projectGithubToken').value = '';
+    const result = $('#projectGithubResult');
+    result.href = url;
+    result.classList.remove('hidden');
+    status.textContent = `تم الرفع إلى ${plan.repo} على الفرع ${plan.branch}.`;
+  });
+};
 
 // ---------- المايكروفون: تسجيل ثم تحويله لنص ----------
 let rec = null;
