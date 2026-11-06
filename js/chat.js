@@ -1,10 +1,12 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, settings } from './db.js?v=9';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=9';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=9';
-import { preparePersonalContext } from './memory.js?v=9';
-import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=9';
-import { mediaProvider, kieMediaSpec } from './media.js?v=9';
+import { saveChat, getBlob, putBlob, settings } from './db.js?v=12';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=12';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=12';
+import { preparePersonalContext } from './memory.js?v=12';
+import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=12';
+import { mediaProvider, kieMediaSpec } from './media.js?v=12';
+import { withMediaCallback } from './media-push.js?v=12';
+import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=12';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -144,9 +146,11 @@ async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, r
     const spec = (provider === 'kie' ? kieMediaSpec : mediaSpec)(kind, prompt, { aspect, reference, videoReference });
     emit('status', { text: `ينشئ المهمة عبر ${provider === 'kie' ? 'kie.ai' : 'PiAPI'} · ${spec.name}…` });
     reply.mediaTask = { provider, kind, name: spec.name, prompt, submitting: true };
+    const submission = await withMediaCallback(spec, chat, reply, signal);
+    signal?.throwIfAborted();
     // Persist submission state, including uncertain network outcomes, before the paid POST.
     await saveChat({ ...chat, messages: [...chat.messages, reply] });
-    reply.mediaTask.id = await (provider === 'kie' ? createKieMediaTask : createMedia)(spec, signal);
+    reply.mediaTask.id = await (provider === 'kie' ? createKieMediaTask : createMedia)(submission, signal);
     reply.mediaTask.submitting = false;
     await saveChat({ ...chat, messages: [...chat.messages, reply] });
   }
@@ -167,16 +171,22 @@ async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, r
 export async function resumeMedia(chat, reply, emit, signal, { once = false } = {}) {
   try {
     await drawMedia(chat, reply, { resume: true, once }, emit, signal);
-    if (reply.mediaTask.done) {
-      delete reply.error;
-      delete reply.stopped;
-      await saveChat(chat);
-    }
   } catch (e) {
     if (once) return;
     reply.stopped = !!signal?.aborted;
     reply.error = signal?.aborted ? 'توقف الانتظار؛ المهمة قد تستمر لدى المزوّد. تابعها لاحقاً بنفس الرقم.' : e.message;
     await saveChat(chat);
+    return;
+  }
+  if (reply.mediaTask.done) {
+    delete reply.error;
+    delete reply.stopped;
+    try {
+      await saveChat(chat);
+    } catch (error) {
+      delete reply.mediaTask.done;
+      throw error;
+    }
   }
 }
 
@@ -189,14 +199,15 @@ export async function respond(chat, opts, emit, signal) {
   const userMsg = chat.messages[chat.messages.length - 1];
 
   try {
+    const work = chat.mode === 'work';
     const workspaceKind = ['image', 'video'].includes(chat.mode) ? chat.mode : null;
-    const personal = workspaceKind ? { expanded: userMsg.text || '' } : await preparePersonalContext(chat, userMsg.text || '');
+    const personal = workspaceKind || work ? { expanded: userMsg.text || '' } : await preparePersonalContext(chat, userMsg.text || '');
     reply.contextSources = personal.sources;
     if (personal.action) reply.memoryAction = personal.action.text;
     if (personal.recallUnavailable) reply.recallUnavailable = true;
     const search = !!opts.search || personal.search;
     // وضع الرسم المباشر: نص المستخدم هو البرومبت، والصور المرفقة معه مرجع
-    const kind = workspaceKind || (opts.videoMode ? 'video' : opts.imageMode ? 'image' : mediaIntent(personal.expanded));
+    const kind = workspaceKind || (!work && (opts.videoMode ? 'video' : opts.imageMode ? 'image' : mediaIntent(personal.expanded)));
     if (kind) {
       await drawMedia(chat, reply, {
         kind, prompt: personal.expanded, aspect: opts.aspect, referenceUrl: userMsg.mediaReferenceUrl,
@@ -205,10 +216,13 @@ export async function respond(chat, opts, emit, signal) {
       return reply;
     }
 
-    let system = [systemPrompt(model, search), personal.prompt].filter(Boolean).join('\n\n');
+    let system = [systemPrompt(model, search), work && PROJECT_PROMPT, personal.prompt].filter(Boolean).join('\n\n');
     const messages = await history(chat, model);
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-    if (lastUser) lastUser.text = personal.expanded;
+    if (lastUser) {
+      lastUser.text = personal.expanded;
+      if (work) lastUser.text += '\n\nCurrent project files (JSON snapshot):\n' + JSON.stringify(chat.project?.files || []);
+    }
 
     // نماذج بدون أدوات: نبحث قبل السؤال ونعطيها النتائج
     if (search && model.search === 'pre' && userMsg.text?.trim()) {
@@ -217,7 +231,7 @@ export async function respond(chat, opts, emit, signal) {
       system += `\n\nنتائج بحث حديثة في الإنترنت عن سؤال المستخدم (استخدمها واذكر المصادر):\n${found}`;
     }
 
-    const tools = model.tools ? TOOLS.filter((t) => search || t.name !== 'web_search') : [];
+    const tools = model.tools ? TOOLS.filter(t => t.name === 'web_search' ? search : !work) : [];
     for (let step = 0; step < 6; step++) {
       emit('status', { text: step ? '✍️ يكمل الرد…' : '' });
       const out = await runModel(model.id, {
@@ -226,6 +240,7 @@ export async function respond(chat, opts, emit, signal) {
         tools,
         search: search && (model.search === 'native' || model.search === 'openrouter'),
         deep: !!opts.deep,
+        ...(work ? { maxOutputTokens: 12000 } : {}),
         signal,
         onState: (state) => emit('status', { text: state.phase === 'connecting' ? `بانتظار بدء استجابة ${model.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'}…` : state.phase === 'retry' ? 'الخدمة رفضت الطلب مؤقتاً؛ أعيد المحاولة مرة واحدة…' : state.streaming ? 'اتصلت الخدمة؛ بانتظار النص…' : 'الخدمة ترسل الرد دفعة واحدة؛ بانتظار اكتماله…' }),
         onDelta: (t) => {
@@ -260,6 +275,13 @@ export async function respond(chat, opts, emit, signal) {
       if (reply.text && !reply.text.endsWith('\n')) {
         reply.text += '\n\n';
         emit('delta', { text: '\n\n' });
+      }
+    }
+    if (work) {
+      const proposed = extractProjectProposal(reply.text, chat.project);
+      if (proposed) {
+        reply.text = proposed.text;
+        reply.projectProposal = proposed.proposal;
       }
     }
     if (!reply.text.trim() && !reply.images?.length) reply.text = '…';

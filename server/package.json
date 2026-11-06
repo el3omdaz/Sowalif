@@ -1,0 +1,7 @@
+{
+  "name": "sowalif-media-push",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node media-push.js" },
+  "dependencies": { "web-push": "^3.6.7" }
+}

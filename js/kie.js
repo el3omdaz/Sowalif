@@ -1,6 +1,6 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
-import { settings, putBlob } from './db.js?v=9';
-import { modelById } from './models.js?v=9';
+import { settings, putBlob } from './db.js?v=12';
+import { modelById } from './models.js?v=12';
 
 // sc.base / sc.upload لتجربة التطبيق على خادم وهمي فقط
 const BASE = () => settings.get('base', 'https://api.kie.ai');
@@ -305,7 +305,7 @@ async function runChat(model, { system, messages, search, deep, signal, onDelta,
 
 export async function runModel(modelId, opts) {
   const model = modelById(modelId);
-  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=9')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
+  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=12')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
   const started = Date.now();
   const connection = { model: model.id, provider: model.provider || 'kie', phase: 'preparing', firstTextMs: null };
   const onTransport = (state) => {
@@ -376,12 +376,15 @@ export async function uploadFile(blob, fileName, signal) {
 // ---------- توليد الصور (مهمة ثم استعلام حتى تنتهي) ----------
 async function taskCall(method, p, body, signal) {
   let res;
+  let text;
   try {
     res = await fetch(`${BASE()}${p}`, { method, headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal });
+    text = await res.text();
   } catch (e) {
-    throw netError(e);
+    const error = netError(e);
+    if (error !== e) error.cause = e;
+    throw error;
   }
-  const text = await res.text();
   const json = safeJSON(text);
   if (!json) throw new Error(`kie.ai (${res.status}): ${text.slice(0, 200)}`);
   const code = Number(json.code ?? res.status);

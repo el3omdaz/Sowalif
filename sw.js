@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v9';
-const SHELL = ['./', 'index.html', 'style.css?v=9', 'js/app.js?v=9', 'js/db.js?v=9', 'js/kie.js?v=9', 'js/chat.js?v=9', 'js/models.js?v=9', 'js/openrouter.js?v=9', 'js/memory.js?v=9', 'js/piapi.js?v=9', 'js/media.js?v=9', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v12';
+const SHELL = ['./', 'index.html', 'style.css?v=12', 'js/app.js?v=12', 'js/media-push.js?v=12', 'js/project.js?v=12', 'js/db.js?v=12', 'js/kie.js?v=12', 'js/chat.js?v=12', 'js/models.js?v=12', 'js/openrouter.js?v=12', 'js/memory.js?v=12', 'js/piapi.js?v=12', 'js/media.js?v=12', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -22,8 +22,20 @@ self.addEventListener('notificationclick', (e) => {
   }));
 });
 
+self.addEventListener('push', (e) => {
+  let payload;
+  try { payload = e.data?.json(); } catch {}
+  e.waitUntil(self.registration.showNotification('سوالف', {
+    body: payload?.outcome === 'failed' ? 'تعذّر إكمال مهمة التوليد.' : 'اكتملت مهمة التوليد.',
+    icon: new URL('icon-192.png', self.registration.scope).href,
+    tag: payload?.tag,
+    data: { chatId: payload?.chatId },
+  }));
+});
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  if (url.pathname.startsWith('/api/media-push/')) return;
   // طلبات kie.ai وغيرها تمر مباشرة بدون حفظ
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(

@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <div id="app" class="app">
@@ -39,7 +39,12 @@
         <button type="button" data-mode="chat" aria-pressed="true">الشات</button>
         <button type="button" data-mode="image" aria-pressed="false">الصور</button>
         <button type="button" data-mode="video" aria-pressed="false">الفيديو</button>
+        <button type="button" data-mode="work" aria-pressed="false">الشغل</button>
       </nav>
+      <div id="projectBar" class="project-bar hidden">
+        <span id="projectCount">مشروع جديد</span>
+        <button id="openProject" class="btn ghost" type="button">ملفات المشروع</button>
+      </div>
 
       <section id="messages" class="messages" aria-label="المحادثة">
         <div id="empty" class="empty">
@@ -66,7 +71,7 @@
           <div id="voiceCapture" class="voice-capture hidden" role="group" aria-label="تسجيل صوتي">
             <button id="voiceCancel" class="icon-btn" aria-label="إلغاء التسجيل والتحويل">✕</button>
             <div class="voice-center"><div id="voiceWave" class="voice-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><span id="voiceLabel" role="status">تكلم…</span></div>
-            <button id="voiceAccept" class="send" aria-label="اعتماد التسجيل وتحويله لنص">✓</button>
+            <button id="voiceAccept" class="send" aria-label="إيقاف التسجيل">■</button>
           </div>
           <textarea id="input" aria-label="رسالتك" dir="auto" rows="1" placeholder="اكتب رسالتك…" enterkeyhint="send"></textarea>
           <div class="tools">
@@ -105,107 +110,163 @@
     </div>
   </div>
 
+  <div id="projectSheet" class="sheet hidden">
+    <div class="sheet-card project-card" role="dialog" aria-modal="true" aria-labelledby="projectTitle">
+      <div class="sheet-head"><h3 id="projectTitle">ملفات المشروع</h3><button class="icon-btn" data-close aria-label="إغلاق">✕</button></div>
+      <p class="muted">الملفات تُحفظ على جهازك وتُرسل للمزوّد عند طلب مساعدة في المشروع. اختر ملفات المصدر فقط.</p>
+      <div class="project-actions">
+        <label class="btn ghost">استيراد ملفات<input id="projectImport" type="file" multiple hidden></label>
+        <label class="btn ghost">استيراد مجلد<input id="projectFolder" type="file" webkitdirectory multiple hidden></label>
+        <button id="projectExport" class="btn ghost" type="button">تنزيل ZIP</button>
+      </div>
+      <div class="project-editor">
+        <label for="projectFiles">الملفات المحفوظة</label>
+        <select id="projectFiles" dir="ltr"></select>
+        <label for="projectPath">مسار الملف</label>
+        <input id="projectPath" type="text" dir="ltr" placeholder="index.html" spellcheck="false" maxlength="180">
+        <label for="projectCode">محتوى الملف</label>
+        <textarea id="projectCode" dir="ltr" rows="12" spellcheck="false"></textarea>
+        <div class="project-actions">
+          <button id="projectSave" class="btn primary" type="button">حفظ الملف</button>
+          <button id="projectPreview" class="btn ghost" type="button">معاينة HTML مستقل</button>
+          <button id="projectRemove" class="btn ghost" type="button">حذف الملف</button>
+        </div>
+      </div>
+      <p id="projectStatus" class="muted" role="status"></p>
+      <iframe id="projectFrame" class="project-frame hidden" title="معاينة المشروع" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+    </div>
+  </div>
+
   <!-- الإعدادات -->
   <div id="settingsSheet" class="sheet hidden">
     <div class="sheet-card">
       <div class="sheet-head"><h3>الإعدادات</h3><button class="icon-btn" data-close>✕</button></div>
       <div class="settings">
-        <label class="check-row"><input type="checkbox" id="completionNotifications"> إشعار عند اكتمال المهمة أو الرد</label>
-        <p>يظهر الإشعار إذا وصل الرد أثناء استخدام تطبيق آخر وكان المتصفح ما زال يشغّل سوالف.</p>
-        <section>
-          <details id="personalizationPanel" class="personalization-panel">
-            <summary>تعليمات خاصة وذاكرة مشتركة</summary>
-            <p class="muted">تُحفظ على هذا الجهاز وتُستخدم مع كل النماذج والمزوّدين. عند سؤالك يُرسل السياق المناسب للمزوّد المختار؛ لا توجد مزامنة تلقائية بين الأجهزة.</p>
-            <label for="customInstructions">تعليماتك الخاصة</label>
-            <textarea id="customInstructions" rows="4" maxlength="8000" placeholder="مثلاً: رد باللهجة الكويتية، اختصر، واذكر مصادر الأخبار."></textarea>
-            <label for="personalNotes">معلومات تتذكرها النماذج عنك</label>
-            <textarea id="personalNotes" rows="4" maxlength="12000" placeholder="اكتب معلوماتك وتفضيلاتك هنا، أو قل في المحادثة: تذكر أن…"></textarea>
-            <label class="check-row"><input id="memoryEnabled" type="checkbox" checked> استخدام الذاكرة والربط بين محادثات هذا الجهاز</label>
-            <p class="muted">يسترجع مقاطع نصية مرتبطة بسؤالك من المحادثات السابقة، بدون رفع الملفات القديمة. تستطيع مراجعة مصادر السياق تحت الرد. تعليماتك الخاصة تطبّق حتى لو عطّلت الذاكرة.</p>
-            <button id="savePersonalization" class="btn primary">حفظ التعليمات والذاكرة</button>
-            <p id="personalizationMsg" class="muted" role="status"></p>
-            <h4>اختصاراتك المحفوظة</h4>
-            <p class="muted">تعمل عندما ترسل الكلمة وحدها في أي محادثة، حتى لو غيّرت النموذج. مثال: «ذهب» ← آخر أخبار الذهب وتأثير الدولار والعوائد. تقدر تقول أيضاً: متى ما قلت كلمة ذهب، جيب لي آخر أخباره.</p>
-            <label for="memoryTrigger">الكلمة أو العبارة</label>
-            <input id="memoryTrigger" type="text" maxlength="80" placeholder="ذهب">
-            <label for="memoryAction">الطلب المرتبط بها</label>
-            <textarea id="memoryAction" rows="3" maxlength="1500" placeholder="ابحث عن آخر أخبار الذهب، ولخّص تأثير الدولار والعوائد مع المصادر."></textarea>
-            <label class="check-row"><input id="memorySearch" type="checkbox" checked> تفعيل البحث عند استخدام الاختصار</label>
-            <div class="row"><button id="saveMemoryRule" class="btn ghost">حفظ الاختصار</button><button id="cancelMemoryEdit" class="btn ghost hidden">إلغاء التعديل</button></div>
-            <p id="memoryRuleMsg" class="muted" role="status"></p>
-            <div id="memoryRules" class="memory-rules"></div>
-            <button id="clearSavedMemory" class="btn danger">مسح الملاحظات والاختصارات</button>
-            <p class="muted">المسح لا يحذف المحادثات السابقة. لإيقاف الاسترجاع منها عطّل خيار الربط واحفظ.</p>
-          </details>
-        </section>
-        <section>
-          <h4>وضوح النص</h4>
-          <label for="chatFontSize">حجم خط المحادثة</label>
-          <select id="chatFontSize"><option value="16">مدمج — 16</option><option value="17" selected>عادي — 17</option><option value="18">أكبر — 18</option><option value="20">كبير — 20</option></select>
-          <p class="font-preview">نص واضح ومريح للقراءة. <strong>وهذا مثال للنص العريض.</strong></p>
-        </section>
-        <section>
-          <h4>مزوّد الخدمة</h4>
-          <select id="providerSelect" aria-label="مزوّد الخدمة"><option value="kie">kie.ai</option><option value="openrouter">OpenRouter</option></select>
-          <p class="muted">المفتاح منفصل لكل مزوّد. عند الإرسال تذهب المحادثة والمرفقات للمزوّد المختار. يُحفظ المفتاح على هذا الجهاز فقط، ولا يُرفع إلى GitHub.</p>
-        </section>
-        <section>
-          <h4 id="keyTitle">مفتاح kie.ai</h4>
-          <p id="keyHelp" class="muted"></p>
-          <div class="row"><input id="keyInput" type="password" aria-label="مفتاح المزوّد" autocomplete="off" spellcheck="false" placeholder="الصق المفتاح هنا"><button id="saveKey" class="btn primary">حفظ</button></div>
-          <div class="row"><span id="keyNow" class="muted"></span><button id="checkKey" class="btn ghost">فحص المفتاح</button></div>
-          <p id="keyMsg" class="muted"></p>
-        </section>
-        <section>
-          <h4>مزوّد الصور والفيديو</h4>
-          <select id="mediaProvider" aria-label="مزوّد الصور والفيديو"><option value="auto">تلقائي — PiAPI إن توفر مفتاحه، وإلا kie.ai</option><option value="piapi">PiAPI</option><option value="kie">kie.ai</option></select>
-          <p class="muted">اختيار مستقل عن المحادثة؛ يمكنك استخدام OpenRouter للدردشة وkie.ai أو PiAPI للوسائط. لا يغيّر التطبيق المزوّد بعد إرسال مهمة لتجنب تكرار التكلفة.</p>
-          <label for="mediaKieKey">مفتاح kie.ai للصور والفيديو</label><input id="mediaKieKey" type="password" dir="ltr" autocomplete="off" placeholder="الصق مفتاح kie.ai هنا">
-          <div class="row"><button id="saveMediaKie" class="btn ghost">حفظ مفتاح kie.ai</button><button id="forgetMediaKie" class="btn ghost">مسح مفتاح kie.ai</button></div>
-          <p id="mediaKieKeyState" class="muted" role="status"></p>
-          <label for="kieImageModel">نموذج الصور · kie.ai</label><select id="kieImageModel"><option value="auto">تلقائي — Nano Banana 2.1</option><option value="nano-banana-2-1">Nano Banana 2.1</option><option value="nano-banana-pro">Nano Banana Pro</option></select>
-          <label for="kieVideoModel">نموذج الفيديو · kie.ai</label><select id="kieVideoModel"><option value="auto">تلقائي — Kling 2.6</option><option value="kling-2.6">Kling 2.6 — نص أو صورة إلى فيديو</option><option value="wan-2.6">Wan 2.6 — صورة إلى فيديو مع صوت</option></select>
-          <p class="muted">مفتاح kie.ai مشترك مع إعدادات محادثة kie.ai. يدعم رفع الصورة المحلية للرسم والتحريك. Kling بدون صوت؛ Wan يولّد الصوت أيضاً.</p>
-          <h4>PiAPI</h4>
-          <p class="muted">مستقل عن مزوّد المحادثة ويعمل مع OpenRouter وkie.ai. اكتب «ارسم صورة…» أو «سوي فيديو…»، أو استخدم أزرار صورة وفيديو. لتحريك صورة أرفقها واكتب وصف الحركة. تُحسب الوسائط على رصيد PiAPI.</p>
-          <label for="piapiKey">مفتاح PiAPI</label>
-          <input id="piapiKey" type="password" dir="ltr" autocomplete="off" placeholder="الصق مفتاح PiAPI هنا">
-          <div class="row"><button id="savePiapi" class="btn ghost">حفظ مفتاح PiAPI</button><button id="forgetPiapi" class="btn ghost">مسح مفتاح PiAPI</button></div>
-          <p id="piapiKeyState" class="muted" role="status"></p>
-          <label for="piapiImageModel">نموذج الصور</label><select id="piapiImageModel"></select>
-          <label for="piapiVideoModel">نموذج الفيديو وتحريك الصور</label><select id="piapiVideoModel"></select>
-          <label for="piapiDuration">مدة الفيديو · للمزوّدين (Framepack ثابت 10 ثوانٍ)</label><select id="piapiDuration"><option value="5">5 ثوانٍ</option><option value="10">10 ثوانٍ</option></select>
-          <p class="muted">التلقائي يستخدم Flux Schnell للرسم وKling 2.6 للفيديو من النص، وFramepack لتحريك صورة (10 ثوانٍ، بدون صوت). يتم استخدام آخر صورة مرفقة واحدة. Kling وKontext يحتاجان رابط صورة عام؛ ضعه في خانة المرجع بعد تفعيل وضع الصورة أو الفيديو. خدمة رفع PiAPI لا تدعم المتصفح حالياً؛ Framepack يستقبل الصورة المحلية مباشرة. روابط الفيديو مؤقتة؛ احفظ النتيجة بعد اكتمالها. المفتاح محفوظ على هذا الجهاز ولا يدخل في النسخة الاحتياطية. <a href="https://app.piapi.ai" target="_blank" rel="noopener noreferrer">حساب PiAPI</a></p>
-        </section>
-        <section>
-          <h4>فحص بطء الرد</h4>
-          <p id="diagnoseHelp" class="muted">يفحص النموذج الحالي وGemini Flash عبر المزوّد المختار. يرسل عبارة اختبار قصيرة لكل نموذج بدون محادثاتك أو ملفاتك، وتُحسب الطلبات على رصيد المزوّد.</p>
-          <div class="row"><button id="diagnoseBtn" class="btn ghost">فحص الاتصال والنماذج</button><button id="cancelDiagnosis" class="btn ghost hidden">إلغاء</button></div>
-          <pre id="diagnosisReport" class="diagnosis-report" dir="auto" role="status"></pre>
-          <button id="copyDiagnosis" class="btn ghost hidden">نسخ نتيجة الفحص</button>
-        </section>
-        <section>
-          <h4>النموذج التلقائي</h4>
-          <select id="defaultModel"></select>
-          <button id="refreshModels" class="btn ghost hidden">تحديث نماذج OpenRouter</button>
-          <p id="catalogMsg" class="muted"></p>
-        </section>
-        <section>
-          <h4>الإملاء الصوتي</h4>
-          <select id="speechMode" aria-label="طريقة تحويل الصوت"><option value="record">تسجيل واعتماد — ثم إدراج النص</option><option value="live">إملاء المتصفح — النص أثناء الكلام</option></select>
-          <p class="muted">التسجيل ثم التحويل يستخدم المزوّد المختار، ويُدرج النص قبل الإرسال. إملاء المتصفح الاختياري قد يرسل الصوت لخدمة التعرف على الكلام الخاصة بالمتصفح.</p>
-        </section>
-        <section>
-          <h4>📱 على الآيفون</h4>
-          <p class="muted">افتح الرابط في Safari ← زر المشاركة ⬆️ ← «إضافة إلى الشاشة الرئيسية». يصير تطبيق مستقل، ومحادثاته محفوظة في الآيفون.</p>
-        </section>
-        <section>
-          <h4>نقل المحادثات بين الأجهزة</h4>
-          <p class="muted">كل جهاز يحفظ محادثاته. صدّر نسخة من جهاز واستوردها في الثاني (أو احتفظ فيها كنسخة احتياطية).</p>
-          <div class="row"><button id="exportBtn" class="btn ghost">⬇️ تصدير</button><label class="btn ghost">⬆️ استيراد<input id="importInput" type="file" accept=".json,application/json" hidden></label></div>
-          <p id="backupMsg" class="muted"></p>
-        </section>
-        <section><button id="forgetKey" class="btn danger wide">مسح المفتاح من هذا الجهاز</button></section>
+        <details class="settings-group" name="settings-sections" data-settings="models">
+          <summary><span><strong>المزوّد والنماذج</strong><small>مفاتيح الشات واختيار النموذج وفحص الاتصال</small></span></summary>
+          <div class="settings-body">
+            <section>
+              <h4>مزوّد الخدمة</h4>
+              <select id="providerSelect" aria-label="مزوّد الخدمة"><option value="kie">kie.ai</option><option value="openrouter">OpenRouter</option></select>
+              <p class="muted">المفتاح منفصل لكل مزوّد. عند الإرسال تذهب المحادثة والمرفقات للمزوّد المختار. يُحفظ المفتاح على هذا الجهاز فقط، ولا يُرفع إلى GitHub.</p>
+            </section>
+            <section>
+              <h4 id="keyTitle">مفتاح kie.ai</h4>
+              <p id="keyHelp" class="muted"></p>
+              <div class="row"><input id="keyInput" type="password" aria-label="مفتاح المزوّد" autocomplete="off" spellcheck="false" placeholder="الصق المفتاح هنا"><button id="saveKey" class="btn primary">حفظ</button></div>
+              <div class="row"><span id="keyNow" class="muted"></span><button id="checkKey" class="btn ghost">فحص المفتاح</button></div>
+              <p id="keyMsg" class="muted"></p>
+            </section>
+            <section>
+              <h4>النموذج التلقائي</h4>
+              <select id="defaultModel"></select>
+              <button id="refreshModels" class="btn ghost hidden">تحديث نماذج OpenRouter</button>
+              <p id="catalogMsg" class="muted"></p>
+            </section>
+            <section>
+              <h4>فحص بطء الرد</h4>
+              <p id="diagnoseHelp" class="muted">يفحص النموذج الحالي وGemini Flash عبر المزوّد المختار. يرسل عبارة اختبار قصيرة لكل نموذج بدون محادثاتك أو ملفاتك، وتُحسب الطلبات على رصيد المزوّد.</p>
+              <div class="row"><button id="diagnoseBtn" class="btn ghost">فحص الاتصال والنماذج</button><button id="cancelDiagnosis" class="btn ghost hidden">إلغاء</button></div>
+              <pre id="diagnosisReport" class="diagnosis-report" dir="auto" role="status"></pre>
+              <button id="copyDiagnosis" class="btn ghost hidden">نسخ نتيجة الفحص</button>
+            </section>
+            <section><button id="forgetKey" class="btn danger wide">مسح المفتاح من هذا الجهاز</button></section>
+          </div>
+        </details>
+        <details class="settings-group" name="settings-sections" data-settings="media">
+          <summary><span><strong>الصور والفيديو</strong><small>مزوّدو التوليد ومفاتيحهم والنماذج والمدة</small></span></summary>
+          <div class="settings-body">
+            <section>
+              <h4>مزوّد الصور والفيديو</h4>
+              <select id="mediaProvider" aria-label="مزوّد الصور والفيديو"><option value="auto">تلقائي — PiAPI إن توفر مفتاحه، وإلا kie.ai</option><option value="piapi">PiAPI</option><option value="kie">kie.ai</option></select>
+              <p class="muted">اختيار مستقل عن المحادثة؛ يمكنك استخدام OpenRouter للدردشة وkie.ai أو PiAPI للوسائط. لا يغيّر التطبيق المزوّد بعد إرسال مهمة لتجنب تكرار التكلفة.</p>
+              <label for="mediaKieKey">مفتاح kie.ai للصور والفيديو</label><input id="mediaKieKey" type="password" dir="ltr" autocomplete="off" placeholder="الصق مفتاح kie.ai هنا">
+              <div class="row"><button id="saveMediaKie" class="btn ghost">حفظ مفتاح kie.ai</button><button id="forgetMediaKie" class="btn ghost">مسح مفتاح kie.ai</button></div>
+              <p id="mediaKieKeyState" class="muted" role="status"></p>
+              <label for="kieImageModel">نموذج الصور · kie.ai</label><select id="kieImageModel"><option value="auto">تلقائي — Nano Banana 2.1</option><option value="nano-banana-2-1">Nano Banana 2.1</option><option value="nano-banana-pro">Nano Banana Pro</option></select>
+              <label for="kieVideoModel">نموذج الفيديو · kie.ai</label><select id="kieVideoModel"><option value="auto">تلقائي — Kling 2.6</option><option value="kling-2.6">Kling 2.6 — نص أو صورة إلى فيديو</option><option value="wan-2.6">Wan 2.6 — صورة إلى فيديو مع صوت</option></select>
+              <p class="muted">مفتاح kie.ai مشترك مع إعدادات محادثة kie.ai. يدعم رفع الصورة المحلية للرسم والتحريك. Kling بدون صوت؛ Wan يولّد الصوت أيضاً.</p>
+              <h4>PiAPI</h4>
+              <p class="muted">مستقل عن مزوّد المحادثة ويعمل مع OpenRouter وkie.ai. اكتب «ارسم صورة…» أو «سوي فيديو…»، أو استخدم أزرار صورة وفيديو. لتحريك صورة أرفقها واكتب وصف الحركة. تُحسب الوسائط على رصيد PiAPI.</p>
+              <label for="piapiKey">مفتاح PiAPI</label>
+              <input id="piapiKey" type="password" dir="ltr" autocomplete="off" placeholder="الصق مفتاح PiAPI هنا">
+              <div class="row"><button id="savePiapi" class="btn ghost">حفظ مفتاح PiAPI</button><button id="forgetPiapi" class="btn ghost">مسح مفتاح PiAPI</button></div>
+              <p id="piapiKeyState" class="muted" role="status"></p>
+              <label for="piapiImageModel">نموذج الصور</label><select id="piapiImageModel"></select>
+              <label for="piapiVideoModel">نموذج الفيديو وتحريك الصور</label><select id="piapiVideoModel"></select>
+              <label for="piapiDuration">مدة الفيديو · للمزوّدين (Framepack ثابت 10 ثوانٍ)</label><select id="piapiDuration"><option value="5">5 ثوانٍ</option><option value="10">10 ثوانٍ</option></select>
+              <p class="muted">التلقائي يستخدم Flux Schnell للرسم وKling 2.6 للفيديو من النص، وFramepack لتحريك صورة (10 ثوانٍ، بدون صوت). يتم استخدام آخر صورة مرفقة واحدة. Kling وKontext يحتاجان رابط صورة عام؛ ضعه في خانة المرجع بعد تفعيل وضع الصورة أو الفيديو. خدمة رفع PiAPI لا تدعم المتصفح حالياً؛ Framepack يستقبل الصورة المحلية مباشرة. روابط الفيديو مؤقتة؛ احفظ النتيجة بعد اكتمالها. المفتاح محفوظ على هذا الجهاز ولا يدخل في النسخة الاحتياطية. <a href="https://app.piapi.ai" target="_blank" rel="noopener noreferrer">حساب PiAPI</a></p>
+            </section>
+          </div>
+        </details>
+        <details class="settings-group" name="settings-sections" data-settings="preferences">
+          <summary><span><strong>العرض والصوت</strong><small>حجم الخط وطريقة الإملاء</small></span></summary>
+          <div class="settings-body">
+            <section>
+              <h4>وضوح النص</h4>
+              <label for="chatFontSize">حجم خط المحادثة</label>
+              <select id="chatFontSize"><option value="16">مدمج — 16</option><option value="17" selected>عادي — 17</option><option value="18">أكبر — 18</option><option value="20">كبير — 20</option></select>
+              <p class="font-preview">نص واضح ومريح للقراءة. <strong>وهذا مثال للنص العريض.</strong></p>
+            </section>
+            <section>
+              <h4>الإملاء الصوتي</h4>
+              <select id="speechMode" aria-label="طريقة تحويل الصوت"><option value="record">تسجيل — يتحوّل إلى نص عند الإيقاف</option><option value="live">إملاء المتصفح — النص أثناء الكلام</option></select>
+              <p class="muted">التسجيل ثم التحويل يستخدم المزوّد المختار، ويُدرج النص قبل الإرسال. إملاء المتصفح الاختياري قد يرسل الصوت لخدمة التعرف على الكلام الخاصة بالمتصفح.</p>
+            </section>
+          </div>
+        </details>
+        <details class="settings-group" name="settings-sections" data-settings="notifications">
+          <summary><span><strong>الإشعارات والآيفون</strong><small>إشعارات الاكتمال وإضافة سوالف للشاشة الرئيسية</small></span></summary>
+          <div class="settings-body">
+            <section>
+              <label class="check-row"><input type="checkbox" id="completionNotifications"> إشعار عند اكتمال المهمة أو الرد</label>
+              <p class="muted">إشعارات الصور والفيديو أثناء تعليق التطبيق تعتمد على تفعيل خدمة الإشعارات الخلفية.</p>
+            </section>
+            <section>
+              <h4>📱 على الآيفون</h4>
+              <p class="muted">افتح الرابط في Safari ← زر المشاركة ⬆️ ← «إضافة إلى الشاشة الرئيسية». يصير تطبيق مستقل، ومحادثاته محفوظة في الآيفون.</p>
+            </section>
+          </div>
+        </details>
+        <details class="settings-group" name="settings-sections" data-settings="memory">
+          <summary><span><strong>التعليمات والذاكرة</strong><small>تفضيلاتك والربط بين المحادثات والاختصارات</small></span></summary>
+          <div class="settings-body">
+            <section class="personalization-panel">
+              <p class="muted">تُحفظ على هذا الجهاز وتُستخدم مع كل النماذج والمزوّدين. عند سؤالك يُرسل السياق المناسب للمزوّد المختار؛ لا توجد مزامنة تلقائية بين الأجهزة.</p>
+              <label for="customInstructions">تعليماتك الخاصة</label>
+              <textarea id="customInstructions" rows="4" maxlength="8000" placeholder="مثلاً: رد باللهجة الكويتية، اختصر، واذكر مصادر الأخبار."></textarea>
+              <label for="personalNotes">معلومات تتذكرها النماذج عنك</label>
+              <textarea id="personalNotes" rows="4" maxlength="12000" placeholder="اكتب معلوماتك وتفضيلاتك هنا، أو قل في المحادثة: تذكر أن…"></textarea>
+              <label class="check-row"><input id="memoryEnabled" type="checkbox" checked> استخدام الذاكرة والربط بين محادثات هذا الجهاز</label>
+              <p class="muted">يسترجع مقاطع نصية مرتبطة بسؤالك من المحادثات السابقة، بدون رفع الملفات القديمة. تستطيع مراجعة مصادر السياق تحت الرد. تعليماتك الخاصة تطبّق حتى لو عطّلت الذاكرة.</p>
+              <button id="savePersonalization" class="btn primary">حفظ التعليمات والذاكرة</button>
+              <p id="personalizationMsg" class="muted" role="status"></p>
+              <h4>اختصاراتك المحفوظة</h4>
+              <p class="muted">تعمل عندما ترسل الكلمة وحدها في أي محادثة، حتى لو غيّرت النموذج. مثال: «ذهب» ← آخر أخبار الذهب وتأثير الدولار والعوائد. تقدر تقول أيضاً: متى ما قلت كلمة ذهب، جيب لي آخر أخباره.</p>
+              <label for="memoryTrigger">الكلمة أو العبارة</label>
+              <input id="memoryTrigger" type="text" maxlength="80" placeholder="ذهب">
+              <label for="memoryAction">الطلب المرتبط بها</label>
+              <textarea id="memoryAction" rows="3" maxlength="1500" placeholder="ابحث عن آخر أخبار الذهب، ولخّص تأثير الدولار والعوائد مع المصادر."></textarea>
+              <label class="check-row"><input id="memorySearch" type="checkbox" checked> تفعيل البحث عند استخدام الاختصار</label>
+              <div class="row"><button id="saveMemoryRule" class="btn ghost">حفظ الاختصار</button><button id="cancelMemoryEdit" class="btn ghost hidden">إلغاء التعديل</button></div>
+              <p id="memoryRuleMsg" class="muted" role="status"></p>
+              <div id="memoryRules" class="memory-rules"></div>
+              <button id="clearSavedMemory" class="btn danger">مسح الملاحظات والاختصارات</button>
+              <p class="muted">المسح لا يحذف المحادثات السابقة. لإيقاف الاسترجاع منها عطّل خيار الربط واحفظ.</p>
+            </section>
+          </div>
+        </details>
+        <details class="settings-group" name="settings-sections" data-settings="backup">
+          <summary><span><strong>النسخ الاحتياطي</strong><small>تصدير واستيراد المحادثات والمشاريع</small></span></summary>
+          <div class="settings-body">
+            <section>
+              <h4>نقل المحادثات بين الأجهزة</h4>
+              <p class="muted">كل جهاز يحفظ محادثاته. صدّر نسخة من جهاز واستوردها في الثاني (أو احتفظ فيها كنسخة احتياطية).</p>
+              <div class="row"><button id="exportBtn" class="btn ghost">⬇️ تصدير</button><label class="btn ghost">⬆️ استيراد<input id="importInput" type="file" accept=".json,application/json" hidden></label></div>
+              <p id="backupMsg" class="muted"></p>
+            </section>
+          </div>
+        </details>
       </div>
     </div>
   </div>
@@ -214,6 +275,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=9"></script>
+  <script type="module" src="js/app.js?v=12"></script>
 </body>
 </html>

@@ -44,14 +44,40 @@ export const getChat = (id) => tx('chats', 'readonly', (s) => s.get(id));
 // النصوص فقط للاسترجاع المحلي؛ لا نعيد المرفقات أو مفاتيح المزوّدين.
 export async function recallChats() {
   const all = await tx('chats', 'readonly', (s) => s.getAll());
-  return all.filter(c => !['image', 'video'].includes(c.mode)).map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: (c.messages || []).filter((m) => !m.error && ['user', 'assistant'].includes(m.role)).map((m) => ({ role: m.role, text: String(m.text || ''), at: m.at })) }));
+  return all.filter(c => !['image', 'video', 'work'].includes(c.mode)).map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: (c.messages || []).filter((m) => !m.error && ['user', 'assistant'].includes(m.role)).map((m) => ({ role: m.role, text: String(m.text || ''), at: m.at })) }));
 }
 
-export async function saveChat(chat, touch = true) {
+export async function saveChat(chat, touch = true, preserveProject = chat.mode === 'work') {
   if (touch) chat.updatedAt = Date.now();
   // نخزن نسخة نظيفة بدون عناصر مؤقتة للواجهة
-  await tx('chats', 'readwrite', (s) => s.put(JSON.parse(JSON.stringify(chat))));
+  const snapshot = JSON.parse(JSON.stringify(chat));
+  await tx('chats', 'readwrite', (s) => {
+    if (!preserveProject) return s.put(snapshot);
+    const current = s.get(chat.id);
+    current.onsuccess = () => {
+      if ((current.result?.project?.revision || 0) > (snapshot.project?.revision || 0)) {
+        snapshot.project = current.result.project;
+      }
+      s.put(snapshot);
+    };
+  });
+  if (snapshot.project) chat.project = snapshot.project;
   return chat;
+}
+
+export async function saveProject(chat, project) {
+  const updatedAt = Date.now();
+  let saved = false;
+  await tx('chats', 'readwrite', (s) => {
+    const current = s.get(chat.id);
+    current.onsuccess = () => {
+      if ((current.result?.project?.revision || 0) !== project.revision - 1) return;
+      s.put({ ...(current.result || chat), project, updatedAt });
+      saved = true;
+    };
+  });
+  if (!saved) throw new Error('تغيّرت ملفات المشروع في نافذة ثانية. افتح المشروع من جديد.');
+  Object.assign(chat, { project, updatedAt });
 }
 
 export function newChat(model) {
@@ -117,7 +143,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=9');
+  const { readPersonalization } = await import('./memory.js?v=12');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -139,12 +165,12 @@ export async function importAll(file) {
   for (const c of data.chats || []) {
     const old = await getChat(c.id);
     if (!old || (old.updatedAt || 0) <= (c.updatedAt || 0)) {
-      await saveChat(c, false);
+      await saveChat(c, false, false);
       n++;
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=9');
+    const { mergePersonalization } = await import('./memory.js?v=12');
     mergePersonalization(data.personalization);
   }
   return n;

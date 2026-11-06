@@ -1,24 +1,26 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=9';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=9';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=9';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=9';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=9';
-import { mediaProvider } from './media.js?v=9';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=9';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=9';
+import * as db from './db.js?v=12';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=12';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=12';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=12';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=12';
+import { mediaProvider } from './media.js?v=12';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=12';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=12';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=12';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=12';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 async function notifyCompletion(chat, reply) {
   if (!document.hidden || !db.settings.get('completionNotifications', false) ||
-      globalThis.Notification?.permission !== 'granted' || !reply || reply.error || reply.stopped) return;
+      globalThis.Notification?.permission !== 'granted' || !reply || reply.error || reply.stopped || reply.mediaTask?.push) return;
   try {
     const registration = await navigator.serviceWorker.getRegistration();
     await registration?.showNotification('سوالف', {
       body: reply.mediaTask ? 'اكتملت مهمة التوليد.' : 'رد المحادثة جاهز.',
-      icon: 'icon-192.png',
+      icon: new URL('icon-192.png', registration.scope).href,
       tag: `${chat.id}-${reply.at}`,
       data: { chatId: chat.id },
     });
@@ -67,7 +69,7 @@ async function boot() {
   if (id && S.chats.some((c) => c.id === id)) await openChat(id);
   else newChat();
   if (!db.settings.get(keySetting(S.provider), '')) {
-    openSettings();
+    openSettings('models');
     toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} عشان تبدأ`, 4000);
   }
 }
@@ -82,6 +84,7 @@ function renderModelName() {
     chat: `${m.name} — ${m.tagline}`,
     image: 'اكتب وصفاً للرسم أو أرفق صورة وقل شنو تبي تغيّر فيها.',
     video: 'صف الفيديو أو أرفق صورة لتحريكها. تعديلات الفيديو تستخدم Seedance 2.5 مع PiAPI.',
+    work: 'صف تطبيقًا جديدًا أو استورد ملفات مشروعك واطلب تعديلها.',
   }[S.mode];
 }
 
@@ -112,7 +115,7 @@ function renderChatList() {
     last = g;
     html += `<div class="chat-item${c.id === S.chat?.id ? ' active' : ''}" data-id="${c.id}"><a href="#${c.id}">${esc(c.title)}</a><button class="icon-btn more" data-more="${c.id}" aria-label="خيارات">⋯</button></div>`;
   }
-  $('#chatList').innerHTML = html || '<p class="muted" style="padding:8px">لا توجد محادثات بعد</p>';
+  $('#chatList').innerHTML = html || `<p class="muted" style="padding:8px">${S.mode === 'work' ? 'لا توجد مشاريع بعد' : 'لا توجد محادثات بعد'}</p>`;
 }
 
 $('#search').addEventListener('input', renderChatList);
@@ -141,11 +144,12 @@ function chatMenu(id, anchor) {
   menu.style.left = `${Math.max(8, r.left)}px`;
   setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
   menu.addEventListener('click', async (e) => {
+    if (projectSaving || S.controller) return;
     const a = e.target.dataset.a;
     const chat = await db.getChat(id);
     if (!chat) return;
     if (a === 'rename') {
-      const title = prompt('اسم المحادثة', chat.title)?.trim();
+      const title = prompt(chat.mode === 'work' ? 'اسم المشروع' : 'اسم المحادثة', chat.title)?.trim();
       if (title) await db.saveChat(Object.assign(chat, { title: title.slice(0, 80) }), false);
     } else if (a === 'pin') await db.saveChat(Object.assign(chat, { pinned: !chat.pinned }), false);
     else if (a === 'del') {
@@ -163,7 +167,9 @@ $('#menuBtn').onclick = () => $('#app').classList.add('side-open');
 $('#scrim').onclick = closeSide;
 
 // ---------- المحادثة ----------
-const modeOf = chat => ['image', 'video'].includes(chat?.mode) ? chat.mode : 'chat';
+const modeOf = chat => ['image', 'video', 'work'].includes(chat?.mode) ? chat.mode : 'chat';
+const isMediaWorkspace = () => ['image', 'video'].includes(S.mode);
+let projectSaving = false;
 
 function applyWorkspace(mode) {
   S.mode = mode;
@@ -172,9 +178,14 @@ function applyWorkspace(mode) {
   for (const button of document.querySelectorAll('#workspaceTabs button')) {
     button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
   }
-  $('#emptyTitle').textContent = { chat: 'شلون أقدر أساعدك؟', image: 'شنو تبي ترسم؟', video: 'شنو الفيديو اللي تبيه؟' }[mode];
+  $('#emptyTitle').textContent = { chat: 'شلون أقدر أساعدك؟', image: 'شنو تبي ترسم؟', video: 'شنو الفيديو اللي تبيه؟', work: 'شنو تبي تبني اليوم؟' }[mode];
   $('#chatChips').classList.toggle('hidden', mode !== 'chat');
-  $('#modelBtn').classList.toggle('hidden', mode !== 'chat');
+  $('#modelBtn').classList.toggle('hidden', isMediaWorkspace());
+  $('#projectBar').classList.toggle('hidden', mode !== 'work');
+  $('#newChat').textContent = mode === 'work' ? '＋ مشروع جديد' : '＋ محادثة جديدة';
+  $('#newChatTop').setAttribute('aria-label', mode === 'work' ? 'مشروع جديد' : 'محادثة جديدة');
+  $('#search').placeholder = mode === 'work' ? 'ابحث في المشاريع' : 'ابحث في المحادثات';
+  renderProjectCount();
   $('#mediaReference').value = '';
   $('#videoReference').value = '';
   $('#reuseMedia').checked = true;
@@ -184,7 +195,7 @@ function applyWorkspace(mode) {
 $('#workspaceTabs').onclick = async (e) => {
   const mode = e.target.closest('[data-mode]')?.dataset.mode;
   if (!mode || mode === S.mode) return;
-  if (S.controller || rec || voiceJob || micStarting) return toast('انتظر انتهاء الطلب أو أوقفه قبل تغيير القسم');
+  if (projectSaving || S.controller || rec || voiceJob || micStarting) return toast('انتظر انتهاء الطلب قبل تغيير القسم');
   if (input.value.trim() || S.attachments.length || $('#mediaReference').value || $('#videoReference').value) {
     return toast('أرسل المسودة أو امسحها قبل تغيير القسم');
   }
@@ -194,8 +205,8 @@ $('#workspaceTabs').onclick = async (e) => {
 };
 
 function newChat(mode = S.mode) {
-  if (S.controller) return;
-  if (rec || voiceJob || micStarting) return toast('اعتمد التسجيل أو ألغِه قبل فتح محادثة جديدة');
+  if (S.controller || projectSaving) return;
+  if (rec || voiceJob || micStarting) return toast('أوقف التسجيل أو ألغِه قبل فتح محادثة جديدة');
   S.chat = db.newChat(S.defaultModel);
   S.chat.mode = mode;
   applyWorkspace(mode);
@@ -211,8 +222,8 @@ $('#newChat').onclick = () => newChat();
 $('#newChatTop').onclick = () => newChat();
 
 async function openChat(id) {
-  if (S.controller) return toast('انتظر يخلص الرد');
-  if (rec || voiceJob || micStarting) return toast('اعتمد التسجيل أو ألغِه قبل تغيير المحادثة');
+  if (S.controller || projectSaving) return toast('انتظر يخلص الطلب');
+  if (rec || voiceJob || micStarting) return toast('أوقف التسجيل أو ألغِه قبل تغيير المحادثة');
   const chat = await db.getChat(id);
   if (!chat) return toast('المحادثة غير موجودة');
   S.chat = chat;
@@ -231,23 +242,48 @@ async function openChat(id) {
 
 marked.setOptions({ gfm: true, breaks: true });
 
+let pendingMediaCheck = false;
+
 async function checkPendingMedia() {
   const chat = S.chat;
-  if (document.hidden || !chat || S.controller) return;
+  if (document.hidden || !chat) return;
+  if (S.controller) {
+    pendingMediaCheck = true;
+    return;
+  }
   const reply = chat.messages.findLast(m => m.mediaTask?.id && !m.mediaTask.done && !m.stopped);
   if (!reply || !db.settings.get(reply.mediaTask.provider === 'kie' ? 'kieKey' : 'piapiKey', '')) return;
+  await followMedia(chat, reply);
+}
+
+function finishRequest() {
+  S.controller = null;
+  setStatus('');
+  renderProjectCount();
+  renderMessages();
+  updateSend();
+  if (pendingMediaCheck) {
+    pendingMediaCheck = false;
+    void checkPendingMedia();
+  }
+}
+
+async function followMedia(chat, reply) {
   const controller = new AbortController();
   S.controller = controller;
   updateSend();
   try {
-    await resumeMedia(chat, reply, () => {}, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]), { once: true });
-    if (reply.mediaTask.done) {
-      renderMessages();
-      void notifyCompletion(chat, reply);
+    await resumeMedia(chat, reply, (event, data) => {
+      if (event === 'status') setStatus(data.text);
+    }, controller.signal);
+    if (reply.mediaTask.done && !reply.error) {
+      if (document.hidden) void notifyCompletion(chat, reply);
+      else toast('اكتملت مهمة التوليد.');
     }
+  } catch {
+    toast('تعذّر حفظ نتيجة المهمة. حاول متابعتها مرة ثانية.');
   } finally {
-    S.controller = null;
-    updateSend();
+    finishRequest();
   }
 }
 function md(text) {
@@ -322,6 +358,7 @@ function messageHTML(m, i) {
     ${imgs ? `<div class="gen">${imgs}</div>` : ''}
     ${m.text ? `<div class="bubble md">${md(m.text)}</div>` : ''}
     ${m.error ? `<div class="err-box">⚠️ ${esc(m.error)}</div>` : ''}
+    ${S.mode === 'work' && m.projectProposal ? projectProposalHTML(m.projectProposal) : ''}
     ${m.memoryAction ? `<div class="memory-notice">✓ ${esc(m.memoryAction)}</div>` : ''}
     ${m.recallUnavailable ? '<div class="memory-notice">تعذّر استرجاع المحادثات السابقة في هذا الرد.</div>' : ''}
     ${m.contextSources?.length ? `<details class="context-sources"><summary>سياق من ${m.contextSources.length} محادثة سابقة</summary>${m.contextSources.map((c) => `<a href="#${encodeURIComponent(c.id)}">${esc(c.title)}</a>`).join('')}</details>` : ''}
@@ -370,21 +407,22 @@ $('#messages').addEventListener('click', async (e) => {
   const msgEl = e.target.closest('.msg[data-i]');
   if (!msgEl || !msgEl.dataset.i) return;
   const m = S.chat.messages[Number(msgEl.dataset.i)];
-  if (e.target.closest('[data-copy]')) {
+  if (e.target.closest('[data-apply-project]')) {
+    if (S.controller || projectSaving) return;
+    try {
+      await saveProjectFiles(applyProjectProposal(S.chat.project, m.projectProposal));
+      toast('تم تطبيق التغييرات على المشروع.');
+    } catch (error) {
+      toast(error.message);
+    }
+  } else if (e.target.closest('[data-copy]')) {
     await copy(m.text);
     toast('تم النسخ');
   } else if (e.target.closest('[data-resume-media]')) {
     if (S.controller) return;
     const message = S.chat.messages[Number(e.target.closest('[data-i]').dataset.i)];
     if (!message?.mediaTask?.id) return;
-    const ctrl = new AbortController();
-    S.controller = ctrl;
-    updateSend();
-    try {
-      await resumeMedia(S.chat, message, (event, data) => { if (event === 'status') setStatus(data.text); }, ctrl.signal);
-      if (message.mediaTask.done) void notifyCompletion(S.chat, message);
-    }
-    finally { S.controller = null; setStatus(''); renderMessages(); updateSend(); }
+    await followMedia(S.chat, message);
   } else if (e.target.closest('[data-fast-retry]')) {
     if (S.controller) return;
     S.provider = providerOf(m.model);
@@ -448,7 +486,12 @@ $('#modelList').addEventListener('click', (e) => {
 });
 document.querySelectorAll('.sheet').forEach((s) =>
   s.addEventListener('click', (e) => {
-    if (e.target === s || e.target.closest('[data-close]')) s.classList.add('hidden');
+    if (e.target !== s && !e.target.closest('[data-close]')) return;
+    if (s.id === 'projectSheet') {
+      if (projectSaving || !discardProjectDraft()) return;
+      clearProjectPreview();
+    }
+    s.classList.add('hidden');
   }),
 );
 
@@ -474,10 +517,12 @@ function syncToggles() {
   $('#aspect').classList.toggle('hidden', !media);
   $('#mediaReference').classList.toggle('hidden', !media);
   $('#videoReference').classList.toggle('hidden', S.mode !== 'video');
-  $('#reuseMediaRow').classList.toggle('hidden', S.mode === 'chat');
-  for (const id of ['searchBtn', 'deepBtn', 'imgBtn', 'videoBtn']) $(`#${id}`).classList.toggle('hidden', S.mode !== 'chat');
-  $('#fileInput').accept = S.mode === 'chat' ? 'image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt' : 'image/*';
-  input.placeholder = video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…' : 'اكتب رسالتك…';
+  $('#reuseMediaRow').classList.toggle('hidden', !isMediaWorkspace());
+  for (const id of ['searchBtn', 'deepBtn']) $(`#${id}`).classList.toggle('hidden', isMediaWorkspace());
+  for (const id of ['imgBtn', 'videoBtn']) $(`#${id}`).classList.toggle('hidden', S.mode !== 'chat');
+  $('#fileInput').accept = isMediaWorkspace() ? 'image/*' : 'image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt';
+  input.placeholder = video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…'
+    : S.mode === 'work' ? 'صف التطبيق أو التعديل اللي تبيه…' : 'اكتب رسالتك…';
 }
 $('#searchBtn').onclick = () => {
   S.search = !S.search;
@@ -547,7 +592,7 @@ async function shrinkImage(file) {
 
 async function addFiles(files) {
   for (const file of files) {
-    if (S.mode !== 'chat' && !file.type.startsWith('image/')) {
+    if (isMediaWorkspace() && !file.type.startsWith('image/')) {
       toast('أرفق صورة أو استخدم خانة الرابط للمرجع.');
       continue;
     }
@@ -632,7 +677,8 @@ async function run(opts) {
     frame = 0;
     if (!el.isConnected) return;
     const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
-    bubble.innerHTML = md(text);
+    const visibleText = S.mode === 'work' ? text.split(/^\x60{3}sowalif-project\b/m, 1)[0] : text;
+    bubble.innerHTML = md(visibleText);
     if (stick) box.scrollTop = box.scrollHeight;
   };
   const emit = (ev, d) => {
@@ -657,29 +703,26 @@ async function run(opts) {
     void notifyCompletion(chat, reply);
   } finally {
     if (frame) cancelAnimationFrame(frame);
-    S.controller = null;
-    setStatus('');
-    if (S.chat === chat) renderMessages();
-    updateSend();
+    finishRequest();
     loadChats();
   }
 }
 
 async function send() {
-  if (S.controller) return;
+  if (S.controller || projectSaving) return;
   if (diagnosisController) return toast('انتظر انتهاء فحص الاتصال أو ألغِ الفحص');
   if (rec || voiceJob || mic.classList.contains('busy')) return toast('أوقف الإملاء وانتظر اكتمال النص أولاً');
   const text = input.value.trim();
   if ((!text && !S.attachments.length) || S.attachments.some((a) => a.loading)) return;
-  const mediaKind = S.mode !== 'chat' ? S.mode : S.videoMode ? 'video' : S.imageMode ? 'image' : mediaIntent(text);
+  const mediaKind = isMediaWorkspace() ? S.mode : S.mode === 'chat' && (S.videoMode ? 'video' : S.imageMode ? 'image' : mediaIntent(text));
   if (mediaKind && !text) return toast('اكتب وصف الصورة أو الفيديو');
   const mediaKey = mediaProvider() === 'kie' ? 'kieKey' : 'piapiKey';
   if (mediaKind && !db.settings.get(mediaKey, '')) {
-    openSettings();
+    openSettings('media');
     return toast('أضف مفتاح مزوّد الصور والفيديو المحدد في الإعدادات');
   }
   if (!mediaKind && !db.settings.get(keySetting(S.provider), '')) {
-    openSettings();
+    openSettings('models');
     return toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} أول`);
   }
   const files = S.attachments.map((a) => a.meta);
@@ -687,7 +730,7 @@ async function send() {
   const videoReferenceUrl = S.mode === 'video' ? $('#videoReference').value.trim() : '';
   if (mediaReferenceUrl && !/^https?:\/\//i.test(mediaReferenceUrl)) return toast('استخدم رابط صورة يبدأ بـ https://');
   if (videoReferenceUrl && !/^https?:\/\//i.test(videoReferenceUrl)) return toast('استخدم رابط فيديو يبدأ بـ https://');
-  const reuseMedia = S.mode !== 'chat' && $('#reuseMedia').checked;
+  const reuseMedia = isMediaWorkspace() && $('#reuseMedia').checked;
   S.chat.messages.push({ role: 'user', text, files, ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), ...(videoReferenceUrl ? { videoReferenceUrl } : {}), reuseMedia, at: Date.now() });
   $('#mediaReference').value = '';
   $('#videoReference').value = '';
@@ -708,11 +751,157 @@ async function send() {
 }
 
 async function retry() {
-  if (S.controller) return;
+  if (S.controller || projectSaving) return;
   while (S.chat.messages.at(-1)?.role === 'assistant') S.chat.messages.pop();
   if (!S.chat.messages.length) return;
   await run({ imageMode: false });
 }
+
+// ---------- ملفات الشغل ----------
+const projectFiles = () => S.chat?.project?.files || [];
+const selectedProjectFile = () => projectFiles().find(file => file.path === $('#projectFiles').value);
+
+function renderProjectCount() {
+  $('#projectCount').textContent = projectFiles().length ? `عدد الملفات: ${projectFiles().length}` : 'مشروع جديد';
+}
+
+function projectProposalHTML(proposal) {
+  const current = proposal.revision === (S.chat.project?.revision || 0);
+  if (!current) return '<p class="muted">اقتراح من نسخة سابقة للمشروع.</p>';
+  try { applyProjectProposal(S.chat.project, proposal); } catch { return ''; }
+  const review = proposal.changes.map(({ path, content }) => {
+    const before = projectFiles().find(file => file.path.toLowerCase() === path.toLowerCase());
+    return `<details class="project-change"><summary>${before ? 'تعديل' : 'ملف جديد'} · <bdi>${esc(path)}</bdi></summary>
+      ${before ? `<p>النسخة الحالية</p><pre dir="ltr">${esc(before.content)}</pre>` : ''}
+      <p>النسخة المقترحة</p><pre dir="ltr">${esc(content)}</pre></details>`;
+  }).join('');
+  return `<div class="project-proposal"><strong>تغييرات مقترحة</strong>${review}
+    <button type="button" class="btn primary" data-apply-project>تطبيق التغييرات</button></div>`;
+}
+
+async function saveProjectFiles(files) {
+  if (projectSaving || S.controller || S.mode !== 'work') throw new Error('انتظر انتهاء الطلب أولاً.');
+  projectSaving = true;
+  const chat = S.chat;
+  const project = { files, revision: (chat.project?.revision || 0) + 1 };
+  try {
+    await db.saveProject(chat, project);
+    history.replaceState(null, '', `#${chat.id}`);
+    renderProjectCount();
+    renderMessages();
+    void loadChats();
+  } finally {
+    projectSaving = false;
+  }
+}
+
+function clearProjectPreview() {
+  const frame = $('#projectFrame');
+  frame.removeAttribute('srcdoc');
+  frame.classList.add('hidden');
+}
+
+function loadProjectEditor(file) {
+  $('#projectPath').value = file?.path || '';
+  $('#projectCode').value = file?.content || '';
+  $('#projectRemove').disabled = !file;
+  clearProjectPreview();
+}
+
+function renderProjectEditor(path = '') {
+  const files = projectFiles();
+  $('#projectFiles').replaceChildren(new Option('ملف جديد', ''), ...files.map(file => new Option(file.path, file.path)));
+  $('#projectFiles').value = path;
+  $('#projectExport').disabled = !files.length;
+  loadProjectEditor(selectedProjectFile());
+}
+
+let editorPath = '';
+function discardProjectDraft() {
+  const file = projectFiles().find(item => item.path === editorPath);
+  return ($('#projectPath').value === (file?.path || '') && $('#projectCode').value === (file?.content || '')) ||
+    confirm('تبي تتجاهل التعديلات غير المحفوظة؟');
+}
+
+$('#openProject').onclick = () => {
+  if (S.controller || projectSaving) return toast('انتظر انتهاء الرد أولاً.');
+  editorPath = projectFiles().find(file => file.path === 'index.html')?.path || projectFiles()[0]?.path || '';
+  renderProjectEditor(editorPath);
+  $('#projectStatus').textContent = '';
+  $('#projectSheet').classList.remove('hidden');
+};
+$('#projectFiles').onchange = (event) => {
+  if (projectSaving || !discardProjectDraft()) {
+    event.target.value = editorPath;
+    return;
+  }
+  editorPath = event.target.value;
+  loadProjectEditor(selectedProjectFile());
+};
+
+async function editProject(action) {
+  if (projectSaving || S.controller) return;
+  const status = $('#projectStatus');
+  try {
+    await action(status);
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+$('#projectSave').onclick = () => editProject(async (status) => {
+  const path = $('#projectPath').value.trim();
+  const files = mergeProjectFiles(projectFiles(), [{ path, content: $('#projectCode').value }]);
+  const destination = files.find(file => file.path.toLowerCase() === path.toLowerCase()).path;
+  if (destination !== editorPath && projectFiles().some(file => file.path === destination) && !confirm('تبي تستبدل الملف الموجود بهذا المسار؟')) return;
+  await saveProjectFiles(files);
+  editorPath = destination;
+  renderProjectEditor(editorPath);
+  status.textContent = 'تم حفظ الملف.';
+});
+$('#projectRemove').onclick = () => editProject(async (status) => {
+  if (!editorPath || !confirm(`تحذف الملف «${editorPath}»؟`)) return;
+  await saveProjectFiles(projectFiles().filter(file => file.path !== editorPath));
+  editorPath = '';
+  renderProjectEditor();
+  status.textContent = 'تم حذف الملف.';
+});
+for (const id of ['projectImport', 'projectFolder']) {
+  $(`#${id}`).onchange = (event) => {
+    const items = [...event.target.files];
+    event.target.value = '';
+    if (!items.length || !discardProjectDraft()) return;
+    void editProject(async (status) => {
+      const chat = S.chat;
+      const { changes, skipped } = await readProjectFiles(items);
+      if (S.chat !== chat || $('#projectSheet').classList.contains('hidden')) return;
+      const existing = new Set(projectFiles().map(file => file.path.toLowerCase()));
+      if (changes.some(file => existing.has(file.path.toLowerCase())) && !confirm('بعض الملفات موجودة. تبي تستبدلها بالملفات المستوردة؟')) return;
+      const files = mergeProjectFiles(projectFiles(), changes);
+      await saveProjectFiles(files);
+      editorPath = files.find(file => file.path.toLowerCase() === changes[0].path.toLowerCase()).path;
+      renderProjectEditor(editorPath);
+      status.textContent = `تم استيراد ${changes.length} ملف.${skipped ? ` تم تجاوز ${skipped} ملف غير مدعوم.` : ''}`;
+    });
+  };
+}
+$('#projectPreview').onclick = () => editProject(async (status) => {
+  if (!/\.html?$/i.test($('#projectPath').value.trim())) throw new Error('اختر ملف HTML يحتوي على كوده وتنسيقه داخله.');
+  const frame = $('#projectFrame');
+  frame.srcdoc = projectPreview($('#projectCode').value);
+  frame.classList.remove('hidden');
+  status.textContent = 'المعاينة تشغّل HTML وCSS وJavaScript المضمّنة داخل الملف.';
+});
+$('#projectExport').onclick = () => editProject(async () => {
+  const url = URL.createObjectURL(projectZip(projectFiles()));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'sowalif-project.zip';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+});
 
 // ---------- المايكروفون: تسجيل ثم تحويله لنص ----------
 let rec = null;
@@ -764,13 +953,17 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 window.addEventListener('pagehide', releaseMicWake);
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) void checkPendingMedia();
+});
+window.addEventListener('online', () => void checkPendingMedia());
 
 function showVoice() {
   $('.composer').classList.add('voice-active');
   $('#voiceCapture').classList.remove('hidden');
   $('#voiceAccept').disabled = false;
-  $('#voiceAccept').textContent = '✓';
-  $('#voiceAccept').setAttribute('aria-label', 'اعتماد التسجيل وتحويله لنص');
+  $('#voiceAccept').textContent = '■';
+  $('#voiceAccept').setAttribute('aria-label', 'إيقاف التسجيل');
   input.readOnly = true;
 }
 
@@ -918,7 +1111,7 @@ async function startRec() {
   showVoice();
   startMicWake(state);
   startMeter(state);
-  setStatus('اضغط ✓ لاعتماد التسجيل وتحويله إلى نص، أو × للإلغاء');
+  setStatus('اضغط ■ لإيقاف التسجيل. بعدها يتحوّل إلى نص تلقائيًا.');
   mic.classList.add('rec');
   tick();
   // حد أقصى 5 دقائق
@@ -946,10 +1139,11 @@ function stopRec() {
     state.endTimer = setTimeout(() => { state.speech.abort(); state.speech.onend(); }, 5000);
     return;
   }
-  if (rec.mr.state === 'inactive') return;
-  stopMeter(rec);
-  rec.mr.stop();
-  rec.stream.getTracks().forEach((t) => t.stop());
+  const state = rec;
+  if (state.mr.state === 'inactive') return;
+  stopMeter(state);
+  state.mr.stop();
+  state.stream.getTracks().forEach((t) => t.stop());
 }
 
 async function finishRec(blob, state) {
@@ -963,7 +1157,7 @@ async function finishRec(blob, state) {
   rec = null;
   if (dur < 700 || blob.size < 1500) {
     resetMic();
-    return toast('التسجيل قصير — تكلم ثم اضغط ✓');
+    return toast('التسجيل قصير — تكلم ثم اضغط ■');
   }
   voiceJob = { blob, controller: null };
   await convertVoice(voiceJob);
@@ -1118,7 +1312,12 @@ $('#clearSavedMemory').onclick = () => {
   } catch (e) { $('#personalizationMsg').textContent = e.message; }
 };
 
-function openSettings() {
+function openSettings(group) {
+  const sheet = $('#settingsSheet');
+  if (sheet.classList.contains('hidden') || typeof group === 'string') {
+    for (const section of sheet.querySelectorAll('[data-settings]')) section.open = section.dataset.settings === group;
+    sheet.querySelector('.sheet-card').scrollTop = 0;
+  }
   $('#completionNotifications').checked = db.settings.get('completionNotifications', false) && globalThis.Notification?.permission === 'granted';
   $('#mediaProvider').value = db.settings.get('mediaProvider', 'auto');
   $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';
@@ -1127,7 +1326,7 @@ function openSettings() {
   for (const [id, key, fallback] of [['piapiImageModel', 'piapiImageModel', 'auto'], ['piapiVideoModel', 'piapiVideoModel', 'auto'], ['piapiDuration', 'piapiDuration', 5]]) $(`#${id}`).value = db.settings.get(key, fallback);
   loadPersonalSettings();
   closeSide();
-  $('#settingsSheet').classList.remove('hidden');
+  sheet.classList.remove('hidden');
   const isOR = S.provider === 'openrouter';
   const k = db.settings.get(keySetting(S.provider), '');
   $('#providerSelect').value = S.provider;
@@ -1167,11 +1366,15 @@ $('#completionNotifications').onchange = async (e) => {
   const toggle = e.target;
   if (!toggle.checked) {
     db.settings.set('completionNotifications', false);
+    toggle.disabled = true;
+    try { await disableMediaPush(); }
+    catch { toast('تعذّر إلغاء اشتراك الإشعارات الخلفية. جرّب مرة ثانية.'); }
+    finally { toggle.disabled = false; }
     return;
   }
   toggle.disabled = true;
   try {
-    const permission = 'serviceWorker' in navigator && await globalThis.Notification?.requestPermission();
+    const permission = 'serviceWorker' in navigator && await enableCompletionNotifications();
     toggle.checked = permission === 'granted';
   } catch {
     toggle.checked = false;
@@ -1312,7 +1515,8 @@ $('#forgetKey').onclick = () => {
 };
 
 // ---------- التطبيق على الآيفون ----------
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js')
+  .then(() => navigator.serviceWorker.ready).then(prepareMediaPush).catch(() => {});
 window.addEventListener('hashchange', () => {
   const id = location.hash.slice(1);
   if (id && id !== S.chat?.id) openChat(id);

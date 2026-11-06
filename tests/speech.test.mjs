@@ -121,6 +121,18 @@ test('recording cancellation drops audio without transcription and preserves the
   assert.equal(a.timers.size, 0);
 });
 
+test('stopping a recording converts it directly into the draft', async () => {
+  const a = app();
+  recorder(a);
+  a.ctx.transcribe = async () => 'النص';
+  await a.node('#micBtn').click();
+  assert.equal(a.node('#voiceAccept').textContent, '■');
+  a.run('rec.started -= 2000; rec.mr.ondataavailable({ data: new Blob(["x".repeat(2000)]) })');
+  a.node('#voiceAccept').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(a.node('#input').value, 'النص');
+});
+
 test('failed transcription retains audio for retry and inserts text only after success', async () => {
   const a = app();
   recorder(a);

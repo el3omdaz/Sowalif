@@ -1,5 +1,5 @@
 // Independent media provider: never uses or forwards chat-provider credentials.
-import { settings } from './db.js?v=9';
+import { settings } from './db.js?v=12';
 
 export const IMAGE_MODELS = [
   { id: 'auto', name: 'تلقائي — Flux Schnell / Kontext' },
@@ -117,9 +117,12 @@ async function request(url, body, signal) {
     res = await fetch(url, { method: body ? 'POST' : 'GET', headers: { 'X-API-Key': key, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000) });
   } catch (e) {
     if (signal?.aborted) throw e;
-    throw new Error(body ? 'لم يتأكد وصول الطلب إلى PiAPI. لا تعِد إنشاءه قبل فحص سجل المهام في حسابك لتجنب تكرار التكلفة.' : 'تعذّر الاتصال بـ PiAPI. يمكنك متابعة فحص نفس المهمة لاحقاً.');
+    throw new Error(body ? 'لم يتأكد وصول الطلب إلى PiAPI. لا تعِد إنشاءه قبل فحص سجل المهام في حسابك لتجنب تكرار التكلفة.' : 'تعذّر الاتصال بـ PiAPI. يمكنك متابعة فحص نفس المهمة لاحقاً.', { cause: e });
   }
-  const json = await res.json().catch(() => ({}));
+  const json = await res.json().catch(error => {
+    if (error instanceof SyntaxError) return {};
+    throw error;
+  });
   if (!res.ok || (json.code != null && ![0, 200].includes(json.code))) throw new Error(`PiAPI (${res.status}): ${String(json.message || 'تعذّر تنفيذ الطلب').slice(0, 300)}`);
   return json.data || json;
 }
@@ -147,8 +150,21 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
 });
 export async function waitMedia(task, { signal, onStatus = () => {}, interval = 4000, timeout = 20 * 60000, readTask = readMediaTask, once = false } = {}) {
   const start = Date.now();
+  let interruptedReads = 0;
   while (Date.now() - start < timeout) {
-    const result = await readTask(task.id, signal);
+    let result;
+    try {
+      signal?.throwIfAborted();
+      result = await readTask(task.id, signal);
+      interruptedReads = 0;
+    } catch (error) {
+      const cause = error.cause || error;
+      const interrupted = cause instanceof TypeError || ['AbortError', 'TimeoutError'].includes(cause.name);
+      if (once || signal?.aborted || !interrupted || ++interruptedReads > 3) throw error;
+      onStatus(`${task.name} · انقطع الاتصال، جاري التحقق من نفس المهمة…`);
+      await pause(interval, signal);
+      continue;
+    }
     const url = taskResult(result, task.kind);
     if (url) return url;
     if (once) return null;

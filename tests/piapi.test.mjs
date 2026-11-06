@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const local = new Map([['sc.piapiKey', '"fake-piapi"'], ['sc.kieKey', '"never-send-kie"'], ['sc.openRouterKey', '"never-send-or"']]);
 globalThis.localStorage = { getItem: k => local.get(k) ?? null, setItem: (k,v) => local.set(k,v) };
-const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=9');
-const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=9');
+const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=12');
+const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=12');
 
 test('media provider and kie model selection are independent from chat, with no silent failover', () => {
   assert.equal(mediaProvider(), 'piapi');
@@ -120,4 +120,19 @@ test('a foreground status check only reads the existing task once', async () => 
   });
   assert.equal(url, null);
   assert.deepEqual(ids, ['existing']);
+});
+
+test('a browser-aborted media status read retries the same task', async () => {
+  const ids = [];
+  const url = await waitMedia({ id: 'existing', kind: 'video' }, {
+    interval: 0,
+    readTask: async id => {
+      ids.push(id);
+      if (ids.length === 1) throw new DOMException('Fetch is aborted', 'AbortError');
+      if (ids.length === 2) return { status: 'pending' };
+      return { status: 'success', output: { video: 'https://cdn.test/clip.mp4' } };
+    },
+  });
+  assert.equal(url, 'https://cdn.test/clip.mp4');
+  assert.deepEqual(ids, ['existing', 'existing', 'existing']);
 });
