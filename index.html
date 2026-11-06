@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
   <div id="app" class="app">
@@ -43,7 +43,10 @@
       </nav>
       <div id="projectBar" class="project-bar hidden">
         <span id="projectCount">مشروع جديد</span>
-        <button id="openProject" class="btn ghost" type="button">ملفات المشروع</button>
+        <div class="project-actions">
+          <button id="projectLinkTop" class="btn ghost hidden" type="button">ربط مجلد الجهاز</button>
+          <button id="openProject" class="btn ghost" type="button">ملفات المشروع</button>
+        </div>
       </div>
 
       <section id="messages" class="messages" aria-label="المحادثة">
@@ -120,12 +123,14 @@
   <div id="projectSheet" class="sheet hidden">
     <div class="sheet-card project-card" role="dialog" aria-modal="true" aria-labelledby="projectTitle">
       <div class="sheet-head"><h3 id="projectTitle">ملفات المشروع</h3><button class="icon-btn" data-close aria-label="إغلاق">✕</button></div>
-      <p class="muted">الملفات تُحفظ على جهازك وتُرسل للمزوّد عند طلب مساعدة في المشروع. اختر ملفات المصدر فقط.</p>
+      <p id="projectFolderHint" class="muted"></p>
+      <p class="muted">ملفات المصدر المحفوظة تُرسل للمزوّد عند طلب مساعدة في المشروع.</p>
       <div class="project-actions">
+        <button id="projectLinkFolder" class="btn primary hidden" type="button">ربط مجلد الجهاز</button>
         <label class="btn ghost">استيراد ملفات<input id="projectImport" type="file" multiple hidden></label>
-        <label class="btn ghost">استيراد مجلد<input id="projectFolder" type="file" webkitdirectory multiple hidden></label>
-        <button id="projectLinkFolder" class="btn ghost hidden" type="button">ربط مجلد للتعديل</button>
-        <button id="projectWriteFolder" class="btn ghost hidden" type="button">حفظ في المجلد</button>
+        <label class="btn ghost">استيراد نسخة من مجلد<input id="projectFolder" type="file" webkitdirectory multiple hidden></label>
+        <button id="projectWriteFolder" class="btn ghost hidden" type="button">حفظ التغييرات المعلّقة في المجلد</button>
+        <button id="projectRefreshFolder" class="btn ghost hidden" type="button">إعادة قراءة ملفات الجهاز</button>
         <button id="projectExport" class="btn ghost" type="button">تنزيل ZIP</button>
       </div>
       <details class="settings-group project-github">
@@ -303,6 +308,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=15"></script>
+  <script type="module" src="js/app.js?v=18"></script>
 </body>
 </html>

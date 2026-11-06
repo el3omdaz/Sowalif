@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { prepareProjectPush, pushProject } from '../js/project-github.js?v=15';
-import { extractProjectProposal, readProjectFiles } from '../js/project.js?v=15';
-import { writeProjectDirectory } from '../js/project-folder.js?v=15';
+import { prepareProjectPush, pushProject } from '../js/project-github.js?v=16';
+import { extractProjectProposal, readProjectFiles } from '../js/project.js?v=16';
+import { writeProjectDirectory } from '../js/project-folder.js?v=16';
 
 test('folder input keeps nested paths relative to the chosen root', async () => {
   const files = [

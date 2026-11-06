@@ -1,12 +1,12 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, settings } from './db.js?v=15';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=15';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=15';
-import { preparePersonalContext } from './memory.js?v=15';
-import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=15';
-import { mediaProvider, kieMediaSpec } from './media.js?v=15';
-import { withMediaCallback } from './media-push.js?v=15';
-import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=15';
+import { saveChat, getBlob, putBlob, settings } from './db.js?v=16';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=16';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=16';
+import { preparePersonalContext } from './memory.js?v=16';
+import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=16';
+import { mediaProvider, kieMediaSpec } from './media.js?v=16';
+import { withMediaCallback } from './media-push.js?v=16';
+import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=16';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 

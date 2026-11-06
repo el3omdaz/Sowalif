@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const local = new Map([['sc.piapiKey', '"fake-piapi"'], ['sc.kieKey', '"never-send-kie"'], ['sc.openRouterKey', '"never-send-or"']]);
 globalThis.localStorage = { getItem: k => local.get(k) ?? null, setItem: (k,v) => local.set(k,v) };
-const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=15');
-const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=15');
+const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=16');
+const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=16');
 
 test('media provider and kie model selection are independent from chat, with no silent failover', () => {
   assert.equal(mediaProvider(), 'piapi');

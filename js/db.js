@@ -90,6 +90,7 @@ export async function deleteChat(id) {
   const chat = await getChat(id);
   if (!chat) return;
   for (const b of blobIds(chat)) await deleteBlob(b);
+  if (chat.mode === 'work') await deleteBlob(`project-folder:${id}`);
   await tx('chats', 'readwrite', (s) => s.delete(id));
 }
 
@@ -101,6 +102,9 @@ export async function putBlob(blob) {
 }
 export const getBlob = (id) => tx('blobs', 'readonly', (s) => s.get(id));
 export const deleteBlob = (id) => tx('blobs', 'readwrite', (s) => s.delete(id));
+
+export const getProjectFolder = (id) => getBlob(`project-folder:${id}`);
+export const saveProjectFolder = (id, link) => tx('blobs', 'readwrite', (s) => s.put(link, `project-folder:${id}`));
 
 // روابط عرض الصور (تُنشأ مرة لكل ملف)
 const urls = new Map();
@@ -143,7 +147,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=15');
+  const { readPersonalization } = await import('./memory.js?v=16');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -170,7 +174,7 @@ export async function importAll(file) {
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=15');
+    const { mergePersonalization } = await import('./memory.js?v=16');
     mergePersonalization(data.personalization);
   }
   return n;

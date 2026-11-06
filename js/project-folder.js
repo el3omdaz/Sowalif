@@ -1,4 +1,4 @@
-import { readProjectFiles, validProjectPath } from './project.js?v=15';
+import { readProjectFiles, validProjectPath } from './project.js?v=16';
 
 export async function readProjectDirectory(root) {
   const items = [];
@@ -14,7 +14,7 @@ export async function readProjectDirectory(root) {
     }
   }
   await scan(root, '');
-  return (await readProjectFiles(items)).changes;
+  return items.length ? (await readProjectFiles(items)).changes : [];
 }
 
 async function location(root, path, create = false) {
@@ -36,17 +36,32 @@ async function readCurrent(root, path) {
   }
 }
 
-export async function writeProjectDirectory(root, baseline, files, removed) {
+export async function writeProjectDirectory(root, baseline, files, removed, beforeWrite = async () => {}) {
+  if (root.requestPermission && await root.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+    throw new Error('اسمح لسوالف بالكتابة على المجلد، ثم حاول مرة ثانية.');
+  }
   const edits = files.filter(file => baseline.get(file.path) !== file.content);
   const deletions = removed.filter(path => baseline.has(path)).map(path => ({ path }));
   const changes = [...edits, ...deletions];
-  for (const { path } of changes) {
-    if (!validProjectPath(path) || await readCurrent(root, path) !== baseline.get(path)) {
+  async function check({ path, content }) {
+    if (!validProjectPath(path)) throw new Error('مسار الملف غير مدعوم.');
+    const actual = await readCurrent(root, path);
+    if (actual !== baseline.get(path) && actual !== content) {
       throw new Error(`تغيّر الملف خارج سوالف: ${path}. أعد ربط المجلد لمراجعته قبل الحفظ.`);
     }
+    return actual;
   }
-  for (const { path, content } of changes) {
+  for (const change of changes) await check(change);
+  await beforeWrite();
+  for (const change of changes) {
+    const { path, content } = change;
+    const actual = await check(change);
     try {
+      if (actual === content) {
+        if (content === undefined) baseline.delete(path);
+        else baseline.set(path, content);
+        continue;
+      }
       const { directory, name } = await location(root, path, content !== undefined);
       if (content === undefined) {
         await directory.removeEntry(name);

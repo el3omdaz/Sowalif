@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const storage = new Map();
 globalThis.localStorage = { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) };
-const { readPersonalization, savePersonalization, saveRule, removeRule, captureMemory, preparePersonalContext, parseMemoryCommand, retrieveContext, mergePersonalization } = await import('../js/memory.js?v=15');
+const { readPersonalization, savePersonalization, saveRule, removeRule, captureMemory, preparePersonalContext, parseMemoryCommand, retrieveContext, mergePersonalization } = await import('../js/memory.js?v=16');
 test.beforeEach(() => storage.clear());
 
 test('gold shortcut is captured once and works in another chat with fresh search enabled', async () => {

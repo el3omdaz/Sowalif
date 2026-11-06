@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import vm from 'node:vm';
+import { applyProjectProposal } from '../js/project.js?v=16';
+import { writeProjectDirectory } from '../js/project-folder.js?v=16';
 
-function app() {
+function app({ navigator = {}, coarsePointer = false } = {}) {
   const nodes = new Map();
   const documentEvents = {};
   const node = (s) => {
@@ -30,7 +35,7 @@ function app() {
   const ctx = vm.createContext({
     document: { visibilityState: 'visible', querySelector: node, querySelectorAll: () => [], addEventListener(name, fn) { documentEvents[name] = fn; }, documentElement: { style: { setProperty() {} } } },
     window: { SpeechRecognition: Speech, addEventListener() {} },
-    navigator: {}, matchMedia: () => ({ matches: false }),
+    navigator, matchMedia: query => ({ matches: coarsePointer && query === '(pointer: coarse)' }),
     db: { settings: { get: (_, d) => d } },
     MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test', OR_DEFAULT_MODEL: 'or:test/model', OR_AUDIO_MODEL: 'or:google/test',
     providerOf: (id) => String(id).startsWith('or:') ? 'openrouter' : 'kie',
@@ -45,6 +50,23 @@ function app() {
   vm.runInContext(source, ctx);
   return { ctx, node, timers, documentEvents, speech: () => speech, run: (s) => vm.runInContext(s, ctx) };
 }
+
+test('Enter sends regardless of browser device classification', () => {
+  const a = app({ navigator: { userAgentData: { mobile: true } }, coarsePointer: true });
+  const press = (event, expected) => {
+    let sent = false;
+    let prevented = false;
+    a.ctx.recordSend = () => { sent = true; };
+    a.run('send = recordSend');
+    a.node('#input').listeners.keydown({ key: 'Enter', ...event, preventDefault: () => { prevented = true; } });
+    assert.deepEqual({ sent, prevented }, expected);
+  };
+  press({}, { sent: true, prevented: true });
+  press({ key: 'Unidentified', code: 'NumpadEnter' }, { sent: true, prevented: true });
+  press({ shiftKey: true }, { sent: false, prevented: false });
+  press({ isComposing: true }, { sent: false, prevented: false });
+  press({ repeat: true }, { sent: false, prevented: true });
+});
 
 test('video model picker changes the media provider and model independently of chat', () => {
   const a = app();
@@ -65,6 +87,48 @@ test('video model picker changes the media provider and model independently of c
   assert.equal(a.node('#modelName').textContent, 'Seedance 2.5');
   assert.equal(a.node('#providerBadge').textContent, 'kie.ai');
   assert.equal(a.run('S.model'), 'chat-model');
+});
+
+test('applying a proposal in a linked project writes the file on disk immediately', async (t) => {
+  const a = app();
+  const directory = await mkdtemp(join(tmpdir(), 'sowalif-linked-project-'));
+  const path = join(directory, 'app.js');
+  await writeFile(path, 'before');
+  t.after(async () => { await unlink(path); await rmdir(directory); });
+  a.ctx.applyProjectProposal = applyProjectProposal;
+  a.ctx.writeProjectDirectory = writeProjectDirectory;
+  a.ctx.location = { pathname: '/' };
+  a.ctx.history = { replaceState() {} };
+  a.ctx.db.saveProject = async (chat, project) => { chat.project = project; };
+  a.ctx.db.saveProjectFolder = async () => {};
+  a.ctx.directory = {
+    name: 'project',
+    requestPermission: async () => 'granted',
+    getFileHandle: async name => {
+      assert.equal(name, 'app.js');
+      return {
+        getFile: async () => ({ text: () => readFile(path, 'utf8') }),
+        createWritable: async () => ({ write: content => writeFile(path, content), close: async () => {} }),
+      };
+    },
+  };
+  a.run(`
+    S.mode = 'work';
+    S.chat = {
+      id: 'work',
+      project: { revision: 1, files: [{ path: 'app.js', content: 'before' }] },
+      messages: [{ projectProposal: { revision: 1, changes: [{ path: 'app.js', content: 'after' }] } }],
+    };
+    linkedFolders.set('work', { directory, baseline: new Map([['app.js', 'before']]) });
+    renderMessages = () => {};
+    loadChats = async () => {};
+  `);
+  await a.node('#messages').listeners.click({
+    target: { closest: selector => selector === '.msg[data-i]' ? { dataset: { i: '0' } }
+      : selector === '[data-apply-project]' ? {} : null },
+  });
+  assert.equal(await readFile(path, 'utf8'), 'after');
+  assert.match(a.node('#toast').textContent, /مجلد جهازك/);
 });
 
 test('live dictation keeps the draft, replaces interim text, and cleans up on stop', () => {

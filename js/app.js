@@ -1,16 +1,16 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=15';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=15';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=15';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=15';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=15';
-import { mediaProvider } from './media.js?v=15';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=15';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=15';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=15';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=15';
-import { prepareProjectPush, pushProject } from './project-github.js?v=15';
-import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=15';
+import * as db from './db.js?v=16';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=16';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=16';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=16';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=16';
+import { mediaProvider } from './media.js?v=16';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=16';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=16';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=16';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=16';
+import { prepareProjectPush, pushProject } from './project-github.js?v=16';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=16';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -169,6 +169,7 @@ function chatMenu(id, anchor) {
     else if (a === 'del') {
       if (!confirm(`تحذف «${chat.title}»؟`)) return;
       await db.deleteChat(id);
+      linkedFolders.delete(id);
       if (S.chat?.id === id) newChat();
     }
     if (S.chat?.id === id && a !== 'del') S.chat = await db.getChat(id);
@@ -239,6 +240,10 @@ async function openChat(id) {
   if (rec || voiceJob || micStarting) return toast('أوقف التسجيل أو ألغِه قبل تغيير المحادثة');
   const chat = await db.getChat(id);
   if (!chat) return toast('المحادثة غير موجودة');
+  if (chat.mode === 'work' && !linkedFolders.has(id)) {
+    const link = await db.getProjectFolder(id).catch(() => null);
+    if (link) linkedFolders.set(id, link);
+  }
   S.chat = chat;
   S.model = chat.model || S.defaultModel;
   S.provider = providerOf(S.model);
@@ -423,8 +428,9 @@ $('#messages').addEventListener('click', async (e) => {
   if (e.target.closest('[data-apply-project]')) {
     if (S.controller || projectSaving) return;
     try {
-      await saveProjectFiles(applyProjectProposal(S.chat.project, m.projectProposal));
-      toast('تم تطبيق التغييرات على المشروع.');
+      const files = applyProjectProposal(S.chat.project, m.projectProposal);
+      const linked = await saveProjectFiles(files, { writePaths: m.projectProposal.changes.map(change => change.path) });
+      toast(linked ? 'تم تعديل الملفات في مجلد جهازك.' : 'تم تطبيق التغييرات على نسخة سوالف.');
     } catch (error) {
       toast(error.message);
     }
@@ -597,13 +603,10 @@ function autosize() {
   updateSend();
 }
 input.addEventListener('input', autosize);
-const isTouch = matchMedia('(pointer: coarse)').matches;
 input.addEventListener('keydown', (e) => {
-  // على الكمبيوتر Enter يرسل و Shift+Enter سطر جديد، وعلى الجوال Enter سطر جديد
-  if (e.key === 'Enter' && !e.shiftKey && !isTouch && !e.isComposing) {
-    e.preventDefault();
-    send();
-  }
+  if ((e.key !== 'Enter' && e.code !== 'NumpadEnter') || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  if (!e.repeat) void send();
 });
 
 function updateSend() {
@@ -812,7 +815,10 @@ const projectFiles = () => S.chat?.project?.files || [];
 const selectedProjectFile = () => projectFiles().find(file => file.path === $('#projectFiles').value);
 
 function renderProjectCount() {
-  $('#projectCount').textContent = projectFiles().length ? `عدد الملفات: ${projectFiles().length}` : 'مشروع جديد';
+  const linked = linkedFolders.get(S.chat?.id);
+  $('#projectCount').textContent = linked ? `مجلد الجهاز: ${linked.directory.name}`
+    : projectFiles().length ? `نسخة سوالف · ${projectFiles().length} ملف` : 'مشروع جديد';
+  $('#projectLinkTop').classList.toggle('hidden', Boolean(linked) || typeof window.showDirectoryPicker !== 'function');
 }
 
 function projectProposalHTML(proposal) {
@@ -825,11 +831,12 @@ function projectProposalHTML(proposal) {
       ${before ? `<p>النسخة الحالية</p><pre dir="ltr">${esc(before.content)}</pre>` : ''}
       <p>النسخة المقترحة</p><pre dir="ltr">${esc(content)}</pre></details>`;
   }).join('');
+  const action = linkedFolders.has(S.chat.id) ? 'طبّق على ملفات الجهاز' : 'طبّق على نسخة سوالف';
   return `<div class="project-proposal"><strong>تغييرات مقترحة</strong>${review}
-    <button type="button" class="btn primary" data-apply-project>تطبيق التغييرات</button></div>`;
+    <button type="button" class="btn primary" data-apply-project>${action}</button></div>`;
 }
 
-async function saveProjectFiles(files, removedPath) {
+async function saveProjectFiles(files, { removedPath, writePaths } = {}) {
   if (projectSaving || S.controller || S.mode !== 'work') throw new Error('انتظر انتهاء الطلب أولاً.');
   projectSaving = true;
   const chat = S.chat;
@@ -837,13 +844,32 @@ async function saveProjectFiles(files, removedPath) {
   const removed = [...new Set([...(chat.project?.removed || []), ...(removedPath ? [removedPath] : [])])]
     .filter(path => !kept.has(path.toLowerCase()));
   const project = { files, removed, revision: (chat.project?.revision || 0) + 1 };
-  try {
+  const link = writePaths && linkedFolders.get(chat.id);
+  let saved = false;
+  async function persistProject() {
     await db.saveProject(chat, project);
+    saved = true;
     history.replaceState(null, '', `#${chat.id}`);
-    renderProjectCount();
-    renderMessages();
-    void loadChats();
+  }
+  try {
+    if (link) {
+      const paths = new Set(writePaths.map(path => path.toLowerCase()));
+      await writeProjectDirectory(link.directory, link.baseline, files.filter(file => paths.has(file.path.toLowerCase())),
+        removedPath ? [removedPath] : [], persistProject);
+    } else {
+      await persistProject();
+    }
+    return Boolean(link);
+  } catch (error) {
+    if (!saved) throw error;
+    throw new Error(`${error.message} نسخة سوالف محفوظة. راجع المجلد من «ملفات المشروع».`);
   } finally {
+    if (saved) {
+      if (link) await db.saveProjectFolder(chat.id, link).catch(() => {});
+      renderProjectCount();
+      renderMessages();
+      void loadChats();
+    }
     projectSaving = false;
   }
 }
@@ -866,8 +892,14 @@ function renderProjectEditor(path = '') {
   $('#projectFiles').replaceChildren(new Option('ملف جديد', ''), ...files.map(file => new Option(file.path, file.path)));
   $('#projectFiles').value = path;
   $('#projectExport').disabled = !files.length;
+  const linked = linkedFolders.get(S.chat.id);
   $('#projectLinkFolder').classList.toggle('hidden', typeof window.showDirectoryPicker !== 'function');
-  $('#projectWriteFolder').classList.toggle('hidden', !linkedFolders.has(S.chat.id));
+  $('#projectLinkFolder').textContent = linked ? 'تحديث ربط المجلد' : 'ربط مجلد الجهاز';
+  $('#projectWriteFolder').classList.toggle('hidden', !linked);
+  $('#projectRefreshFolder').classList.toggle('hidden', !linked);
+  $('#projectFolderHint').textContent = linked ? `مرتبط بمجلد «${linked.directory.name}». تطبيق التغييرات يحفظها في المجلد مباشرة.`
+    : typeof window.showDirectoryPicker === 'function' ? 'اربط مجلد الجهاز للتعديل على ملفاته مباشرة. الاستيراد يفتح نسخة داخل سوالف.'
+      : 'للتعديل المباشر على ملفات ويندوز، افتح سوالف من Chrome أو Edge على نفس الجهاز.';
   loadProjectEditor(selectedProjectFile());
 }
 
@@ -889,6 +921,11 @@ $('#openProject').onclick = () => {
   renderProjectEditor(editorPath);
   $('#projectStatus').textContent = '';
   $('#projectSheet').classList.remove('hidden');
+};
+$('#projectLinkTop').onclick = () => {
+  if (projectSaving || S.controller) return;
+  $('#openProject').click();
+  $('#projectLinkFolder').click();
 };
 $('#projectFiles').onchange = (event) => {
   if (projectSaving || !discardProjectDraft()) {
@@ -914,17 +951,18 @@ $('#projectSave').onclick = () => editProject(async (status) => {
   const files = mergeProjectFiles(projectFiles(), [{ path, content: $('#projectCode').value }]);
   const destination = files.find(file => file.path.toLowerCase() === path.toLowerCase()).path;
   if (destination !== editorPath && projectFiles().some(file => file.path === destination) && !confirm('تبي تستبدل الملف الموجود بهذا المسار؟')) return;
-  await saveProjectFiles(files);
+  const linked = await saveProjectFiles(files, { writePaths: [destination] });
   editorPath = destination;
   renderProjectEditor(editorPath);
-  status.textContent = 'تم حفظ الملف.';
+  status.textContent = linked ? 'تم حفظ الملف في مجلد جهازك.' : 'تم حفظ الملف في نسخة سوالف.';
 });
 $('#projectRemove').onclick = () => editProject(async (status) => {
-  if (!editorPath || !confirm(`تحذف الملف «${editorPath}»؟`)) return;
-  await saveProjectFiles(projectFiles().filter(file => file.path !== editorPath), editorPath);
+  const fromDevice = linkedFolders.get(S.chat.id)?.baseline.has(editorPath);
+  if (!editorPath || !confirm(`تحذف الملف «${editorPath}» ${fromDevice ? 'من مجلد الجهاز؟' : 'من نسخة سوالف؟'}`)) return;
+  const linked = await saveProjectFiles(projectFiles().filter(file => file.path !== editorPath), { removedPath: editorPath, writePaths: [editorPath] });
   editorPath = '';
   renderProjectEditor();
-  status.textContent = 'تم حذف الملف.';
+  status.textContent = linked ? 'تم حذف الملف من المشروع ومجلد الجهاز.' : 'تم حذف الملف من نسخة سوالف.';
 });
 for (const id of ['projectImport', 'projectFolder']) {
   $(`#${id}`).onchange = (event) => {
@@ -978,14 +1016,41 @@ $('#projectLinkFolder').onclick = () => {
     if (S.chat !== chat || $('#projectSheet').classList.contains('hidden')) return;
     const baseline = new Map(imported.map(file => [file.path, file.content]));
     const existing = new Map(projectFiles().map(file => [file.path.toLowerCase(), file.content]));
-    if (imported.some(file => existing.has(file.path.toLowerCase()) && existing.get(file.path.toLowerCase()) !== file.content) &&
-        !confirm('بعض الملفات تختلف عن نسخة سوالف. تبي تستورد محتوى المجلد فوق الملفات المطابقة؟')) return;
-    const files = mergeProjectFiles(projectFiles(), imported);
+    const different = imported.some(file => existing.has(file.path.toLowerCase()) && existing.get(file.path.toLowerCase()) !== file.content);
+    if (different && !confirm('بعض الملفات تختلف. تبي تربط المجلد وتحتفظ بتعديلات سوالف للمراجعة؟')) return;
+    const files = mergeProjectFiles(imported, projectFiles());
     await saveProjectFiles(files);
-    linkedFolders.set(chat.id, { directory, baseline });
-    editorPath = files[0].path;
+    const link = { directory, baseline };
+    linkedFolders.set(chat.id, link);
+    const remembered = await db.saveProjectFolder(chat.id, link).then(() => true, () => false);
+    editorPath = files[0]?.path || '';
     renderProjectEditor(editorPath);
-    status.textContent = `تم ربط «${directory.name}». تقدر تحفظ التعديلات فيه بعد مراجعتها.`;
+    renderProjectCount();
+    renderMessages();
+    status.textContent = `تم ربط «${directory.name}». التعديلات الجديدة تُحفظ مباشرة.${remembered ? '' : ' الربط متاح في الصفحة الحالية فقط.'}`;
+  });
+};
+
+$('#projectRefreshFolder').onclick = () => {
+  if (!discardProjectDraft()) return;
+  void editProject(async (status) => {
+    const chat = S.chat;
+    const link = linkedFolders.get(chat.id);
+    if (!link || !confirm('تبي تعيد قراءة المجلد وتستبدل نسخة سوالف للملفات المرتبطة؟')) return;
+    if (link.directory.requestPermission && await link.directory.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+      throw new Error('اسمح لسوالف بالوصول إلى المجلد، ثم حاول مرة ثانية.');
+    }
+    const imported = await readProjectDirectory(link.directory);
+    if (S.chat !== chat || $('#projectSheet').classList.contains('hidden')) return;
+    const disk = new Map(imported.map(file => [file.path, file.content]));
+    const remaining = projectFiles().filter(file => !link.baseline.has(file.path) || disk.has(file.path));
+    const files = mergeProjectFiles(remaining, imported);
+    await saveProjectFiles(files);
+    link.baseline = disk;
+    await db.saveProjectFolder(chat.id, link);
+    editorPath = files[0]?.path || '';
+    renderProjectEditor(editorPath);
+    status.textContent = 'تم تحميل أحدث ملفات المجلد.';
   });
 };
 
@@ -1014,7 +1079,12 @@ $('#projectWriteFolder').onclick = () => {
   if (!linked) return;
   void projectTransfer(status, async () => {
     if (!confirm(`تحفظ تغييرات سوالف في المجلد «${linked.directory.name}»؟`)) return;
-    const count = await writeProjectDirectory(linked.directory, linked.baseline, projectFiles(), S.chat.project?.removed || []);
+    let count;
+    try {
+      count = await writeProjectDirectory(linked.directory, linked.baseline, projectFiles(), S.chat.project?.removed || []);
+    } finally {
+      await db.saveProjectFolder(S.chat.id, linked).catch(() => {});
+    }
     status.textContent = count ? `تم حفظ ${count} تغيير في المجلد.` : 'ما فيه تغييرات جديدة للحفظ.';
   });
 };

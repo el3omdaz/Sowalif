@@ -1,4 +1,4 @@
-import { validProjectPath } from './project.js?v=15';
+import { validProjectPath } from './project.js?v=16';
 
 const shaPattern = /^[a-f0-9]{40}$/i;
 const refPath = branch => branch.split('/').map(encodeURIComponent).join('/');

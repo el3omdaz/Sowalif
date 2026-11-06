@@ -1,4 +1,4 @@
-import { settings } from './db.js?v=15';
+import { settings } from './db.js?v=16';
 
 export function mediaProvider() {
   const choice = settings.get('mediaProvider', 'auto');
