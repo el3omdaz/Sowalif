@@ -1,10 +1,10 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, settings } from './db.js?v=8';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=8';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=8';
-import { preparePersonalContext } from './memory.js?v=8';
-import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=8';
-import { mediaProvider, kieMediaSpec } from './media.js?v=8';
+import { saveChat, getBlob, putBlob, settings } from './db.js?v=9';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=9';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=9';
+import { preparePersonalContext } from './memory.js?v=9';
+import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=9';
+import { mediaProvider, kieMediaSpec } from './media.js?v=9';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -103,21 +103,34 @@ async function webSearch(query, signal) {
 }
 
 async function drawImage(chat, reply, { prompt, aspect_ratio, reference }, emit, signal) {
-  return drawMedia(chat, reply, { kind: 'image', prompt, aspect: aspect_ratio, useLast: reference === 'last_generated' }, emit, signal);
+  return drawMedia(chat, reply, { kind: 'image', prompt, aspect: aspect_ratio, useLast: reference === 'last_generated' || undefined }, emit, signal);
 }
 
-async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, referenceUrl }, emit, signal) {
+async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, referenceUrl, videoReference, once }, emit, signal) {
   if (!resume) {
     const provider = mediaProvider();
     if (!settings.get(provider === 'kie' ? 'kieKey' : 'piapiKey', '')) throw new Error(`أضف مفتاح ${provider === 'kie' ? 'kie.ai' : 'PiAPI'} للصور والفيديو من الإعدادات`);
     const current = chat.messages.at(-1);
     let file = current?.files?.filter(f => f.kind === 'image').at(-1);
-    if (!file && (useLast || /(?:هذي|هذه|الصورة|صورتك|حرك|حرّك|animate|this image)/i.test(prompt))) {
+    if (!file && !referenceUrl && !videoReference && (useLast ?? /(?:هذي|هذه|الصورة|صورتك|حرك|حرّك|animate|this image)/i.test(prompt))) {
       for (const message of [...chat.messages].reverse()) {
+        if (chat.mode === 'video' && message.videos?.at(-1)?.url) {
+          videoReference = message.videos.at(-1).url;
+          break;
+        }
+        if (chat.mode === 'video' && message.videoReferenceUrl) {
+          videoReference = message.videoReferenceUrl;
+          break;
+        }
         file = [...(message.files || []), ...(message.images || [])].filter(f => f.kind === 'image').at(-1);
         if (file) break;
+        if (message.mediaReferenceUrl) {
+          referenceUrl = message.mediaReferenceUrl;
+          break;
+        }
       }
     }
+    if (videoReference && provider === 'kie') throw new Error('لتعديل الفيديو اختر PiAPI في إعدادات الوسائط. لإنشاء فيديو جديد ألغِ استخدام آخر مرجع.');
     let reference = referenceUrl;
     if (!reference && file) {
       reference = file.url && (!file.blob || Date.now() - (file.urlAt || 0) < URL_TTL) ? file.url : null;
@@ -128,7 +141,7 @@ async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, r
         reference = provider === 'kie' ? await uploadFile(blob, `reference.${ext}`, signal) : await toDataUrl(blob);
       }
     }
-    const spec = (provider === 'kie' ? kieMediaSpec : mediaSpec)(kind, prompt, { aspect, reference });
+    const spec = (provider === 'kie' ? kieMediaSpec : mediaSpec)(kind, prompt, { aspect, reference, videoReference });
     emit('status', { text: `ينشئ المهمة عبر ${provider === 'kie' ? 'kie.ai' : 'PiAPI'} · ${spec.name}…` });
     reply.mediaTask = { provider, kind, name: spec.name, prompt, submitting: true };
     // Persist submission state, including uncertain network outcomes, before the paid POST.
@@ -138,7 +151,8 @@ async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, r
     await saveChat({ ...chat, messages: [...chat.messages, reply] });
   }
   const task = reply.mediaTask;
-  const url = await waitMedia(task, { signal, ...(task.provider === 'kie' ? { readTask: readKieMediaTask } : {}), onStatus: text => emit('status', { text }) });
+  const url = await waitMedia(task, { signal, once, ...(task.provider === 'kie' ? { readTask: readKieMediaTask } : {}), onStatus: text => emit('status', { text }) });
+  if (!url) return [];
   const media = { kind: task.kind, url, model: task.name };
   // Images are small enough to keep offline; videos retain the provider download URL.
   if (task.kind === 'image') Object.assign(media, await saveRemote(url));
@@ -150,14 +164,20 @@ async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, r
   return [media];
 }
 
-export async function resumeMedia(chat, reply, emit, signal) {
+export async function resumeMedia(chat, reply, emit, signal, { once = false } = {}) {
   try {
-    delete reply.error;
-    delete reply.stopped;
-    await drawMedia(chat, reply, { resume: true }, emit, signal);
+    await drawMedia(chat, reply, { resume: true, once }, emit, signal);
+    if (reply.mediaTask.done) {
+      delete reply.error;
+      delete reply.stopped;
+      await saveChat(chat);
+    }
   } catch (e) {
+    if (once) return;
+    reply.stopped = !!signal?.aborted;
     reply.error = signal?.aborted ? 'توقف الانتظار؛ المهمة قد تستمر لدى المزوّد. تابعها لاحقاً بنفس الرقم.' : e.message;
-  } finally { await saveChat(chat); }
+    await saveChat(chat);
+  }
 }
 
 // ---------- الرد ----------
@@ -169,15 +189,19 @@ export async function respond(chat, opts, emit, signal) {
   const userMsg = chat.messages[chat.messages.length - 1];
 
   try {
-    const personal = await preparePersonalContext(chat, userMsg.text || '');
+    const workspaceKind = ['image', 'video'].includes(chat.mode) ? chat.mode : null;
+    const personal = workspaceKind ? { expanded: userMsg.text || '' } : await preparePersonalContext(chat, userMsg.text || '');
     reply.contextSources = personal.sources;
     if (personal.action) reply.memoryAction = personal.action.text;
     if (personal.recallUnavailable) reply.recallUnavailable = true;
     const search = !!opts.search || personal.search;
     // وضع الرسم المباشر: نص المستخدم هو البرومبت، والصور المرفقة معه مرجع
-    const kind = opts.videoMode ? 'video' : opts.imageMode ? 'image' : mediaIntent(personal.expanded);
+    const kind = workspaceKind || (opts.videoMode ? 'video' : opts.imageMode ? 'image' : mediaIntent(personal.expanded));
     if (kind) {
-      await drawMedia(chat, reply, { kind, prompt: personal.expanded, aspect: opts.aspect, referenceUrl: userMsg.mediaReferenceUrl }, emit, signal);
+      await drawMedia(chat, reply, {
+        kind, prompt: personal.expanded, aspect: opts.aspect, referenceUrl: userMsg.mediaReferenceUrl,
+        videoReference: userMsg.videoReferenceUrl, useLast: workspaceKind ? userMsg.reuseMedia !== false : undefined,
+      }, emit, signal);
       return reply;
     }
 

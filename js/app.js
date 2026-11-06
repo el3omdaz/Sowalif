@@ -1,15 +1,29 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=8';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=8';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=8';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=8';
-import { mediaIntent } from './piapi.js?v=8';
-import { mediaProvider } from './media.js?v=8';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=8';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=8';
+import * as db from './db.js?v=9';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=9';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=9';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=9';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=9';
+import { mediaProvider } from './media.js?v=9';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=9';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=9';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+async function notifyCompletion(chat, reply) {
+  if (!document.hidden || !db.settings.get('completionNotifications', false) ||
+      globalThis.Notification?.permission !== 'granted' || !reply || reply.error || reply.stopped) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    await registration?.showNotification('سوالف', {
+      body: reply.mediaTask ? 'اكتملت مهمة التوليد.' : 'رد المحادثة جاهز.',
+      icon: 'icon-192.png',
+      tag: `${chat.id}-${reply.at}`,
+      data: { chatId: chat.id },
+    });
+  } catch { /* The saved result is available even if the browser rejects notifications. */ }
+}
 
 const initialProvider = db.settings.get('provider', 'kie') === 'openrouter' ? 'openrouter' : 'kie';
 const keySetting = (provider) => provider === 'openrouter' ? 'openRouterKey' : 'kieKey';
@@ -23,6 +37,7 @@ const S = {
   model: '',
   defaultModel: defaultFor(initialProvider),
   chat: null,
+  mode: 'chat',
   chats: [],
   attachments: [], // { id, name, kind, preview, meta, loading }
   search: db.settings.get('search', false),
@@ -42,6 +57,9 @@ function toast(text, ms = 2600) {
 
 // ---------- البداية ----------
 async function boot() {
+  for (const [id, models] of [['piapiImageModel', IMAGE_MODELS], ['piapiVideoModel', VIDEO_MODELS]]) {
+    $(`#${id}`).replaceChildren(...models.map(model => new Option(model.name, model.id)));
+  }
   applyTypography();
   syncToggles();
   S.chats = await db.listChats();
@@ -60,7 +78,11 @@ function renderModelName() {
   const m = modelOf(S.model);
   $('#modelName').textContent = m.name;
   $('#providerBadge').textContent = m.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai';
-  $('#emptyModel').textContent = `${m.name} — ${m.tagline}`;
+  $('#emptyModel').textContent = {
+    chat: `${m.name} — ${m.tagline}`,
+    image: 'اكتب وصفاً للرسم أو أرفق صورة وقل شنو تبي تغيّر فيها.',
+    video: 'صف الفيديو أو أرفق صورة لتحريكها. تعديلات الفيديو تستخدم Seedance 2.5 مع PiAPI.',
+  }[S.mode];
 }
 
 // ---------- قائمة المحادثات ----------
@@ -81,7 +103,7 @@ function groupOf(t) {
 
 function renderChatList() {
   const q = $('#search').value.trim().toLowerCase();
-  const list = S.chats.filter((c) => !q || c.title.toLowerCase().includes(q));
+  const list = S.chats.filter(c => modeOf(c) === S.mode && (!q || c.title.toLowerCase().includes(q)));
   let html = '';
   let last = '';
   for (const c of list) {
@@ -141,10 +163,42 @@ $('#menuBtn').onclick = () => $('#app').classList.add('side-open');
 $('#scrim').onclick = closeSide;
 
 // ---------- المحادثة ----------
-function newChat() {
+const modeOf = chat => ['image', 'video'].includes(chat?.mode) ? chat.mode : 'chat';
+
+function applyWorkspace(mode) {
+  S.mode = mode;
+  S.imageMode = false;
+  S.videoMode = false;
+  for (const button of document.querySelectorAll('#workspaceTabs button')) {
+    button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+  }
+  $('#emptyTitle').textContent = { chat: 'شلون أقدر أساعدك؟', image: 'شنو تبي ترسم؟', video: 'شنو الفيديو اللي تبيه؟' }[mode];
+  $('#chatChips').classList.toggle('hidden', mode !== 'chat');
+  $('#modelBtn').classList.toggle('hidden', mode !== 'chat');
+  $('#mediaReference').value = '';
+  $('#videoReference').value = '';
+  $('#reuseMedia').checked = true;
+  syncToggles();
+}
+
+$('#workspaceTabs').onclick = async (e) => {
+  const mode = e.target.closest('[data-mode]')?.dataset.mode;
+  if (!mode || mode === S.mode) return;
+  if (S.controller || rec || voiceJob || micStarting) return toast('انتظر انتهاء الطلب أو أوقفه قبل تغيير القسم');
+  if (input.value.trim() || S.attachments.length || $('#mediaReference').value || $('#videoReference').value) {
+    return toast('أرسل المسودة أو امسحها قبل تغيير القسم');
+  }
+  const latest = S.chats.find(chat => modeOf(chat) === mode);
+  if (latest) await openChat(latest.id);
+  else newChat(mode);
+};
+
+function newChat(mode = S.mode) {
   if (S.controller) return;
   if (rec || voiceJob || micStarting) return toast('اعتمد التسجيل أو ألغِه قبل فتح محادثة جديدة');
   S.chat = db.newChat(S.defaultModel);
+  S.chat.mode = mode;
+  applyWorkspace(mode);
   S.model = S.defaultModel;
   history.replaceState(null, '', location.pathname);
   renderModelName();
@@ -153,8 +207,8 @@ function newChat() {
   closeSide();
   if (matchMedia('(min-width: 821px)').matches) $('#input').focus();
 }
-$('#newChat').onclick = newChat;
-$('#newChatTop').onclick = newChat;
+$('#newChat').onclick = () => newChat();
+$('#newChatTop').onclick = () => newChat();
 
 async function openChat(id) {
   if (S.controller) return toast('انتظر يخلص الرد');
@@ -166,17 +220,36 @@ async function openChat(id) {
   S.provider = providerOf(S.model);
   S.defaultModel = defaultFor(S.provider);
   db.settings.set('provider', S.provider);
-  S.imageMode = false;
-  S.videoMode = false;
-  syncToggles();
+  applyWorkspace(modeOf(chat));
   history.replaceState(null, '', `#${id}`);
   renderModelName();
   renderMessages();
   renderChatList();
   closeSide();
+  checkPendingMedia();
 }
 
 marked.setOptions({ gfm: true, breaks: true });
+
+async function checkPendingMedia() {
+  const chat = S.chat;
+  if (document.hidden || !chat || S.controller) return;
+  const reply = chat.messages.findLast(m => m.mediaTask?.id && !m.mediaTask.done && !m.stopped);
+  if (!reply || !db.settings.get(reply.mediaTask.provider === 'kie' ? 'kieKey' : 'piapiKey', '')) return;
+  const controller = new AbortController();
+  S.controller = controller;
+  updateSend();
+  try {
+    await resumeMedia(chat, reply, () => {}, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]), { once: true });
+    if (reply.mediaTask.done) {
+      renderMessages();
+      void notifyCompletion(chat, reply);
+    }
+  } finally {
+    S.controller = null;
+    updateSend();
+  }
+}
 function md(text) {
   const div = document.createElement('div');
   div.innerHTML = DOMPurify.sanitize(marked.parse(text || ''));
@@ -198,7 +271,34 @@ function md(text) {
 // الصور تُعرض من الجهاز (blob) أو من الرابط إن لم تُحفظ
 const imgAttrs = (f) => (f.blob ? `data-blob="${f.blob}"` : f.preview ? `src="${f.preview}"` : `src="${esc(f.url || '')}"`);
 const genFigure = (f) => `<figure><img ${imgAttrs(f)} alt="" data-zoom><a ${f.blob ? `data-blob-href="${f.blob}"` : `href="${esc(f.url)}"`} download="image.png">⬇️ حفظ</a></figure>`;
-const videoFigure = (f) => `<figure><video ${imgAttrs(f)} controls playsinline preload="metadata" aria-label="الفيديو المُنشأ"></video><a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" download="video.mp4">فتح وحفظ الفيديو ↗</a></figure>`;
+const videoFigure = (f) => `<figure><video ${imgAttrs(f)} controls playsinline preload="metadata" aria-label="الفيديو المُنشأ"></video><button type="button" class="btn ghost" data-download-video data-url="${esc(f.url)}">⬇️ حفظ الفيديو</button></figure>`;
+
+async function downloadVideo(button) {
+  button.disabled = true;
+  try {
+    const url = new URL(button.dataset.url);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('رابط الفيديو غير صالح.');
+    const response = await fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(120000) });
+    if ([403, 404, 410].includes(response.status)) throw new Error('رابط الفيديو عند المزوّد غير متاح أو انتهت صلاحيته.');
+    if (!response.ok) throw new Error('تعذّر تنزيل الفيديو من المزوّد.');
+    const file = await response.blob();
+    if (!file.size || (file.type && !/^(?:video\/|application\/octet-stream$)/i.test(file.type))) {
+      throw new Error('الرابط لم يرجع ملف فيديو قابل للحفظ.');
+    }
+    const localUrl = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = localUrl;
+    link.download = file.type === 'video/webm' ? 'sowalif-video.webm' : 'sowalif-video.mp4';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(localUrl), 60000);
+  } catch (error) {
+    toast(error instanceof TypeError || error.name === 'TimeoutError' ? 'تعذّر تنزيل الفيديو. قد يكون الرابط منتهي الصلاحية أو أن المزوّد يمنع التنزيل المباشر.' : error.message, 6000);
+  } finally {
+    button.disabled = false;
+  }
+}
 
 async function hydrate(root) {
   for (const el of root.querySelectorAll('[data-blob]')) {
@@ -214,7 +314,7 @@ async function hydrate(root) {
 function messageHTML(m, i) {
   if (m.role === 'user') {
     const files = (m.files || []).map((f) => (f.kind === 'image' ? `<img ${imgAttrs(f)} alt="" data-zoom>` : `<span class="doc-chip">📄 ${esc(f.name)}</span>`)).join('');
-    return `<div class="msg user">${files ? `<div class="files">${files}</div>` : ''}${m.text ? `<div class="bubble" dir="auto">${esc(m.text)}</div>` : ''}</div>`;
+    return `<div class="msg user" data-i="${i}">${files ? `<div class="files">${files}</div>` : ''}${m.text ? `<div class="bubble" dir="auto">${esc(m.text)}</div><div class="meta"><button data-copy>📋 نسخ</button></div>` : ''}</div>`;
   }
   const imgs = (m.images || []).map(genFigure).join('') + (m.videos || []).map(videoFigure).join('');
   const isLast = i === S.chat.messages.length - 1;
@@ -246,6 +346,8 @@ function renderMessages() {
 }
 
 $('#messages').addEventListener('click', async (e) => {
+  const download = e.target.closest('[data-download-video]');
+  if (download) return downloadVideo(download);
   const sourceLink = e.target.closest('.context-sources a');
   if (sourceLink) {
     e.preventDefault();
@@ -265,7 +367,7 @@ $('#messages').addEventListener('click', async (e) => {
     copyCode.textContent = '✓';
     return setTimeout(() => (copyCode.textContent = 'نسخ'), 1200);
   }
-  const msgEl = e.target.closest('.msg.assistant');
+  const msgEl = e.target.closest('.msg[data-i]');
   if (!msgEl || !msgEl.dataset.i) return;
   const m = S.chat.messages[Number(msgEl.dataset.i)];
   if (e.target.closest('[data-copy]')) {
@@ -278,7 +380,10 @@ $('#messages').addEventListener('click', async (e) => {
     const ctrl = new AbortController();
     S.controller = ctrl;
     updateSend();
-    try { await resumeMedia(S.chat, message, (event, data) => { if (event === 'status') setStatus(data.text); }, ctrl.signal); }
+    try {
+      await resumeMedia(S.chat, message, (event, data) => { if (event === 'status') setStatus(data.text); }, ctrl.signal);
+      if (message.mediaTask.done) void notifyCompletion(S.chat, message);
+    }
     finally { S.controller = null; setStatus(''); renderMessages(); updateSend(); }
   } else if (e.target.closest('[data-fast-retry]')) {
     if (S.controller) return;
@@ -349,7 +454,9 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
-  const media = S.imageMode || S.videoMode;
+  const image = S.mode === 'image' || S.imageMode;
+  const video = S.mode === 'video' || S.videoMode;
+  const media = image || video;
   for (const [id, active] of [['searchBtn', S.search && !S.imageMode], ['deepBtn', S.deep && !S.imageMode], ['imgBtn', S.imageMode]]) {
     $(`#${id}`).setAttribute('aria-pressed', String(active));
   }
@@ -366,7 +473,11 @@ function syncToggles() {
   $('#deepBtn').disabled = media;
   $('#aspect').classList.toggle('hidden', !media);
   $('#mediaReference').classList.toggle('hidden', !media);
-  input.placeholder = S.videoMode ? 'صف الفيديو… أو أرفق صورة وصف حركتها' : S.imageMode ? 'صف الصورة اللي تبيها… (أرفق صورة لتعديلها)' : 'اكتب رسالتك…';
+  $('#videoReference').classList.toggle('hidden', S.mode !== 'video');
+  $('#reuseMediaRow').classList.toggle('hidden', S.mode === 'chat');
+  for (const id of ['searchBtn', 'deepBtn', 'imgBtn', 'videoBtn']) $(`#${id}`).classList.toggle('hidden', S.mode !== 'chat');
+  $('#fileInput').accept = S.mode === 'chat' ? 'image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt' : 'image/*';
+  input.placeholder = video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…' : 'اكتب رسالتك…';
 }
 $('#searchBtn').onclick = () => {
   S.search = !S.search;
@@ -436,6 +547,10 @@ async function shrinkImage(file) {
 
 async function addFiles(files) {
   for (const file of files) {
+    if (S.mode !== 'chat' && !file.type.startsWith('image/')) {
+      toast('أرفق صورة أو استخدم خانة الرابط للمرجع.');
+      continue;
+    }
     if (file.size > 40 * 1024 * 1024) {
       toast(`«${file.name}» أكبر من 40MB`);
       continue;
@@ -538,7 +653,8 @@ async function run(opts) {
     }
   };
   try {
-    await respond(chat, { model: S.model, search: S.search, deep: S.deep, aspect: $('#aspect').value, ...opts }, emit, ctrl.signal);
+    const reply = await respond(chat, { model: S.model, search: S.search, deep: S.deep, aspect: $('#aspect').value, ...opts }, emit, ctrl.signal);
+    void notifyCompletion(chat, reply);
   } finally {
     if (frame) cancelAnimationFrame(frame);
     S.controller = null;
@@ -555,8 +671,8 @@ async function send() {
   if (rec || voiceJob || mic.classList.contains('busy')) return toast('أوقف الإملاء وانتظر اكتمال النص أولاً');
   const text = input.value.trim();
   if ((!text && !S.attachments.length) || S.attachments.some((a) => a.loading)) return;
-  if ((S.imageMode || S.videoMode) && !text) return toast('اكتب وصف الصورة أو الفيديو');
-  const mediaKind = S.videoMode ? 'video' : S.imageMode ? 'image' : mediaIntent(text);
+  const mediaKind = S.mode !== 'chat' ? S.mode : S.videoMode ? 'video' : S.imageMode ? 'image' : mediaIntent(text);
+  if (mediaKind && !text) return toast('اكتب وصف الصورة أو الفيديو');
   const mediaKey = mediaProvider() === 'kie' ? 'kieKey' : 'piapiKey';
   if (mediaKind && !db.settings.get(mediaKey, '')) {
     openSettings();
@@ -567,10 +683,15 @@ async function send() {
     return toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} أول`);
   }
   const files = S.attachments.map((a) => a.meta);
-  const mediaReferenceUrl = (S.imageMode || S.videoMode) ? $('#mediaReference').value.trim() : '';
+  const mediaReferenceUrl = mediaKind ? $('#mediaReference').value.trim() : '';
+  const videoReferenceUrl = S.mode === 'video' ? $('#videoReference').value.trim() : '';
   if (mediaReferenceUrl && !/^https?:\/\//i.test(mediaReferenceUrl)) return toast('استخدم رابط صورة يبدأ بـ https://');
-  S.chat.messages.push({ role: 'user', text, files, ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), at: Date.now() });
+  if (videoReferenceUrl && !/^https?:\/\//i.test(videoReferenceUrl)) return toast('استخدم رابط فيديو يبدأ بـ https://');
+  const reuseMedia = S.mode !== 'chat' && $('#reuseMedia').checked;
+  S.chat.messages.push({ role: 'user', text, files, ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), ...(videoReferenceUrl ? { videoReferenceUrl } : {}), reuseMedia, at: Date.now() });
   $('#mediaReference').value = '';
+  $('#videoReference').value = '';
+  $('#reuseMedia').checked = true;
   history.replaceState(null, '', `#${S.chat.id}`);
   input.value = '';
   S.attachments = [];
@@ -639,6 +760,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (micWakeLock?.released) micWakeLock = null;
     acquireMicWake();
+    checkPendingMedia();
   }
 });
 window.addEventListener('pagehide', releaseMicWake);
@@ -997,6 +1119,7 @@ $('#clearSavedMemory').onclick = () => {
 };
 
 function openSettings() {
+  $('#completionNotifications').checked = db.settings.get('completionNotifications', false) && globalThis.Notification?.permission === 'granted';
   $('#mediaProvider').value = db.settings.get('mediaProvider', 'auto');
   $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';
   for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).value = db.settings.get(id, 'auto');
@@ -1039,6 +1162,25 @@ $('#savePiapi').onclick = () => {
 };
 $('#forgetPiapi').onclick = () => { db.settings.set('piapiKey', ''); $('#piapiKey').value = ''; openSettings(); };
 for (const id of ['piapiImageModel', 'piapiVideoModel', 'piapiDuration']) $(`#${id}`).onchange = (e) => db.settings.set(id, e.target.value);
+
+$('#completionNotifications').onchange = async (e) => {
+  const toggle = e.target;
+  if (!toggle.checked) {
+    db.settings.set('completionNotifications', false);
+    return;
+  }
+  toggle.disabled = true;
+  try {
+    const permission = 'serviceWorker' in navigator && await globalThis.Notification?.requestPermission();
+    toggle.checked = permission === 'granted';
+  } catch {
+    toggle.checked = false;
+  } finally {
+    toggle.disabled = false;
+    db.settings.set('completionNotifications', toggle.checked);
+  }
+  if (!toggle.checked) toast('الإشعارات غير متاحة أو لم يُسمح بها. على الآيفون افتح التطبيق من الشاشة الرئيسية.');
+};
 $('#providerSelect').onchange = (e) => {
   if (S.controller || rec || voiceJob || micStarting || diagnosisController) {
     e.target.value = S.provider;

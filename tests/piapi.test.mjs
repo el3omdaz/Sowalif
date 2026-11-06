@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const local = new Map([['sc.piapiKey', '"fake-piapi"'], ['sc.kieKey', '"never-send-kie"'], ['sc.openRouterKey', '"never-send-or"']]);
 globalThis.localStorage = { getItem: k => local.get(k) ?? null, setItem: (k,v) => local.set(k,v) };
-const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=8');
-const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=8');
+const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=9');
+const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=9');
 
 test('media provider and kie model selection are independent from chat, with no silent failover', () => {
   assert.equal(mediaProvider(), 'piapi');
@@ -82,4 +82,42 @@ test('local image animation uses inline base64 without an upload service', () =>
   assert.equal(spec.body.input.duration, 10);
   assert.throws(() => mediaSpec('video', 'move', { reference: 'data:image/png;base64,AA==', videoModel: '2.6' }), /Kling/);
   assert.equal(taskResult({ status: 'completed', output: { video_url: 'https://cdn.test/framepack.mp4' } }, 'video'), 'https://cdn.test/framepack.mp4');
+});
+
+test('new model families use their own input schemas and read array image results', () => {
+  const reference = 'https://ref.test/photo.png';
+  const banana = mediaSpec('image', 'change the light', { imageModel: 'nano-banana-2.1', reference });
+  assert.deepEqual(banana.body, {
+    model: 'gemini', task_type: 'nano-banana-2.1',
+    input: { prompt: 'change the light', aspect_ratio: '1:1', output_format: 'png', resolution: '1K', image_urls: [reference] },
+  });
+  assert.equal(mediaSpec('image', 'sky', { imageModel: 'seedream-5-pro' }).body.input.size, '2K');
+  const veo = mediaSpec('video', 'pan left', { videoModel: 'veo3.1-video-fast', reference, aspect: '9:16' });
+  assert.equal(veo.body.input.image_url, reference);
+  assert.equal(veo.body.input.duration, '8s');
+  assert.equal(veo.body.input.aspect_ratio, '9:16');
+  assert.equal(taskResult({ status: 'completed', output: { image_urls: [reference] } }, 'image'), reference);
+});
+
+test('automatic PiAPI video follow-ups submit the existing clip for editing or extension', () => {
+  const videoReference = 'https://ref.test/clip.mp4';
+  const edit = mediaSpec('video', 'غيّر الإضاءة', { videoReference });
+  assert.equal(edit.body.task_type, 'seedance-2.5');
+  assert.deepEqual(edit.body.input.video_urls, [videoReference]);
+  assert.equal(edit.body.input.omni_reference_task_type, 'edit');
+  assert.equal(edit.body.input.duration, -1);
+  assert.equal(edit.body.input.aspect_ratio, 'adaptive');
+  const extension = mediaSpec('video', 'كمّل المقطع', { videoReference, duration: 10 });
+  assert.equal(extension.body.input.omni_reference_task_type, 'extend');
+  assert.equal(extension.body.input.duration, 10);
+});
+
+test('a foreground status check only reads the existing task once', async () => {
+  const ids = [];
+  const url = await waitMedia({ id: 'existing', kind: 'video' }, {
+    once: true,
+    readTask: async id => { ids.push(id); return { status: 'pending' }; },
+  });
+  assert.equal(url, null);
+  assert.deepEqual(ids, ['existing']);
 });

@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v8';
-const SHELL = ['./', 'index.html', 'style.css?v=8', 'js/app.js?v=8', 'js/db.js?v=8', 'js/kie.js?v=8', 'js/chat.js?v=8', 'js/models.js?v=8', 'js/openrouter.js?v=8', 'js/memory.js?v=8', 'js/piapi.js?v=8', 'js/media.js?v=8', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v9';
+const SHELL = ['./', 'index.html', 'style.css?v=9', 'js/app.js?v=9', 'js/db.js?v=9', 'js/kie.js?v=9', 'js/chat.js?v=9', 'js/models.js?v=9', 'js/openrouter.js?v=9', 'js/memory.js?v=9', 'js/piapi.js?v=9', 'js/media.js?v=9', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -8,6 +8,18 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL('./', self.registration.scope);
+  url.hash = encodeURIComponent(e.notification.data?.chatId || '');
+  e.waitUntil(self.clients.matchAll({ type: 'window' }).then(async (windows) => {
+    const client = windows.find(window => new URL(window.url).pathname === url.pathname);
+    if (client?.url === url.href) return client.focus();
+    const navigated = await client?.navigate(url.href);
+    return navigated ? navigated.focus() : self.clients.openWindow(url.href);
+  }));
 });
 
 self.addEventListener('fetch', (e) => {

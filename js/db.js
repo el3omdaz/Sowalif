@@ -36,7 +36,7 @@ export const uid = () => `${Date.now().toString(36)}${Math.random().toString(36)
 export async function listChats() {
   const all = await tx('chats', 'readonly', (s) => s.getAll());
   return all
-    .map(({ id, title, model, updatedAt, pinned }) => ({ id, title, model, updatedAt, pinned: !!pinned }))
+    .map(({ id, title, model, updatedAt, pinned, mode }) => ({ id, title, model, updatedAt, pinned: !!pinned, mode }))
     .sort((a, b) => b.pinned - a.pinned || b.updatedAt - a.updatedAt);
 }
 
@@ -44,7 +44,7 @@ export const getChat = (id) => tx('chats', 'readonly', (s) => s.get(id));
 // النصوص فقط للاسترجاع المحلي؛ لا نعيد المرفقات أو مفاتيح المزوّدين.
 export async function recallChats() {
   const all = await tx('chats', 'readonly', (s) => s.getAll());
-  return all.map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: (c.messages || []).filter((m) => !m.error && ['user', 'assistant'].includes(m.role)).map((m) => ({ role: m.role, text: String(m.text || ''), at: m.at })) }));
+  return all.filter(c => !['image', 'video'].includes(c.mode)).map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: (c.messages || []).filter((m) => !m.error && ['user', 'assistant'].includes(m.role)).map((m) => ({ role: m.role, text: String(m.text || ''), at: m.at })) }));
 }
 
 export async function saveChat(chat, touch = true) {
@@ -117,7 +117,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=8');
+  const { readPersonalization } = await import('./memory.js?v=9');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -144,7 +144,7 @@ export async function importAll(file) {
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=8');
+    const { mergePersonalization } = await import('./memory.js?v=9');
     mergePersonalization(data.personalization);
   }
   return n;

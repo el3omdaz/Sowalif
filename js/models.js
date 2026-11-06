@@ -1,5 +1,5 @@
 // النماذج المتاحة عبر kie.ai (docs.kie.ai — نوفمبر 2026)
-import { settings } from './db.js?v=8';
+import { settings } from './db.js?v=9';
 // api: anthropic = /claude/v1/messages · responses = صيغة OpenAI Responses · chat = صيغة Chat Completions
 // tools: يقدر يستدعي أدوات البحث وتوليد الصور بنفسه · search: native = بحث Google مدمج، tool = أداتنا، pre = نبحث قبل السؤال
 

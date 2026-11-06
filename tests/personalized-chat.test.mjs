@@ -15,8 +15,8 @@ globalThis.indexedDB = { open() {
   });
   return request;
 } };
-const { savePersonalization, saveRule } = await import('../js/memory.js?v=8');
-const { respond } = await import('../js/chat.js?v=8');
+const { savePersonalization, saveRule } = await import('../js/memory.js?v=9');
+const { respond } = await import('../js/chat.js?v=9');
 
 test('custom instructions, cross-chat context and gold rule reach both providers without extra model requests', async () => {
   savePersonalization({ instructions: 'رد باللهجة الكويتية وبنقاط واضحة', notes: 'أفضل توقيت الكويت', enabled: true });
@@ -48,7 +48,7 @@ test('custom instructions, cross-chat context and gold rule reach both providers
 });
 
 test('personalization backup excludes API keys and can be exported with chats', async () => {
-  const { exportAll } = await import('../js/db.js?v=8');
+  const { exportAll } = await import('../js/db.js?v=9');
   const text = await (await exportAll()).text();
   const backup = JSON.parse(text);
   assert.equal(backup.version, 2);
@@ -82,14 +82,14 @@ test('OpenRouter chat routes video straight to PiAPI and resumes an existing tas
   assert.equal(reply.mediaTask.id, 'persistent-video');
   assert.match(reply.error, /نفس المهمة/);
   failPoll = false;
-  const { resumeMedia } = await import('../js/chat.js?v=8');
+  const { resumeMedia } = await import('../js/chat.js?v=9');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/result.mp4');
   assert.equal(reply.mediaTask.done, true);
   assert.deepEqual(calls.map(c => c.method), ['POST', 'GET', 'GET']);
   assert.equal(chat.messages.length, 2);
-  const { exportAll } = await import('../js/db.js?v=8');
+  const { exportAll } = await import('../js/db.js?v=9');
   assert.equal((await (await exportAll()).text()).includes('fake-piapi'), false);
 });
 
@@ -115,9 +115,45 @@ test('kie.ai media works under OpenRouter and resumed jobs retain their original
   assert.ok(reply.error);
   local.set('sc.mediaProvider', '"piapi"');
   failed = false;
-  const { resumeMedia } = await import('../js/chat.js?v=8');
+  const { resumeMedia } = await import('../js/chat.js?v=9');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/kie.mp4');
   assert.deepEqual(calls.map(c => c.method), ['POST', 'GET', 'GET']);
+});
+
+test('media workspaces route short follow-ups with their own last reference and keep chat recall separate', async () => {
+  local.set('sc.piapiKey', '"fake-piapi"');
+  local.set('sc.mediaProvider', '"piapi"');
+  const outgoing = [];
+  globalThis.fetch = async (url, init) => {
+    if (init?.method === 'POST') {
+      outgoing.push(JSON.parse(init.body));
+      return Response.json({ code: 200, data: { task_id: String(outgoing.length) } });
+    }
+    if (url.startsWith('https://cdn.test/')) return new Response(null, { status: 403 });
+    return Response.json({ code: 200, data: {
+      status: 'completed', output: { image_url: 'https://cdn.test/result.png', video: 'https://cdn.test/result.mp4' },
+    } });
+  };
+  const image = { id: 'workspace-image', mode: 'image', title: 'صورة', messages: [
+    { role: 'assistant', images: [{ kind: 'image', url: 'https://cdn.test/current.png' }] },
+    { role: 'user', text: 'خلها أغمق' },
+  ] };
+  const video = { id: 'workspace-video', mode: 'video', title: 'فيديو', messages: [
+    { role: 'assistant', videos: [{ kind: 'video', url: 'https://cdn.test/current.mp4' }] },
+    { role: 'user', text: 'غيّر الألوان' },
+  ] };
+  for (const chat of [image, video]) {
+    const reply = await respond(chat, { model: 'or:anthropic/claude-sonnet-5.5', search: true }, () => {});
+    assert.equal(reply.error, undefined);
+  }
+  assert.equal(outgoing[0].task_type, 'kontext');
+  assert.equal(outgoing[0].input.image, 'https://cdn.test/current.png');
+  assert.deepEqual(outgoing[1].input.video_urls, ['https://cdn.test/current.mp4']);
+  image.messages.push({ role: 'user', text: 'غيمة', reuseMedia: false });
+  await respond(image, { model: 'or:anthropic/claude-sonnet-5.5' }, () => {});
+  assert.equal(outgoing[2].task_type, 'txt2img');
+  const { recallChats } = await import('../js/db.js?v=9');
+  assert.ok((await recallChats()).every(chat => !chat.id.startsWith('workspace-')));
 });

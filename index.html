@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <div id="app" class="app">
@@ -35,13 +35,18 @@
         <button id="modelBtn" class="model-btn"><span id="modelName">…</span> <span class="chev">▾</span><small id="providerBadge"></small></button>
         <button id="newChatTop" class="icon-btn" aria-label="محادثة جديدة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M15 4l5 5M10 14l1-5 7-7 5 5-7 7-6 1Z"/></svg></button>
       </header>
+      <nav id="workspaceTabs" class="workspace-tabs" aria-label="أقسام سوالف">
+        <button type="button" data-mode="chat" aria-pressed="true">الشات</button>
+        <button type="button" data-mode="image" aria-pressed="false">الصور</button>
+        <button type="button" data-mode="video" aria-pressed="false">الفيديو</button>
+      </nav>
 
       <section id="messages" class="messages" aria-label="المحادثة">
         <div id="empty" class="empty">
           <div class="welcome-mark" aria-hidden="true">✳</div>
-          <h2>شلون أقدر أساعدك؟</h2>
+          <h2 id="emptyTitle">شلون أقدر أساعدك؟</h2>
           <p id="emptyModel"></p>
-          <div class="chips">
+          <div id="chatChips" class="chips">
             <button class="chip" data-p="اكتب لي فكرة إعلان قصير لعطر فخم باللهجة الخليجية">✍️ فكرة إعلان</button>
             <button class="chip" data-p="شنو آخر الأخبار اليوم؟">🔎 أخبار اليوم</button>
             <button class="chip" data-img="1" data-p="صورة منتج عطر فاخر على رخام أسود بإضاءة سينمائية">🎨 ارسم صورة</button>
@@ -53,6 +58,8 @@
       <footer class="composer-wrap">
         <div id="attachRow" class="attach-row"></div>
         <input id="mediaReference" class="hidden" type="url" dir="ltr" aria-label="رابط صورة مرجعية اختياري" placeholder="رابط صورة عام اختياري https://…">
+        <input id="videoReference" class="hidden" type="url" dir="ltr" aria-label="رابط فيديو مرجعي اختياري" placeholder="رابط فيديو عام اختياري https://…">
+        <label id="reuseMediaRow" class="media-reuse hidden"><input id="reuseMedia" type="checkbox" checked> استخدم آخر مرجع من هذه المحادثة</label>
         <div id="status" class="status hidden" role="status"></div>
         <div id="wakeStatus" class="status hidden" role="status"></div>
         <div class="composer">
@@ -103,6 +110,8 @@
     <div class="sheet-card">
       <div class="sheet-head"><h3>الإعدادات</h3><button class="icon-btn" data-close>✕</button></div>
       <div class="settings">
+        <label class="check-row"><input type="checkbox" id="completionNotifications"> إشعار عند اكتمال المهمة أو الرد</label>
+        <p>يظهر الإشعار إذا وصل الرد أثناء استخدام تطبيق آخر وكان المتصفح ما زال يشغّل سوالف.</p>
         <section>
           <details id="personalizationPanel" class="personalization-panel">
             <summary>تعليمات خاصة وذاكرة مشتركة</summary>
@@ -163,8 +172,8 @@
           <input id="piapiKey" type="password" dir="ltr" autocomplete="off" placeholder="الصق مفتاح PiAPI هنا">
           <div class="row"><button id="savePiapi" class="btn ghost">حفظ مفتاح PiAPI</button><button id="forgetPiapi" class="btn ghost">مسح مفتاح PiAPI</button></div>
           <p id="piapiKeyState" class="muted" role="status"></p>
-          <label for="piapiImageModel">نموذج الصور</label><select id="piapiImageModel"><option value="auto">تلقائي — Flux Schnell / Kontext</option><option value="schnell">Flux Schnell — رسم سريع</option><option value="dev">Flux Dev — رسم</option><option value="kontext">Flux Kontext — تعديل صورة</option></select>
-          <label for="piapiVideoModel">نموذج الفيديو وتحريك الصور</label><select id="piapiVideoModel"><option value="auto">تلقائي — Kling / Framepack</option><option value="framepack">Framepack — تحريك صورة · 10 ثوانٍ</option><option value="2.6">Kling 2.6</option><option value="3.0">Kling 3.0</option><option value="4.0-flash">Kling 4.0 Flash</option><option value="4.0">Kling 4.0</option></select>
+          <label for="piapiImageModel">نموذج الصور</label><select id="piapiImageModel"></select>
+          <label for="piapiVideoModel">نموذج الفيديو وتحريك الصور</label><select id="piapiVideoModel"></select>
           <label for="piapiDuration">مدة الفيديو · للمزوّدين (Framepack ثابت 10 ثوانٍ)</label><select id="piapiDuration"><option value="5">5 ثوانٍ</option><option value="10">10 ثوانٍ</option></select>
           <p class="muted">التلقائي يستخدم Flux Schnell للرسم وKling 2.6 للفيديو من النص، وFramepack لتحريك صورة (10 ثوانٍ، بدون صوت). يتم استخدام آخر صورة مرفقة واحدة. Kling وKontext يحتاجان رابط صورة عام؛ ضعه في خانة المرجع بعد تفعيل وضع الصورة أو الفيديو. خدمة رفع PiAPI لا تدعم المتصفح حالياً؛ Framepack يستقبل الصورة المحلية مباشرة. روابط الفيديو مؤقتة؛ احفظ النتيجة بعد اكتمالها. المفتاح محفوظ على هذا الجهاز ولا يدخل في النسخة الاحتياطية. <a href="https://app.piapi.ai" target="_blank" rel="noopener noreferrer">حساب PiAPI</a></p>
         </section>
@@ -205,6 +214,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=8"></script>
+  <script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>
