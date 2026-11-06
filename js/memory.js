@@ -1,4 +1,4 @@
-import { settings, recallChats, uid } from './db.js?v=12';
+import { settings, recallChats, uid } from './db.js?v=13';
 
 export const normalize = (value) => String(value || '').normalize('NFKC').toLowerCase().replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 const STOP = new Set('من في على الي الى عن ان انا انت هو هي هذا هذي هذه ذاك ذلك اللي لي لك له لها مع او و يا هل ما لا اي كل بس ابي اريد شنو وش كيف متي متى كان تكون يكون عند عندي عندك قل قلت قول قولي عطيني عطني اكتب اشرح موضوع الموضوع the a an is of to and for it this that'.split(' '));

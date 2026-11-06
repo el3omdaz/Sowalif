@@ -1,14 +1,14 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=12';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=12';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=12';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=12';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=12';
-import { mediaProvider } from './media.js?v=12';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=12';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=12';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=12';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=12';
+import * as db from './db.js?v=13';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=13';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=13';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=13';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=13';
+import { mediaProvider } from './media.js?v=13';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=13';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=13';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=13';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=13';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

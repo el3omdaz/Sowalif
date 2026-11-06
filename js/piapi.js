@@ -1,5 +1,5 @@
 // Independent media provider: never uses or forwards chat-provider credentials.
-import { settings } from './db.js?v=12';
+import { settings } from './db.js?v=13';
 
 export const IMAGE_MODELS = [
   { id: 'auto', name: 'تلقائي — Flux Schnell / Kontext' },
@@ -55,7 +55,10 @@ export function mediaSpec(kind, prompt, { aspect = 'auto', reference, videoRefer
       if (!reference) throw new Error('أرفق صورة لاستخدام Framepack أو اختر تلقائي للفيديو من النص');
       return { name: 'Framepack · 10 ثوانٍ', body: { model: 'Qubico/framepack', task_type: 'img2video', input: { prompt, start_image: reference.startsWith('data:') ? reference.slice(reference.indexOf(',') + 1) : reference, duration: 10 } } };
     }
-    if (reference && !/^https?:\/\//i.test(reference)) throw new Error(`${model.name} يحتاج رابط صورة عام. اختر تلقائي أو Framepack لتحريك صورة مرفقة من جهازك.`);
+    if (reference && !/^https?:\/\//i.test(reference)) {
+      if (model.family === 'seedance') throw new Error('Seedance 2.5 عبر PiAPI يحتاج رابط صورة عام. لاستخدام الصورة المرفقة مباشرة، اختر مزوّد الوسائط kie.ai ثم Seedance 2.5 من إعدادات الصور والفيديو.');
+      throw new Error(`${model.name} يحتاج رابط صورة عام. اختر تلقائي أو Framepack لتحريك صورة مرفقة من جهازك.`);
+    }
     const seconds = Number(duration ?? settings.get('piapiDuration', 5));
     if (model.family === 'seedance') {
       const input = { prompt, duration: seconds === 10 ? 10 : 5, resolution: '480p', aspect_ratio: aspect === 'auto' ? '16:9' : aspect, mode: reference || videoReference ? 'omni_reference' : 'text_to_video' };

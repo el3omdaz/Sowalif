@@ -23,12 +23,12 @@ globalThis.indexedDB = { open() {
   });
   return request;
 } };
-const { savePersonalization, saveRule } = await import('../js/memory.js?v=12');
-const { respond } = await import('../js/chat.js?v=12');
+const { savePersonalization, saveRule } = await import('../js/memory.js?v=13');
+const { respond } = await import('../js/chat.js?v=13');
 
 test('work mode stages file changes and saves only after applying them', async () => {
-  const { saveProject, recallChats } = await import('../js/db.js?v=12');
-  const { applyProjectProposal } = await import('../js/project.js?v=12');
+  const { saveProject, recallChats } = await import('../js/db.js?v=13');
+  const { applyProjectProposal } = await import('../js/project.js?v=13');
   const original = { path: 'index.html', content: '<h1>Before</h1>' };
   const change = { path: 'index.html', content: '<h1>After</h1>' };
   const chat = { id: 'work-project', mode: 'work', title: 'محادثة جديدة', messages: [{ role: 'user', text: 'عدّل الصفحة وأضف صورة تجريبية بالكود' }] };
@@ -85,7 +85,7 @@ test('custom instructions, cross-chat context and gold rule reach both providers
 });
 
 test('personalization backup excludes API keys and can be exported with chats', async () => {
-  const { exportAll } = await import('../js/db.js?v=12');
+  const { exportAll } = await import('../js/db.js?v=13');
   const text = await (await exportAll()).text();
   const backup = JSON.parse(text);
   assert.equal(backup.version, 2);
@@ -119,14 +119,14 @@ test('OpenRouter chat routes video straight to PiAPI and resumes an existing tas
   assert.equal(reply.mediaTask.id, 'persistent-video');
   assert.match(reply.error, /status unavailable/);
   failPoll = false;
-  const { resumeMedia } = await import('../js/chat.js?v=12');
+  const { resumeMedia } = await import('../js/chat.js?v=13');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/result.mp4');
   assert.equal(reply.mediaTask.done, true);
   assert.deepEqual(calls.map(c => c.method), ['POST', 'GET', 'GET']);
   assert.equal(chat.messages.length, 2);
-  const { exportAll } = await import('../js/db.js?v=12');
+  const { exportAll } = await import('../js/db.js?v=13');
   assert.equal((await (await exportAll()).text()).includes('fake-piapi'), false);
 });
 
@@ -152,7 +152,7 @@ test('kie.ai media works under OpenRouter and resumed jobs retain their original
   assert.ok(reply.error);
   local.set('sc.mediaProvider', '"piapi"');
   failed = false;
-  const { resumeMedia } = await import('../js/chat.js?v=12');
+  const { resumeMedia } = await import('../js/chat.js?v=13');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/kie.mp4');
@@ -191,6 +191,6 @@ test('media workspaces route short follow-ups with their own last reference and 
   image.messages.push({ role: 'user', text: 'غيمة', reuseMedia: false });
   await respond(image, { model: 'or:anthropic/claude-sonnet-5.5' }, () => {});
   assert.equal(outgoing[2].task_type, 'txt2img');
-  const { recallChats } = await import('../js/db.js?v=12');
+  const { recallChats } = await import('../js/db.js?v=13');
   assert.ok((await recallChats()).every(chat => !chat.id.startsWith('workspace-')));
 });

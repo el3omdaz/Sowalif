@@ -1,4 +1,4 @@
-import { settings } from './db.js?v=12';
+import { settings } from './db.js?v=13';
 
 export function mediaProvider() {
   const choice = settings.get('mediaProvider', 'auto');
@@ -8,7 +8,13 @@ export function kieMediaSpec(kind, prompt, { reference, aspect = 'auto' } = {}) 
   const duration = settings.get('piapiDuration', 5) == 10 ? '10' : '5';
   if (kind === 'video') {
     const choice = settings.get('kieVideoModel', 'auto');
-    if (!['auto', 'kling-2.6', 'wan-2.6'].includes(choice)) throw new Error('اختر نموذج فيديو kie.ai صالحاً');
+    if (!['auto', 'kling-2.6', 'wan-2.6', 'seedance-2.5'].includes(choice)) throw new Error('اختر نموذج فيديو kie.ai صالحاً');
+    if (choice === 'seedance-2.5') {
+      const ratio = ['16:9', '9:16', '1:1', '4:3', '3:4'].includes(aspect) ? aspect : '16:9';
+      const input = { prompt, duration: Number(duration), resolution: '720p', aspect_ratio: ratio };
+      if (reference) input.reference_image_urls = [reference];
+      return { name: 'Seedance 2.5', body: { model: 'bytedance/seedance-2-5', input } };
+    }
     if (choice === 'wan-2.6') {
       if (!reference) throw new Error('نموذج Wan المحدد يحتاج صورة؛ أرفق صورة أو اختر Kling / تلقائي');
       return { name: 'Wan 2.6', body: { model: 'wan/2-6-image-to-video', input: { prompt, image_urls: [reference], duration, resolution: '720p', multi_shots: false } } };

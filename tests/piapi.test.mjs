@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const local = new Map([['sc.piapiKey', '"fake-piapi"'], ['sc.kieKey', '"never-send-kie"'], ['sc.openRouterKey', '"never-send-or"']]);
 globalThis.localStorage = { getItem: k => local.get(k) ?? null, setItem: (k,v) => local.set(k,v) };
-const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=12');
-const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=12');
+const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=13');
+const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=13');
 
 test('media provider and kie model selection are independent from chat, with no silent failover', () => {
   assert.equal(mediaProvider(), 'piapi');
@@ -110,6 +110,20 @@ test('automatic PiAPI video follow-ups submit the existing clip for editing or e
   const extension = mediaSpec('video', 'كمّل المقطع', { videoReference, duration: 10 });
   assert.equal(extension.body.input.omni_reference_task_type, 'extend');
   assert.equal(extension.body.input.duration, 10);
+});
+
+test('Kie Seedance accepts the uploaded image URL and leaves PiAPI URL validation intact', () => {
+  local.set('sc.kieVideoModel', '"seedance-2.5"');
+  try {
+    const reference = 'https://files.test/reference.png';
+    const spec = kieMediaSpec('video', 'حرّك الصورة', { reference, aspect: '9:16' });
+    assert.equal(spec.body.model, 'bytedance/seedance-2-5');
+    assert.deepEqual(spec.body.input.reference_image_urls, [reference]);
+    assert.equal(spec.body.input.aspect_ratio, '9:16');
+    assert.throws(() => mediaSpec('video', 'حرّك الصورة', { videoModel: 'seedance-2.5', reference: 'data:image/png;base64,AAAA' }), /PiAPI.*kie\.ai/);
+  } finally {
+    local.delete('sc.kieVideoModel');
+  }
 });
 
 test('a foreground status check only reads the existing task once', async () => {
