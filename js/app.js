@@ -1,14 +1,14 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=13';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=13';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=13';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=13';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=13';
-import { mediaProvider } from './media.js?v=13';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=13';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=13';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=13';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=13';
+import * as db from './db.js?v=14';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=14';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=14';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=14';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=14';
+import { mediaProvider } from './media.js?v=14';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=14';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=14';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=14';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=14';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -75,11 +75,23 @@ async function boot() {
 }
 
 const modelOf = (id) => modelById(id);
+const selectedMediaKind = () => isMediaWorkspace() ? S.mode : S.videoMode ? 'video' : S.imageMode ? 'image' : null;
+const mediaModelKey = (kind, provider) => `${provider === 'kie' ? 'kie' : 'piapi'}${kind === 'video' ? 'Video' : 'Image'}Model`;
+const mediaProviderName = provider => provider === 'kie' ? 'kie.ai' : 'PiAPI';
 
 function renderModelName() {
   const m = modelOf(S.model);
-  $('#modelName').textContent = m.name;
-  $('#providerBadge').textContent = m.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai';
+  const kind = selectedMediaKind();
+  if (kind) {
+    const provider = mediaProvider();
+    const key = mediaModelKey(kind, provider);
+    const selected = [...$(`#${key}`).options].find(option => option.value === db.settings.get(key, 'auto'));
+    $('#modelName').textContent = selected?.value === 'auto' ? 'تلقائي' : selected?.textContent || 'اختر النموذج';
+    $('#providerBadge').textContent = mediaProviderName(provider);
+  } else {
+    $('#modelName').textContent = m.name;
+    $('#providerBadge').textContent = m.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai';
+  }
   $('#emptyModel').textContent = {
     chat: `${m.name} — ${m.tagline}`,
     image: 'اكتب وصفاً للرسم أو أرفق صورة وقل شنو تبي تغيّر فيها.',
@@ -180,7 +192,6 @@ function applyWorkspace(mode) {
   }
   $('#emptyTitle').textContent = { chat: 'شلون أقدر أساعدك؟', image: 'شنو تبي ترسم؟', video: 'شنو الفيديو اللي تبيه؟', work: 'شنو تبي تبني اليوم؟' }[mode];
   $('#chatChips').classList.toggle('hidden', mode !== 'chat');
-  $('#modelBtn').classList.toggle('hidden', isMediaWorkspace());
   $('#projectBar').classList.toggle('hidden', mode !== 'work');
   $('#newChat').textContent = mode === 'work' ? '＋ مشروع جديد' : '＋ محادثة جديدة';
   $('#newChatTop').setAttribute('aria-label', mode === 'work' ? 'مشروع جديد' : 'محادثة جديدة');
@@ -456,8 +467,27 @@ async function copy(text) {
 
 // ---------- اختيار النموذج ----------
 function openModels() {
-  const groups = {};
   const query = $('#modelSearch').value.trim().toLowerCase();
+  const kind = selectedMediaKind();
+  $('#modelSheetTitle').textContent = kind === 'video' ? 'اختر نموذج الفيديو' : kind === 'image' ? 'اختر نموذج الصور' : 'اختر النموذج';
+  $('#modelMediaOptions').classList.toggle('hidden', !kind);
+  $('#modelSheet').classList.remove('hidden');
+  if (kind) {
+    const provider = mediaProvider();
+    const key = mediaModelKey(kind, provider);
+    const selected = db.settings.get(key, 'auto');
+    $('#modelMediaProvider').value = db.settings.get('mediaProvider', 'auto');
+    const hasKey = db.settings.get(provider === 'kie' ? 'kieKey' : 'piapiKey', '');
+    $('#modelMediaHint').textContent = hasKey
+      ? `النماذج المتاحة عبر ${mediaProviderName(provider)}`
+      : `أضف مفتاح ${mediaProviderName(provider)} من إعدادات الصور والفيديو لاستخدام نماذجه.`;
+    $('#modelList').innerHTML = [...$(`#${key}`).options]
+      .filter(option => !query || option.textContent.toLowerCase().includes(query) || option.value.toLowerCase().includes(query))
+      .map(option => `<button type="button" class="model${option.value === selected ? ' active' : ''}" data-id="${esc(option.value)}" aria-pressed="${option.value === selected}">${esc(option.textContent)}</button>`)
+      .join('') || '<p class="muted">ما لقيت نموذج بهذا الاسم.</p>';
+    return;
+  }
+  const groups = {};
   for (const m of modelsFor(S.provider).filter((m) => !query || `${m.name} ${m.remoteId || m.id}`.toLowerCase().includes(query))) (groups[m.maker] ||= []).push(m);
   $('#modelList').innerHTML = Object.entries(groups)
     .map(
@@ -473,14 +503,29 @@ function openModels() {
           .join(''),
     )
     .join('');
-  $('#modelSheet').classList.remove('hidden');
 }
-$('#modelBtn').onclick = () => { $('#modelSearch').value = ''; openModels(); };
+$('#modelBtn').onclick = () => {
+  if (S.controller) return toast('انتظر انتهاء الطلب قبل تغيير النموذج.');
+  $('#modelSearch').value = '';
+  openModels();
+};
 $('#modelSearch').addEventListener('input', openModels);
+$('#modelMediaProvider').onchange = (event) => {
+  if (S.controller || !db.settings.set('mediaProvider', event.target.value)) {
+    toast('تعذّر تغيير مزوّد الوسائط الآن.');
+  }
+  renderModelName();
+  openModels();
+};
 $('#modelList').addEventListener('click', (e) => {
   const b = e.target.closest('.model');
-  if (!b) return;
-  S.model = b.dataset.id;
+  if (!b || S.controller) return;
+  const kind = selectedMediaKind();
+  if (kind) {
+    if (!db.settings.set(mediaModelKey(kind, mediaProvider()), b.dataset.id)) return toast('تعذّر حفظ النموذج.');
+  } else {
+    S.model = b.dataset.id;
+  }
   renderModelName();
   $('#modelSheet').classList.add('hidden');
 });
@@ -523,6 +568,7 @@ function syncToggles() {
   $('#fileInput').accept = isMediaWorkspace() ? 'image/*' : 'image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt';
   input.placeholder = video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…'
     : S.mode === 'work' ? 'صف التطبيق أو التعديل اللي تبيه…' : 'اكتب رسالتك…';
+  renderModelName();
 }
 $('#searchBtn').onclick = () => {
   S.search = !S.search;
@@ -1320,6 +1366,7 @@ function openSettings(group) {
   }
   $('#completionNotifications').checked = db.settings.get('completionNotifications', false) && globalThis.Notification?.permission === 'granted';
   $('#mediaProvider').value = db.settings.get('mediaProvider', 'auto');
+  renderModelName();
   $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';
   for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).value = db.settings.get(id, 'auto');
   $('#piapiKeyState').textContent = db.settings.get('piapiKey', '') ? '✓ مفتاح PiAPI محفوظ؛ يُستخدم للصور والفيديو مع أي مزوّد محادثة' : 'لم يُحفظ مفتاح PiAPI بعد';
@@ -1341,7 +1388,15 @@ function openSettings(group) {
   $('#defaultModel').innerHTML = modelsFor(S.provider).map((m) => `<option value="${esc(m.id)}"${m.id === S.defaultModel ? ' selected' : ''}>${esc(m.name)}${m.badge ? ` — ${m.badge}` : ''}</option>`).join('');
 }
 $('#openSettings').onclick = openSettings;
-$('#mediaProvider').onchange = (e) => db.settings.set('mediaProvider', e.target.value);
+function saveMediaPreference(event) {
+  const field = event.target;
+  if (S.controller || !db.settings.set(field.id, field.value)) {
+    field.value = db.settings.get(field.id, field.id === 'piapiDuration' ? 5 : 'auto');
+    return toast('تعذّر حفظ إعداد الوسائط الآن.');
+  }
+  renderModelName();
+}
+$('#mediaProvider').onchange = saveMediaPreference;
 $('#saveMediaKie').onclick = () => {
   const key = $('#mediaKieKey').value.trim();
   if (!key) return toast('الصق مفتاح kie.ai أولاً');
@@ -1350,7 +1405,7 @@ $('#saveMediaKie').onclick = () => {
   openSettings();
 };
 $('#forgetMediaKie').onclick = () => { db.settings.set('kieKey', ''); $('#mediaKieKey').value = ''; openSettings(); };
-for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).onchange = (e) => db.settings.set(id, e.target.value);
+for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).onchange = saveMediaPreference;
 $('#savePiapi').onclick = () => {
   const key = $('#piapiKey').value.trim();
   if (!key) return toast('الصق مفتاح PiAPI أولاً');
@@ -1360,7 +1415,7 @@ $('#savePiapi').onclick = () => {
   toast('تم حفظ مفتاح PiAPI');
 };
 $('#forgetPiapi').onclick = () => { db.settings.set('piapiKey', ''); $('#piapiKey').value = ''; openSettings(); };
-for (const id of ['piapiImageModel', 'piapiVideoModel', 'piapiDuration']) $(`#${id}`).onchange = (e) => db.settings.set(id, e.target.value);
+for (const id of ['piapiImageModel', 'piapiVideoModel', 'piapiDuration']) $(`#${id}`).onchange = saveMediaPreference;
 
 $('#completionNotifications').onchange = async (e) => {
   const toggle = e.target;

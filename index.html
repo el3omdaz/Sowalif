@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
   <div id="app" class="app">
@@ -104,7 +104,14 @@
   <!-- اختيار النموذج -->
   <div id="modelSheet" class="sheet hidden">
     <div class="sheet-card">
-      <div class="sheet-head"><h3>اختر النموذج</h3><button class="icon-btn" data-close>✕</button></div>
+      <div class="sheet-head"><h3 id="modelSheetTitle">اختر النموذج</h3><button class="icon-btn" data-close aria-label="إغلاق">✕</button></div>
+      <div id="modelMediaOptions" class="model-media-options hidden">
+        <label for="modelMediaProvider">مزوّد الوسائط</label>
+        <select id="modelMediaProvider">
+          <option value="auto">تلقائي</option><option value="kie">kie.ai</option><option value="piapi">PiAPI</option>
+        </select>
+        <p id="modelMediaHint" class="muted" role="status"></p>
+      </div>
       <input id="modelSearch" type="search" placeholder="ابحث عن نموذج" aria-label="ابحث عن نموذج">
       <div id="modelList" class="model-list"></div>
     </div>
@@ -275,6 +282,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=13"></script>
+  <script type="module" src="js/app.js?v=14"></script>
 </body>
 </html>

@@ -11,7 +11,7 @@ function app() {
       const classes = new Set();
       nodes.set(s, { value: '', innerHTML: '<svg>mic</svg>', textContent: '', style: {}, scrollHeight: 48,
         classList: { add: (...a) => a.forEach((v) => classes.add(v)), remove: (...a) => a.forEach((v) => classes.delete(v)), contains: (v) => classes.has(v), toggle: () => {} },
-        setAttribute() {}, addEventListener() {}, focus() {}, click() { return this.onclick?.(); },
+        setAttribute() {}, listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; }, focus() {}, click() { return this.onclick?.(); },
       });
     }
     return nodes.get(s);
@@ -45,6 +45,27 @@ function app() {
   vm.runInContext(source, ctx);
   return { ctx, node, timers, documentEvents, speech: () => speech, run: (s) => vm.runInContext(s, ctx) };
 }
+
+test('video model picker changes the media provider and model independently of chat', () => {
+  const a = app();
+  const prefs = new Map();
+  a.ctx.db.settings.get = (key, fallback) => prefs.get(key) ?? fallback;
+  a.ctx.db.settings.set = (key, value) => (prefs.set(key, value), true);
+  a.ctx.modelById = () => ({ name: 'Chat model' });
+  a.ctx.mediaProvider = () => prefs.get('mediaProvider') || 'piapi';
+  a.node('#piapiVideoModel').options = [{ value: 'auto', textContent: 'تلقائي' }];
+  a.node('#kieVideoModel').options = [{ value: 'seedance-2.5', textContent: 'Seedance 2.5' }];
+  a.run("S.mode = 'video'; S.model = 'chat-model'");
+  a.node('#modelBtn').click();
+  a.node('#modelMediaProvider').onchange({ target: { value: 'kie' } });
+  assert.match(a.node('#modelList').innerHTML, /Seedance 2\.5/);
+  a.node('#modelList').listeners.click({ target: { closest: () => ({ dataset: { id: 'seedance-2.5' } }) } });
+  assert.equal(prefs.get('mediaProvider'), 'kie');
+  assert.equal(prefs.get('kieVideoModel'), 'seedance-2.5');
+  assert.equal(a.node('#modelName').textContent, 'Seedance 2.5');
+  assert.equal(a.node('#providerBadge').textContent, 'kie.ai');
+  assert.equal(a.run('S.model'), 'chat-model');
+});
 
 test('live dictation keeps the draft, replaces interim text, and cleans up on stop', () => {
   const a = app();

@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v13';
-const SHELL = ['./', 'index.html', 'style.css?v=13', 'js/app.js?v=13', 'js/media-push.js?v=13', 'js/project.js?v=13', 'js/db.js?v=13', 'js/kie.js?v=13', 'js/chat.js?v=13', 'js/models.js?v=13', 'js/openrouter.js?v=13', 'js/memory.js?v=13', 'js/piapi.js?v=13', 'js/media.js?v=13', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v14';
+const SHELL = ['./', 'index.html', 'style.css?v=14', 'js/app.js?v=14', 'js/media-push.js?v=14', 'js/project.js?v=14', 'js/db.js?v=14', 'js/kie.js?v=14', 'js/chat.js?v=14', 'js/models.js?v=14', 'js/openrouter.js?v=14', 'js/memory.js?v=14', 'js/piapi.js?v=14', 'js/media.js?v=14', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
