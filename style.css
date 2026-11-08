@@ -203,6 +203,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .settings-body p { margin: 6px 0; }
 .settings-body label:not(.btn) { display: block; margin: 8px 0 4px; }
 .settings-body .row { flex-wrap: wrap; }
+.settings .settings-group > summary { min-height: 70px; }
+.settings .settings-group > summary small { font-size: 12px; }
+.settings .settings-body .muted { font-size: 12px; line-height: 1.65; }
+.settings .settings-body p:empty { display: none; }
+.settings-subgroup { border: 1px solid var(--line); border-radius: 12px; margin-block: 10px; }
+.settings-subgroup > summary { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; padding: 12px; font-size: 14px; font-weight: 600; }
+.settings-subgroup > summary::-webkit-details-marker { display: none; }
+.settings-subgroup > summary::after { content: '＋'; color: var(--muted); }
+.settings-subgroup[open] > summary::after { content: '−'; }
+.settings summary:focus-visible { outline: 2px solid var(--text); outline-offset: -3px; border-radius: 12px; }
 .personalization-panel > label { display: block; font-size: 14px; margin: 12px 0 6px; }
 .personalization-panel h4 { margin-top: 20px; }
 .personalization-panel textarea { display: block; width: 100%; resize: vertical; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--panel); line-height: 1.7; font-size: 16px; }

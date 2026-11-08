@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v18';
-const SHELL = ['./', 'index.html', 'style.css?v=16', 'js/app.js?v=18', 'js/media-push.js?v=16', 'js/project.js?v=16', 'js/project-github.js?v=16', 'js/project-folder.js?v=16', 'js/db.js?v=16', 'js/kie.js?v=16', 'js/chat.js?v=16', 'js/models.js?v=16', 'js/openrouter.js?v=16', 'js/memory.js?v=16', 'js/piapi.js?v=16', 'js/media.js?v=16', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v19';
+const SHELL = ['./', 'index.html', 'style.css?v=19', 'js/app.js?v=19', 'js/media-push.js?v=16', 'js/project.js?v=16', 'js/project-github.js?v=16', 'js/project-folder.js?v=16', 'js/db.js?v=16', 'js/kie.js?v=16', 'js/chat.js?v=16', 'js/models.js?v=16', 'js/openrouter.js?v=16', 'js/memory.js?v=16', 'js/piapi.js?v=16', 'js/media.js?v=16', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

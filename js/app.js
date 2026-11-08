@@ -1563,7 +1563,7 @@ function openSettings(group) {
   renderModelName();
   $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';
   for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).value = db.settings.get(id, 'auto');
-  $('#piapiKeyState').textContent = db.settings.get('piapiKey', '') ? '✓ مفتاح PiAPI محفوظ؛ يُستخدم للصور والفيديو مع أي مزوّد محادثة' : 'لم يُحفظ مفتاح PiAPI بعد';
+  $('#piapiKeyState').textContent = db.settings.get('piapiKey', '') ? '✓ مفتاح PiAPI محفوظ' : 'لا يوجد مفتاح PiAPI';
   for (const [id, key, fallback] of [['piapiImageModel', 'piapiImageModel', 'auto'], ['piapiVideoModel', 'piapiVideoModel', 'auto'], ['piapiDuration', 'piapiDuration', 5]]) $(`#${id}`).value = db.settings.get(key, fallback);
   loadPersonalSettings();
   closeSide();
@@ -1572,7 +1572,7 @@ function openSettings(group) {
   const k = db.settings.get(keySetting(S.provider), '');
   $('#providerSelect').value = S.provider;
   $('#keyTitle').textContent = `مفتاح ${isOR ? 'OpenRouter' : 'kie.ai'}`;
-  $('#keyHelp').innerHTML = isOR ? 'أضف مفتاحك من <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouter ← Keys</a>. تُحسب المحادثة والبحث والصوت على رصيد OpenRouter. الصور والفيديو تستخدم مزوّد الوسائط المختار أدناه.' : 'أضف مفتاحك من kie.ai ← API Key. الصور والفيديو تستخدم مزوّد الوسائط المختار أدناه بشكل مستقل.';
+  $('#keyHelp').innerHTML = isOR ? '<a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">الحصول على مفتاح OpenRouter ↗</a>' : 'من حساب kie.ai ← API Key.';
   $('#keyInput').placeholder = isOR ? 'sk-or-v1-…' : 'الصق مفتاح kie.ai هنا';
   $('#checkKey').textContent = isOR ? 'فحص المفتاح' : '💰 الرصيد';
   $('#forgetKey').textContent = `مسح مفتاح ${isOR ? 'OpenRouter' : 'kie.ai'} من هذا الجهاز`;
