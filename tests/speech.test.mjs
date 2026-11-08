@@ -41,6 +41,7 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
     providerOf: (id) => String(id).startsWith('or:') ? 'openrouter' : 'kie',
     agentCredentials: () => ({ engine: 'off', provider: 'openrouter', key: '', model: '' }),
     localAgentOrigin: () => false,
+    fitViewport: () => {},
     readPersonalization: () => ({ instructions: '', notes: '', enabled: true, rules: [] }),
     marked: { setOptions() {} },
     setTimeout: setTimer, setInterval: setTimer, clearTimeout: clearTimer, clearInterval: clearTimer,

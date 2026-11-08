@@ -1,5 +1,6 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
 import * as db from './db.js?v=20';
+import { fitViewport } from './viewport.js?v=21';
 import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=20';
 import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=20';
 import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=20';
@@ -664,11 +665,13 @@ $('#imgBtn').onclick = () => {
 $('#videoBtn').onclick = () => { S.videoMode = !S.videoMode; S.imageMode = false; syncToggles(); };
 
 const input = $('#input');
-function autosize() {
+function autosize(height = window.visualViewport?.height || innerHeight) {
+  if (typeof height !== 'number') height = window.visualViewport?.height || innerHeight;
   input.style.height = 'auto';
-  input.style.height = `${Math.min(input.scrollHeight, innerHeight * 0.4)}px`;
+  input.style.height = `${Math.min(input.scrollHeight, height * 0.3)}px`;
   updateSend();
 }
+fitViewport(window, document, autosize);
 input.addEventListener('input', autosize);
 input.addEventListener('keydown', (e) => {
   if ((e.key !== 'Enter' && e.code !== 'NumpadEnter') || e.shiftKey || e.isComposing) return;
