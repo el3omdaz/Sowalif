@@ -269,7 +269,6 @@ test('provider switching keeps keys and defaults independent in settings', async
   a.node('#providerSelect').onchange({ target: a.node('#providerSelect') });
   assert.equal(a.run('S.provider'), 'openrouter');
   assert.equal(a.run('S.model'), 'or:test/model');
-  assert.equal(a.node('#imgBtn').disabled, false);
   a.node('#keyInput').value = 'new-openrouter-key';
   a.node('#saveKey').onclick();
   await new Promise(setImmediate);

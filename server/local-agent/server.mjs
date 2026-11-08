@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile, readdir, lstat, unlink, realpath } from 'no
 import { resolve, join, dirname, relative, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validProjectPath, mergeProjectFiles } from '../../js/project.js?v=20';
+import { artifactFile, listArtifacts } from './artifacts.mjs';
 
 export const IMAGE = 'sowalif-coding-agent:1';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -76,7 +77,7 @@ export async function snapshot(root) {
   async function walk(directory, prefix = '') {
     for (const item of await readdir(directory, { withFileTypes: true })) {
       const name = prefix + item.name;
-      if (item.isSymbolicLink() || item.name.startsWith('.') || ['node_modules', 'vendor', 'dist', 'build', 'coverage'].includes(item.name)) continue;
+      if (item.isSymbolicLink() || item.name.startsWith('.') || ['node_modules', 'vendor', 'dist', 'build', 'coverage', 'outputs'].includes(item.name)) continue;
       if (item.isDirectory()) await walk(join(directory, item.name), name + '/');
       else if (item.isFile() && validProjectPath(name)) {
         const target = await safeFile(root, name);
@@ -129,11 +130,19 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (req.method !== 'GET' && (req.headers.origin !== `http://${host}` || req.headers['x-sowalif-csrf'] !== csrf || !req.headers['content-type']?.startsWith('application/json'))) return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
         if (url.pathname === '/api/agent/status' && req.method === 'GET') return json(res, 200, { local: true, ready: await ready(), csrf, engines: ['claude', 'codex'] });
         if (url.pathname === '/api/media/upload' && req.method === 'POST') return json(res, 200, await upload(await body(req, 15 * 1024 * 1024)));
+        if (url.pathname === '/api/agent/artifact' && req.method === 'GET') {
+          const p = await project(url.searchParams.get('project'));
+          const path = url.searchParams.get('path');
+          const { target } = await artifactFile(p.workspace, path);
+          res.setHeader('Content-Disposition', `attachment; filename="download.${path.split('.').at(-1)}"; filename*=UTF-8''${encodeURIComponent(path.split('/').at(-1))}`);
+          res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+          return await serve(res, target);
+        }
         if (url.pathname === '/api/agent/project' && req.method === 'GET') {
           const id = url.searchParams.get('id');
           const p = await project(id);
           if (active.has(id)) return json(res, 200, { activeRun: active.get(id) });
-          return json(res, 200, { revision: p.state.revision, files: await snapshot(p.workspace) });
+          return json(res, 200, { revision: p.state.revision, files: await snapshot(p.workspace), artifacts: await listArtifacts(p.workspace) });
         }
         if (url.pathname === '/api/agent/recover' && req.method === 'POST') {
           const input = await body(req);
@@ -142,7 +151,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           p.state.files = await snapshot(p.workspace);
           p.state.revision++;
           await writeFile(p.statePath, JSON.stringify(p.state));
-          return json(res, 200, { files: p.state.files, revision: p.state.revision });
+          return json(res, 200, { files: p.state.files, revision: p.state.revision, artifacts: await listArtifacts(p.workspace) });
         }
         if (url.pathname === '/api/agent/runs' && req.method === 'POST') {
           const input = await body(req);
@@ -189,6 +198,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             settled = true;
             try {
               run.files = await snapshot(p.workspace);
+              run.artifacts = await listArtifacts(p.workspace);
               p.state.files = run.files;
               p.state.revision++;
               if (run.sessionId) p.state.sessions[sessionKey] = run.sessionId;
@@ -206,7 +216,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             // Bound memory without discarding the newest job or its workspace.
             for (const [key, old] of runs) if (key !== id && old.state !== 'running' && Date.now() - old.createdAt > 3600_000) runs.delete(key);
           };
-          const context = 'You are working in Sowalif. Work only in /workspace. Do not deploy or publish. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). Reply in the user language.\n\n' + input.prompt;
+          const context = 'You are working in Sowalif. Work only in /workspace. Do not deploy or publish. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). You can also create real downloadable PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, ZIP and image files whenever the user asks, without requiring a special mode or toggle. Save final deliverables in /workspace/outputs/ with descriptive filenames; put generation scripts outside outputs. Python packages reportlab, docx, openpyxl, pptx, arabic_reshaper and bidi plus Noto Arabic fonts are preinstalled. Use proper RTL and Arabic shaping/fonts for Arabic documents. Verify generated files open correctly; never merely rename plain text to a binary extension. Excel formulas must be real formulas; clearly distinguish calculated/cached values if no calculation engine is available. The app automatically exposes outputs as download links; do not invent public URLs. Reply in the user language.\n\n' + input.prompt;
           try {
             run.handle = launch({ workspace: p.workspace, sessions: p.sessions,
               config: { engine: input.engine, provider: input.provider, key: input.key, model: input.model || undefined, prompt: context, budget: Math.max(.1, Math.min(10, Number(input.budget) || 2)), sessionId: p.state.sessions[sessionKey] }, emit, done });

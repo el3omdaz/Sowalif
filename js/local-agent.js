@@ -30,6 +30,10 @@ export async function localStatus() {
   return state;
 }
 export const answerAgent = (runId, id, allow) => api(`runs/${encodeURIComponent(runId)}/approval`, { id, allow });
+export function agentArtifactUrl(chat, file) {
+  if (!localAgentOrigin() || typeof file?.path !== 'string' || !/^outputs\/(?!.*(?:\.\.|\\))[^\u0000-\u001f]+\.(pdf|docx|xlsx|pptx|csv|txt|md|json|zip|png|jpe?g|webp)$/i.test(file.path)) return '';
+  return `/api/agent/artifact?project=${encodeURIComponent(projectId(chat))}&path=${encodeURIComponent(file.path)}`;
+}
 const pause = () => new Promise(resolve => setTimeout(resolve, 800));
 
 export async function collectAgentRun(chat, reply, emit, signal) {
@@ -43,6 +47,7 @@ export async function collectAgentRun(chat, reply, emit, signal) {
       if (delta) emit('delta', { text: delta });
       if (run.state !== 'running') {
         reply.agentCompleted = true;
+        reply.agentArtifacts = run.artifacts || [];
         reply.agentError = run.error;
         if (run.error) reply.error = run.error;
         if (run.state === 'stopped') reply.stopped = true;

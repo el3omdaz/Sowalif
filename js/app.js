@@ -12,7 +12,7 @@ import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } fro
 import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=20';
 import { prepareProjectPush, pushProject } from './project-github.js?v=20';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=20';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject } from './local-agent.js?v=20';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl } from './local-agent.js?v=22';
 import { cloud, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=20';
 
 const $ = (s) => document.querySelector(s);
@@ -414,6 +414,7 @@ function messageHTML(m, i) {
     ${imgs ? `<div class="gen">${imgs}</div>` : ''}
     ${m.text ? `<div class="bubble md">${md(m.text)}</div>` : ''}
     ${m.promptStudio ? promptStudioHTML(m.promptStudio) : ''}
+    ${m.agentArtifacts?.length ? `<div class="agent-artifacts">${m.agentArtifacts.map(file => { const url = agentArtifactUrl(S.chat, file); return url ? `<a class="btn" href="${esc(url)}" download>↓ ${esc(file.name)} <small>${Math.max(1, Math.ceil(file.size / 1024))} KB</small></a>` : ''; }).join('')}</div>` : ''}
     ${m.error ? `<div class="err-box">⚠️ ${esc(m.error)}</div>` : ''}
     ${S.mode === 'work' && m.projectProposal ? projectProposalHTML(m.projectProposal) : ''}
     ${m.agentChanges?.length ? `<details class="agent-changes"><summary>تغييرات ${m.agentChanges.length} ملف · محفوظة في نسخة المشروع</summary>${m.agentChanges.map(change => `<details><summary>${esc(change.path)}</summary><div>قبل</div><pre dir="auto">${esc(change.before ?? '(ملف جديد)')}</pre><div>بعد</div><pre dir="auto">${esc(change.after ?? '(محذوف)')}</pre></details>`).join('')}</details>${m.agentAppliedRevision === S.chat.project?.revision ? '<button class="btn ghost" data-undo-agent>التراجع عن تغييرات هذا التنفيذ</button>' : ''}` : ''}
@@ -517,8 +518,8 @@ $('#messages').addEventListener('click', async (e) => {
 $('#empty').addEventListener('click', (e) => {
   const c = e.target.closest('.chip');
   if (!c) return;
+  if (c.dataset.img) newChat('image');
   input.value = c.dataset.p;
-  if (c.dataset.img && !S.imageMode) $('#imgBtn').click();
   autosize();
   input.focus();
 });
@@ -620,21 +621,19 @@ function syncToggles() {
   const image = !extracting && (S.mode === 'image' || S.imageMode);
   const video = S.mode === 'video' || S.videoMode;
   const media = image || video;
-  for (const [id, active] of [['searchBtn', S.search && !S.imageMode], ['deepBtn', S.deep && !S.imageMode], ['imgBtn', S.imageMode]]) {
+  for (const [id, active] of [['searchBtn', S.search && !S.imageMode], ['deepBtn', S.deep && !S.imageMode]]) {
     $(`#${id}`).setAttribute('aria-pressed', String(active));
   }
   $('#searchBtn').classList.toggle('on', S.search && !S.imageMode);
   $('#searchBtn').disabled = S.imageMode;
   $('#deepBtn').classList.toggle('on', S.deep && !S.imageMode);
   $('#deepBtn').disabled = S.imageMode;
-  $('#imgBtn').classList.toggle('on', S.imageMode);
-  $('#imgBtn').disabled = false;
-  $('#imgBtn').title = 'توليد صورة من الوصف';
-  $('#videoBtn').classList.toggle('on', S.videoMode);
-  $('#videoBtn').setAttribute('aria-pressed', String(S.videoMode));
   $('#searchBtn').disabled = media;
   $('#deepBtn').disabled = media;
   $('#aspect').classList.toggle('hidden', !media);
+  const toolsLabel = [!media && S.search && 'بحث الويب', !media && S.deep && 'تفكير', image && 'صورة', video && 'فيديو'].filter(Boolean).join(' · ');
+  $('#composerContext').textContent = toolsLabel;
+  $('#composerContext').classList.toggle('hidden', !toolsLabel);
   $('#mediaReference').classList.toggle('hidden', !media);
   $('#videoReference').classList.toggle('hidden', S.mode !== 'video');
   $('#reuseMediaRow').classList.toggle('hidden', !isMediaWorkspace());
@@ -642,7 +641,6 @@ function syncToggles() {
   $('#imageCreate').setAttribute('aria-pressed', String(!extracting));
   $('#imageExtract').setAttribute('aria-pressed', String(extracting));
   for (const id of ['searchBtn', 'deepBtn']) $(`#${id}`).classList.toggle('hidden', isMediaWorkspace());
-  for (const id of ['imgBtn', 'videoBtn']) $(`#${id}`).classList.toggle('hidden', S.mode !== 'chat');
   $('#fileInput').accept = isMediaWorkspace() ? 'image/*' : 'image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt';
   input.placeholder = extracting ? 'أرفق الصورة… واكتب التعديلات اللي تبيها (اختياري)' : video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…'
     : S.mode === 'work' ? 'صف التطبيق أو التعديل اللي تبيه…' : 'اكتب رسالتك…';
@@ -657,12 +655,6 @@ $('#deepBtn').onclick = () => {
   S.deep = !S.deep;
   syncToggles();
 };
-$('#imgBtn').onclick = () => {
-  S.imageMode = !S.imageMode;
-  S.videoMode = false;
-  syncToggles();
-};
-$('#videoBtn').onclick = () => { S.videoMode = !S.videoMode; S.imageMode = false; syncToggles(); };
 
 const input = $('#input');
 function autosize(height = window.visualViewport?.height || innerHeight) {
@@ -761,7 +753,24 @@ $('#fileInput').addEventListener('change', (e) => {
   e.target.value = '';
 });
 // السحب والإفلات واللصق على الكمبيوتر
-$('#attachBtn').onclick = () => $('#fileInput').click();
+function closeComposerTools() {
+  $('#composerSheet').classList.add('hidden');
+  $('#composerMore').setAttribute('aria-expanded', 'false');
+}
+$('#composerMore').onclick = $('#composerContext').onclick = () => {
+  $('#composerSheet').classList.remove('hidden');
+  $('#composerMore').setAttribute('aria-expanded', 'true');
+};
+$('#composerSheet').addEventListener('click', (event) => {
+  if (event.target === event.currentTarget || event.target.closest('[data-close]')) closeComposerTools();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !$('#composerSheet').classList.contains('hidden')) {
+    closeComposerTools();
+    $('#composerMore').focus();
+  }
+});
+$('#attachBtn').onclick = () => { closeComposerTools(); $('#fileInput').click(); };
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault();

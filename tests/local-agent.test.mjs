@@ -80,8 +80,13 @@ test('local runner guards origins, isolates projects, preserves results and neve
   assert.equal(next.status, 202);
   const nextId = (await next.json()).id;
   assert.equal((await post(`runs/${nextId}/stop`, {})).status, 200);
-  await new Promise(resolve => setTimeout(resolve, 30));
-  const stopped = await (await fetch(origin + `/api/agent/runs/${nextId}`)).json();
+  let stopped;
+  const deadline = Date.now() + 2000;
+  do {
+    stopped = await (await fetch(origin + `/api/agent/runs/${nextId}`)).json();
+    if (stopped.state !== 'running') break;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  } while (Date.now() < deadline);
   assert.equal(stopped.state, 'stopped');
   assert.equal(started, 2);
 });

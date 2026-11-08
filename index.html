@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
   <div id="app" class="app">
@@ -82,20 +82,29 @@
         <label id="reuseMediaRow" class="media-reuse hidden"><input id="reuseMedia" type="checkbox" checked> استخدم آخر مرجع من هذه المحادثة</label></details>
         <div id="status" class="status hidden" role="status"></div>
         <div id="wakeStatus" class="status hidden" role="status"></div>
+        <button id="composerContext" class="composer-context hidden" type="button" aria-label="الأدوات المفعلة"></button>
         <div class="composer">
           <div id="voiceCapture" class="voice-capture hidden" role="group" aria-label="تسجيل صوتي">
             <button id="voiceCancel" class="icon-btn" aria-label="إلغاء التسجيل والتحويل">✕</button>
             <div class="voice-center"><div id="voiceWave" class="voice-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><span id="voiceLabel" role="status">تكلم…</span></div>
             <button id="voiceAccept" class="send" aria-label="إيقاف التسجيل">■</button>
           </div>
+          <button id="composerMore" class="icon-btn composer-more" aria-label="إضافة وأدوات" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
           <textarea id="input" aria-label="رسالتك" dir="auto" rows="1" placeholder="اكتب رسالتك…" enterkeyhint="send"></textarea>
-          <div class="tools">
-            <div class="tools-start">
+              <button id="micBtn" class="icon-btn mic" title="تكلم وأحوله نص" aria-label="إملاء صوتي"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg></button>
+              <button id="sendBtn" class="send" title="إرسال" aria-label="إرسال" disabled>↑</button>
+        </div>
+      <p class="composer-note">سوالف يساعدك تفكّر وتنجز. تحقّق من المعلومات المهمة.</p></footer>
+    </main>
+  </div>
+
+  <div id="composerSheet" class="sheet hidden" role="dialog" aria-modal="true" aria-labelledby="composerSheetTitle">
+    <div class="sheet-card composer-menu">
+      <div class="sheet-head"><h3 id="composerSheetTitle">إضافة وأدوات</h3><button class="icon-btn" data-close aria-label="إغلاق">✕</button></div>
+      <div class="composer-options">
               <button id="attachBtn" class="icon-btn attach-button" aria-label="أرفق صورة أو ملف"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>إرفاق</span></button><input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt">
               <button id="searchBtn" class="toggle on" title="البحث في الإنترنت"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><span>بحث</span></button>
               <button id="deepBtn" class="toggle" title="تفكير أعمق (أبطأ وأدق)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M9 21h6M8 14a7 7 0 1 1 8 0l-1 2H9l-1-2Z"/></svg><span>تفكير</span></button>
-              <button id="imgBtn" class="toggle" title="توليد صورة من الوصف"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg><span>صورة</span></button>
-              <button id="videoBtn" class="toggle" title="إنشاء فيديو أو تحريك صورة"><span>▷ فيديو</span></button>
               <select id="aspect" class="aspect hidden" title="مقاس الصورة أو الفيديو">
                 <option value="auto">تلقائي</option>
                 <option value="1:1">مربع 1:1</option>
@@ -105,15 +114,8 @@
                 <option value="3:4">3:4</option>
                 <option value="4:3">4:3</option>
               </select>
-            </div>
-            <div class="tools-end">
-              <button id="micBtn" class="icon-btn mic" title="تكلم وأحوله نص" aria-label="إملاء صوتي"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg></button>
-              <button id="sendBtn" class="send" title="إرسال" aria-label="إرسال" disabled>↑</button>
-            </div>
-          </div>
-        </div>
-      <p class="composer-note">سوالف يساعدك تفكّر وتنجز. تحقّق من المعلومات المهمة.</p></footer>
-    </main>
+      </div>
+    </div>
   </div>
 
   <!-- اختيار النموذج -->
@@ -363,6 +365,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=21"></script>
+  <script type="module" src="js/app.js?v=22"></script>
 </body>
 </html>
