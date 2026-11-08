@@ -1,4 +1,4 @@
-import { readProjectFiles, validProjectPath } from './project.js?v=16';
+import { readProjectFiles, validProjectPath } from './project.js?v=20';
 
 export async function readProjectDirectory(root) {
   const items = [];

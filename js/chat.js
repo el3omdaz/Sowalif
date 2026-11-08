@@ -1,12 +1,14 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, settings } from './db.js?v=16';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=16';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=16';
-import { preparePersonalContext } from './memory.js?v=16';
-import { mediaIntent, mediaSpec, createMedia, waitMedia } from './piapi.js?v=16';
-import { mediaProvider, kieMediaSpec } from './media.js?v=16';
-import { withMediaCallback } from './media-push.js?v=16';
-import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=16';
+import { saveChat, getBlob, putBlob, settings } from './db.js?v=20';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=20';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=20';
+import { preparePersonalContext } from './memory.js?v=20';
+import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=20';
+import { resolveReferences } from './media-references.js?v=20';
+import { mediaProvider, kieMediaSpec } from './media.js?v=20';
+import { withMediaCallback } from './media-push.js?v=20';
+import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=20';
+import { PROMPT_STUDIO_SYSTEM, extractImagePrompt } from './prompt-studio.js?v=20';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -88,7 +90,7 @@ async function history(chat, model) {
       out.push({ role: 'user', text: m.text, files });
     } else if (m.role === 'assistant' && !m.error) {
       const note = ((m.images || []).length ? `\n\n[ولّدتُ ${m.images.length} صورة بالبرومبت: ${m.imagePrompt || ''}]` : '') + (m.videos?.length ? `\n\n[أنشأت فيديو: ${m.mediaTask?.prompt || ''}]` : '');
-      out.push({ role: 'assistant', text: `${m.text || ''}${note}` });
+      out.push({ role: 'assistant', text: `${m.text || ''}${note}${m.promptStudio ? '\nRecreation prompt:\n' + m.promptStudio.prompt : ''}` });
     }
   }
   return out;
@@ -110,11 +112,12 @@ async function drawImage(chat, reply, { prompt, aspect_ratio, reference }, emit,
 
 async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, referenceUrl, videoReference, once }, emit, signal) {
   if (!resume) {
+    reply.mediaKind = kind;
     const provider = mediaProvider();
     if (!settings.get(provider === 'kie' ? 'kieKey' : 'piapiKey', '')) throw new Error(`أضف مفتاح ${provider === 'kie' ? 'kie.ai' : 'PiAPI'} للصور والفيديو من الإعدادات`);
     const current = chat.messages.at(-1);
-    let file = current?.files?.filter(f => f.kind === 'image').at(-1);
-    if (!file && !referenceUrl && !videoReference && (useLast ?? /(?:هذي|هذه|الصورة|صورتك|حرك|حرّك|animate|this image)/i.test(prompt))) {
+    let files = current?.files?.filter(f => f.kind === 'image') || [];
+    if (!files.length && !referenceUrl && !videoReference && (useLast ?? /(?:هذي|هذه|الصورة|صورتك|حرك|حرّك|animate|this image)/i.test(prompt))) {
       for (const message of [...chat.messages].reverse()) {
         if (chat.mode === 'video' && message.videos?.at(-1)?.url) {
           videoReference = message.videos.at(-1).url;
@@ -124,8 +127,8 @@ async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, r
           videoReference = message.videoReferenceUrl;
           break;
         }
-        file = [...(message.files || []), ...(message.images || [])].filter(f => f.kind === 'image').at(-1);
-        if (file) break;
+        files = [...(message.files || []), ...(message.images || [])].filter(f => f.kind === 'image');
+        if (files.length) break;
         if (message.mediaReferenceUrl) {
           referenceUrl = message.mediaReferenceUrl;
           break;
@@ -133,17 +136,13 @@ async function drawMedia(chat, reply, { kind, prompt, aspect, useLast, resume, r
       }
     }
     if (videoReference && provider === 'kie') throw new Error('لتعديل الفيديو اختر PiAPI في إعدادات الوسائط. لإنشاء فيديو جديد ألغِ استخدام آخر مرجع.');
-    let reference = referenceUrl;
-    if (!reference && file) {
-      reference = file.url && (!file.blob || Date.now() - (file.urlAt || 0) < URL_TTL) ? file.url : null;
-      if (!reference && file.blob) {
-        const blob = await getBlob(file.blob);
-        if (!blob) throw new Error('الصورة غير موجودة على هذا الجهاز؛ أرفقها مرة ثانية');
-        const ext = blob.type === 'image/jpeg' ? 'jpg' : blob.type.split('/')[1] || 'png';
-        reference = provider === 'kie' ? await uploadFile(blob, `reference.${ext}`, signal) : await toDataUrl(blob);
-      }
-    }
-    const spec = (provider === 'kie' ? kieMediaSpec : mediaSpec)(kind, prompt, { aspect, reference, videoReference });
+    // Attachments take precedence over a pasted/stored URL, and all attachments are retained.
+    if (!files.length && referenceUrl) files = [{ kind: 'image', url: referenceUrl }];
+    const plan = provider === 'piapi' ? referencePlan(kind, { count: files.length, aspect, videoReference }) : {};
+    // Validate capabilities with placeholder URLs before any upload.
+    (provider === 'kie' ? kieMediaSpec : mediaSpec)(kind, prompt, { ...plan, aspect, references: files.map((_, i) => `https://reference.invalid/${i}`), videoReference });
+    const references = await resolveReferences(files, { provider, inline: plan.inline, signal, onStatus: text => emit('status', { text }) });
+    const spec = (provider === 'kie' ? kieMediaSpec : mediaSpec)(kind, prompt, { ...plan, aspect, references, videoReference });
     emit('status', { text: `ينشئ المهمة عبر ${provider === 'kie' ? 'kie.ai' : 'PiAPI'} · ${spec.name}…` });
     reply.mediaTask = { provider, kind, name: spec.name, prompt, submitting: true };
     const submission = await withMediaCallback(spec, chat, reply, signal);
@@ -200,14 +199,16 @@ export async function respond(chat, opts, emit, signal) {
 
   try {
     const work = chat.mode === 'work';
+    const promptOnly = !!userMsg.promptStudio;
+    if (promptOnly && model.provider === 'openrouter' && model.vision === false) throw new Error('هذا النموذج لا يفهم الصور. اختر نموذجاً يدعم الصور لاستخراج البرومبت.');
     const workspaceKind = ['image', 'video'].includes(chat.mode) ? chat.mode : null;
     const personal = workspaceKind || work ? { expanded: userMsg.text || '' } : await preparePersonalContext(chat, userMsg.text || '');
     reply.contextSources = personal.sources;
     if (personal.action) reply.memoryAction = personal.action.text;
     if (personal.recallUnavailable) reply.recallUnavailable = true;
-    const search = !!opts.search || personal.search;
+    const search = !promptOnly && (!!opts.search || personal.search);
     // وضع الرسم المباشر: نص المستخدم هو البرومبت، والصور المرفقة معه مرجع
-    const kind = workspaceKind || (!work && (opts.videoMode ? 'video' : opts.imageMode ? 'image' : mediaIntent(personal.expanded)));
+    const kind = !promptOnly && (workspaceKind || (!work && (opts.videoMode ? 'video' : opts.imageMode ? 'image' : mediaIntent(personal.expanded))));
     if (kind) {
       await drawMedia(chat, reply, {
         kind, prompt: personal.expanded, aspect: opts.aspect, referenceUrl: userMsg.mediaReferenceUrl,
@@ -216,7 +217,8 @@ export async function respond(chat, opts, emit, signal) {
       return reply;
     }
 
-    let system = [systemPrompt(model, search), work && PROJECT_PROMPT, personal.prompt].filter(Boolean).join('\n\n');
+    if (promptOnly && !chat.messages.some(message => message.files?.some(file => file.kind === 'image'))) throw new Error('أرفق صورة أولاً لاستخراج البرومبت.');
+    let system = [systemPrompt(model, search), work && PROJECT_PROMPT, promptOnly && PROMPT_STUDIO_SYSTEM, personal.prompt].filter(Boolean).join('\n\n');
     const messages = await history(chat, model);
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUser) {
@@ -231,7 +233,7 @@ export async function respond(chat, opts, emit, signal) {
       system += `\n\nنتائج بحث حديثة في الإنترنت عن سؤال المستخدم (استخدمها واذكر المصادر):\n${found}`;
     }
 
-    const tools = model.tools ? TOOLS.filter(t => t.name === 'web_search' ? search : !work) : [];
+    const tools = !promptOnly && model.tools ? TOOLS.filter(t => t.name === 'web_search' ? search : !work) : [];
     for (let step = 0; step < 6; step++) {
       emit('status', { text: step ? '✍️ يكمل الرد…' : '' });
       const out = await runModel(model.id, {
@@ -277,6 +279,10 @@ export async function respond(chat, opts, emit, signal) {
         emit('delta', { text: '\n\n' });
       }
     }
+    if (promptOnly) {
+      const extracted = extractImagePrompt(reply.text);
+      if (extracted) { reply.text = extracted.text; reply.promptStudio = extracted.studio; }
+    }
     if (work) {
       const proposed = extractProjectProposal(reply.text, chat.project);
       if (proposed) {
@@ -284,7 +290,7 @@ export async function respond(chat, opts, emit, signal) {
         reply.projectProposal = proposed.proposal;
       }
     }
-    if (!reply.text.trim() && !reply.images?.length) reply.text = '…';
+    if (!reply.text.trim() && !reply.images?.length && !reply.promptStudio) reply.text = '…';
     return reply;
   } catch (e) {
     if (signal?.aborted) {

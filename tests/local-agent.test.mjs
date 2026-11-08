@@ -1,0 +1,87 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createLocalServer, uploadPiapi } from '../server/local-agent/server.mjs';
+
+test('PiAPI local upload targets only the official host and forwards only its key', async () => {
+  const input = { key: 'fake-piapi-key', fileName: 'reference-1.png', data: 'data:image/png;base64,AA==' };
+  let calls = 0;
+  const request = async (url, options) => {
+    calls++;
+    assert.equal(url, 'https://upload.theapi.app/api/ephemeral_resource');
+    assert.equal(options.headers['x-api-key'], input.key);
+    assert.deepEqual(JSON.parse(options.body), { file_name: input.fileName, file_data: input.data });
+    return Response.json({ code: 200, data: { url: 'https://files.test/photo.png' } });
+  };
+  assert.deepEqual(await uploadPiapi(input, request), { url: 'https://files.test/photo.png' });
+  await assert.rejects(uploadPiapi({ ...input, fileName: '../private.png' }, request));
+  await assert.rejects(uploadPiapi({ ...input, data: 'https://private.test/' }, request));
+  assert.equal(calls, 1);
+});
+
+test('local runner guards origins, isolates projects, preserves results and never returns provider keys', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'sowalif-agent-test-'));
+  let job;
+  let started = 0;
+  const server = createLocalServer({ dataDir, ready: async () => true, launch(options) {
+    started++; job = options;
+    options.emit({ type: 'approval', id: 'approval1', input: { command: 'node --test' } });
+    return { send(answer) { assert.equal(answer.allow, true); }, stop() { options.done(new Error('stopped')); } };
+  } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(dataDir, { recursive: true, force: true }); });
+  const state = await (await fetch(origin + '/api/agent/status')).json();
+  const headers = { 'Content-Type': 'application/json', Origin: origin, 'X-Sowalif-CSRF': state.csrf };
+  const post = (path, data, override = {}) => fetch(origin + '/api/agent/' + path, { method: 'POST', headers: { ...headers, ...override }, body: JSON.stringify(data) });
+  const input = { projectId: 'project-1', prompt: 'Fix the test', engine: 'claude', provider: 'openrouter', key: 'fake-secret-not-for-output', files: [{ path: 'index.html', content: 'before' }] };
+  assert.equal((await post('runs', input, { Origin: 'https://evil.test' })).status, 403);
+  assert.equal((await post('runs', input, { 'X-Sowalif-CSRF': 'wrong' })).status, 403);
+  assert.equal((await fetch(origin + '/server/local-agent/server.mjs')).status, 404);
+  assert.equal((await fetch(origin + '/.local-agent/state.json')).status, 404);
+  assert.equal((await post('runs', { ...input, files: [{ path: '../outside.js', content: 'bad' }] })).status, 400);
+  assert.equal(started, 0);
+  const response = await post('runs', input);
+  assert.equal(response.status, 202);
+  const { id } = await response.json();
+  assert.equal(started, 1);
+  assert.equal((await readFile(join(job.workspace, 'index.html'), 'utf8')), 'before');
+  assert.equal((await post('runs', input)).status, 409);
+  assert.equal(started, 1);
+  const running = await (await fetch(origin + '/api/agent/project?id=project-1')).json();
+  assert.equal(running.activeRun, id);
+  assert.equal((await post(`runs/${id}/approval`, { id: 'approval1', allow: true })).status, 200);
+  job.emit({ type: 'delta', text: input.key + ' Finished' });
+  job.emit({ type: 'result', sessionId: 'session-test' });
+  await writeFile(join(job.workspace, 'index.html'), 'after');
+  await job.done(null);
+  const output = await (await fetch(origin + `/api/agent/runs/${id}`)).json();
+  assert.equal(output.state, 'completed');
+  assert.equal(output.files[0].content, 'after');
+  assert.equal(JSON.stringify(output).includes(input.key), false);
+  assert.equal(output.revision, 1);
+  assert.equal(output.previewPath, 'index.html');
+  const preview = await fetch(origin + '/preview/project-1/index.html');
+  assert.match(preview.headers.get('content-security-policy'), /sandbox allow-scripts/);
+  assert.equal(await preview.text(), 'after');
+  assert.equal((await fetch(origin + '/js/missing-file.js')).status, 404);
+  assert.equal((await fetch(origin + '/api/agent/status')).status, 200);
+  assert.equal((await post('runs', input)).status, 409);
+  // A project altered outside the browser can be explicitly recovered, then reused.
+  await writeFile(join(job.workspace, 'index.html'), 'external edit');
+  const recovered = await (await post('recover', { projectId: input.projectId })).json();
+  assert.equal(recovered.files[0].content, 'external edit');
+  assert.equal(recovered.revision, 2);
+  const stateDirectory = (await readdir(dataDir))[0];
+  assert.equal((await readFile(join(dataDir, stateDirectory, 'state.json'), 'utf8')).includes(input.key), false);
+  const next = await post('runs', { ...input, files: recovered.files, workspaceRevision: recovered.revision, engine: 'codex', provider: 'openai' });
+  assert.equal(next.status, 202);
+  const nextId = (await next.json()).id;
+  assert.equal((await post(`runs/${nextId}/stop`, {})).status, 200);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const stopped = await (await fetch(origin + `/api/agent/runs/${nextId}`)).json();
+  assert.equal(stopped.state, 'stopped');
+  assert.equal(started, 2);
+});

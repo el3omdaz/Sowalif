@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const local = new Map([['sc.piapiKey', '"fake-piapi"'], ['sc.kieKey', '"never-send-kie"'], ['sc.openRouterKey', '"never-send-or"']]);
 globalThis.localStorage = { getItem: k => local.get(k) ?? null, setItem: (k,v) => local.set(k,v) };
-const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=16');
-const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=16');
+const { mediaIntent, mediaSpec, createMedia, waitMedia, taskResult } = await import('../js/piapi.js?v=20');
+const { mediaProvider, kieMediaSpec } = await import('../js/media.js?v=20');
 
 test('media provider and kie model selection are independent from chat, with no silent failover', () => {
   assert.equal(mediaProvider(), 'piapi');
@@ -97,6 +97,21 @@ test('new model families use their own input schemas and read array image result
   assert.equal(veo.body.input.duration, '8s');
   assert.equal(veo.body.input.aspect_ratio, '9:16');
   assert.equal(taskResult({ status: 'completed', output: { image_urls: [reference] } }, 'image'), reference);
+});
+
+test('Veo sends every reference as subject assets, validates counts and ratio before creation', () => {
+  const references = ['https://files.test/person.png', 'https://files.test/bag.png'];
+  const explicit = mediaSpec('video', 'keep the logo and change the clothes', { videoModel: 'veo3.1-video', references });
+  assert.deepEqual(explicit.body.input.reference_image_urls, references);
+  assert.equal(explicit.body.input.image_url, references[0]);
+  assert.equal(explicit.body.input.tail_image_url, undefined);
+  assert.equal(explicit.body.input.aspect_ratio, '16:9');
+  assert.equal(explicit.body.input.duration, '8s');
+  assert.equal(mediaSpec('video', 'use both', { references }).body.task_type, 'veo3.1-video');
+  assert.throws(() => mediaSpec('video', 'use both', { references, aspect: '9:16' }), /16:9/);
+  assert.throws(() => mediaSpec('video', 'use all', { references: [...references, ...references] }), /3/);
+  for (const videoModel of ['framepack', '2.6', 'veo3.1-video-fast']) assert.throws(() => mediaSpec('video', 'use both', { videoModel, references }), /صورة واحدة/);
+  assert.throws(() => kieMediaSpec('video', 'use both', { references }), /صورة واحدة/);
 });
 
 test('automatic PiAPI video follow-ups submit the existing clip for editing or extension', () => {

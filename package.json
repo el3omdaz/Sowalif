@@ -2,12 +2,22 @@
   "name": "smart-chat",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test tests/*.test.mjs" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "agent": "node server/local-agent/server.mjs",
+    "agent:setup": "docker build -t sowalif-coding-agent:1 server/local-agent",
+    "vendor:cloud": "node scripts/build-cloud.mjs"
+  },
   "description": "يُستخدم محلياً فقط لتحديث مكتبات vendor/ — الموقع نفسه ملفات ثابتة بدون بناء",
   "devDependencies": {
     "dompurify": "^3",
+    "esbuild": "0.28.2",
+    "fake-indexeddb": "6.2.7",
     "mammoth": "^1",
     "marked": "^14",
     "pdfjs-dist": "^4"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.119.0"
   }
 }

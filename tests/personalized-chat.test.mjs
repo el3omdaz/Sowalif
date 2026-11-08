@@ -23,12 +23,32 @@ globalThis.indexedDB = { open() {
   });
   return request;
 } };
-const { savePersonalization, saveRule } = await import('../js/memory.js?v=16');
-const { respond } = await import('../js/chat.js?v=16');
+const { savePersonalization, saveRule } = await import('../js/memory.js?v=20');
+const { respond } = await import('../js/chat.js?v=20');
+
+test('prompt studio uses vision chat only, even in the image workspace with no media key', async () => {
+  local.set('sc.openRouterKey', '"fake-or"');
+  local.delete('sc.piapiKey');
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push(url); assert.match(url, /^https:\/\/openrouter.ai\//);
+    const input = JSON.parse(init.body);
+    assert.match(input.messages[0].content, /image prompt assistant/);
+    assert.equal(input.tools, undefined);
+    assert.ok(input.messages.at(-1).content.some(part => part.type === 'image_url'));
+    return Response.json({ choices: [{ message: { content: '```sowalif-prompt\n' + JSON.stringify({ prompt: 'A ceramic vase in warm lighting.', changes: [{ label: 'الملمس', from: 'ceramic', to: 'glass' }] }) + '\n```' }, finish_reason: 'stop' }] });
+  };
+  const chat = { id: 'prompt-extract', mode: 'image', title: 'محادثة جديدة', messages: [{ role: 'user', text: 'استخرج البرومبت', promptStudio: true, files: [{ kind: 'image', url: 'https://reference.test/photo.png' }] }] };
+  const reply = await respond(chat, { model: 'or:anthropic/claude-sonnet-5.5', search: true, imageMode: true }, () => {});
+  assert.equal(reply.error, undefined);
+  assert.equal(reply.promptStudio.prompt, 'A ceramic vase in warm lighting.');
+  assert.equal(reply.mediaTask, undefined);
+  assert.equal(calls.length, 1);
+});
 
 test('work mode stages file changes and saves only after applying them', async () => {
-  const { saveProject, recallChats } = await import('../js/db.js?v=16');
-  const { applyProjectProposal } = await import('../js/project.js?v=16');
+  const { saveProject, recallChats } = await import('../js/db.js?v=20');
+  const { applyProjectProposal } = await import('../js/project.js?v=20');
   const original = { path: 'index.html', content: '<h1>Before</h1>' };
   const change = { path: 'index.html', content: '<h1>After</h1>' };
   const chat = { id: 'work-project', mode: 'work', title: 'محادثة جديدة', messages: [{ role: 'user', text: 'عدّل الصفحة وأضف صورة تجريبية بالكود' }] };
@@ -85,7 +105,7 @@ test('custom instructions, cross-chat context and gold rule reach both providers
 });
 
 test('personalization backup excludes API keys and can be exported with chats', async () => {
-  const { exportAll } = await import('../js/db.js?v=16');
+  const { exportAll } = await import('../js/db.js?v=20');
   const text = await (await exportAll()).text();
   const backup = JSON.parse(text);
   assert.equal(backup.version, 2);
@@ -119,14 +139,14 @@ test('OpenRouter chat routes video straight to PiAPI and resumes an existing tas
   assert.equal(reply.mediaTask.id, 'persistent-video');
   assert.match(reply.error, /status unavailable/);
   failPoll = false;
-  const { resumeMedia } = await import('../js/chat.js?v=16');
+  const { resumeMedia } = await import('../js/chat.js?v=20');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/result.mp4');
   assert.equal(reply.mediaTask.done, true);
   assert.deepEqual(calls.map(c => c.method), ['POST', 'GET', 'GET']);
   assert.equal(chat.messages.length, 2);
-  const { exportAll } = await import('../js/db.js?v=16');
+  const { exportAll } = await import('../js/db.js?v=20');
   assert.equal((await (await exportAll()).text()).includes('fake-piapi'), false);
 });
 
@@ -152,7 +172,7 @@ test('kie.ai media works under OpenRouter and resumed jobs retain their original
   assert.ok(reply.error);
   local.set('sc.mediaProvider', '"piapi"');
   failed = false;
-  const { resumeMedia } = await import('../js/chat.js?v=16');
+  const { resumeMedia } = await import('../js/chat.js?v=20');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/kie.mp4');
@@ -191,6 +211,6 @@ test('media workspaces route short follow-ups with their own last reference and 
   image.messages.push({ role: 'user', text: 'غيمة', reuseMedia: false });
   await respond(image, { model: 'or:anthropic/claude-sonnet-5.5' }, () => {});
   assert.equal(outgoing[2].task_type, 'txt2img');
-  const { recallChats } = await import('../js/db.js?v=16');
+  const { recallChats } = await import('../js/db.js?v=20');
   assert.ok((await recallChats()).every(chat => !chat.id.startsWith('workspace-')));
 });

@@ -1,10 +1,12 @@
-import { settings } from './db.js?v=16';
+import { settings } from './db.js?v=20';
 
 export function mediaProvider() {
   const choice = settings.get('mediaProvider', 'auto');
   return ['piapi', 'kie'].includes(choice) ? choice : settings.get('piapiKey', '') ? 'piapi' : 'kie';
 }
-export function kieMediaSpec(kind, prompt, { reference, aspect = 'auto' } = {}) {
+export function kieMediaSpec(kind, prompt, { reference, references = reference ? [reference] : [], aspect = 'auto' } = {}) {
+  if (references.length > 1) throw new Error('هذا النموذج يقبل صورة واحدة في سوالف. لعدة مراجع اختر PiAPI ثم Veo 3.1 العادي.');
+  reference = references[0];
   const duration = settings.get('piapiDuration', 5) == 10 ? '10' : '5';
   if (kind === 'video') {
     const choice = settings.get('kieVideoModel', 'auto');

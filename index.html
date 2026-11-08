@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <title>المحادثة الذكية</title>
+  <title>سوالف</title>
   <meta name="theme-color" content="#212121" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="المحادثة">
+  <meta name="apple-mobile-web-app-title" content="سوالف">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
   <div id="app" class="app">
@@ -36,17 +36,28 @@
         <button id="newChatTop" class="icon-btn" aria-label="محادثة جديدة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M15 4l5 5M10 14l1-5 7-7 5 5-7 7-6 1Z"/></svg></button>
       </header>
       <nav id="workspaceTabs" class="workspace-tabs" aria-label="أقسام سوالف">
-        <button type="button" data-mode="chat" aria-pressed="true">الشات</button>
-        <button type="button" data-mode="image" aria-pressed="false">الصور</button>
-        <button type="button" data-mode="video" aria-pressed="false">الفيديو</button>
-        <button type="button" data-mode="work" aria-pressed="false">الشغل</button>
+        <button type="button" data-mode="chat" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 1-8 8H4v-7a8 8 0 1 1 16-1Z"/><path d="M8 9h8M8 13h5"/></svg><span>الشات</span></button>
+        <button type="button" data-mode="image" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="9" cy="9" r="2"/><path d="m4 18 5-5 4 4 4-6 4 6"/></svg><span>الصور</span></button>
+        <button type="button" data-mode="video" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="14" height="14" rx="4"/><path d="m16 10 6-4v12l-6-4"/></svg><span>الفيديو</span></button>
+        <button type="button" data-mode="work" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span>الشغل</span></button>
       </nav>
+      <div id="imageTools" class="image-tools hidden" role="group" aria-label="أدوات الصور">
+        <button id="imageCreate" type="button" aria-pressed="true">إنشاء وتعديل صورة</button>
+        <button id="imageExtract" type="button" aria-pressed="false">استخراج برومبت من صورة</button>
+      </div>
       <div id="projectBar" class="project-bar hidden">
         <span id="projectCount">مشروع جديد</span>
         <div class="project-actions">
           <button id="projectLinkTop" class="btn ghost hidden" type="button">ربط مجلد الجهاز</button>
           <button id="openProject" class="btn ghost" type="button">ملفات المشروع</button>
+          <select id="codingEngine" aria-label="محرك البرمجة"><option value="off">اقتراحات فقط</option><option value="claude">Claude Code</option><option value="codex">Codex</option></select>
+          <button id="codingSetup" class="btn ghost" type="button">ربط المحرك</button>
         </div>
+      </div>
+      <div id="agentActivity" class="agent-activity hidden" aria-label="تنفيذ محرك البرمجة">
+        <div class="row"><strong id="agentRunState">سجل التنفيذ</strong><a id="agentPreviewLink" class="hidden" target="_blank" rel="noopener noreferrer">معاينة المشروع ↗</a></div>
+        <div id="agentApproval" class="agent-approval hidden" role="status"></div>
+        <details open><summary>الأدوات ونتائج الأوامر</summary><pre id="agentLog" dir="auto"></pre></details>
       </div>
 
       <section id="messages" class="messages" aria-label="المحادثة">
@@ -65,9 +76,10 @@
 
       <footer class="composer-wrap">
         <div id="attachRow" class="attach-row"></div>
+        <details id="mediaReferenceOptions" class="reference-options hidden"><summary>روابط ومراجع سابقة <span>اختياري</span></summary>
         <input id="mediaReference" class="hidden" type="url" dir="ltr" aria-label="رابط صورة مرجعية اختياري" placeholder="رابط صورة عام اختياري https://…">
         <input id="videoReference" class="hidden" type="url" dir="ltr" aria-label="رابط فيديو مرجعي اختياري" placeholder="رابط فيديو عام اختياري https://…">
-        <label id="reuseMediaRow" class="media-reuse hidden"><input id="reuseMedia" type="checkbox" checked> استخدم آخر مرجع من هذه المحادثة</label>
+        <label id="reuseMediaRow" class="media-reuse hidden"><input id="reuseMedia" type="checkbox" checked> استخدم آخر مرجع من هذه المحادثة</label></details>
         <div id="status" class="status hidden" role="status"></div>
         <div id="wakeStatus" class="status hidden" role="status"></div>
         <div class="composer">
@@ -79,7 +91,7 @@
           <textarea id="input" aria-label="رسالتك" dir="auto" rows="1" placeholder="اكتب رسالتك…" enterkeyhint="send"></textarea>
           <div class="tools">
             <div class="tools-start">
-              <button id="attachBtn" class="icon-btn" aria-label="أرفق صورة أو ملف"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt">
+              <button id="attachBtn" class="icon-btn attach-button" aria-label="أرفق صورة أو ملف"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>إرفاق</span></button><input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt">
               <button id="searchBtn" class="toggle on" title="البحث في الإنترنت"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><span>بحث</span></button>
               <button id="deepBtn" class="toggle" title="تفكير أعمق (أبطأ وأدق)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M9 21h6M8 14a7 7 0 1 1 8 0l-1 2H9l-1-2Z"/></svg><span>تفكير</span></button>
               <button id="imgBtn" class="toggle" title="توليد صورة من الوصف"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg><span>صورة</span></button>
@@ -132,6 +144,7 @@
         <button id="projectWriteFolder" class="btn ghost hidden" type="button">حفظ التغييرات المعلّقة في المجلد</button>
         <button id="projectRefreshFolder" class="btn ghost hidden" type="button">إعادة قراءة ملفات الجهاز</button>
         <button id="projectExport" class="btn ghost" type="button">تنزيل ZIP</button>
+        <button id="codingRecover" class="btn ghost" type="button">استرجاع ملفات محرك الكمبيوتر</button>
       </div>
       <details class="settings-group project-github">
         <summary><span><strong>رفع إلى GitHub</strong><small>راجع الملفات وارفعها على فرع جديد</small></span></summary>
@@ -175,6 +188,44 @@
     <div class="sheet-card">
       <div class="sheet-head"><h3>الإعدادات</h3><button class="icon-btn" data-close>✕</button></div>
       <div class="settings">
+        <details class="settings-group" name="settings-sections" data-settings="cloud">
+          <summary><span><strong>الحساب والمزامنة</strong><small>محادثاتك وصورك على كل أجهزتك</small></span></summary>
+          <div class="settings-body">
+            <p id="cloudAccount" class="account-state" role="status">بياناتك محفوظة على هذا الجهاز</p>
+            <div id="cloudLogin" class="cloud-login">
+              <label for="cloudEmail">البريد الإلكتروني</label><input id="cloudEmail" type="email" dir="ltr" autocomplete="email" placeholder="you@example.com">
+              <label for="cloudPassword">كلمة مرور حساب سوالف</label><input id="cloudPassword" type="password" autocomplete="current-password" minlength="8" placeholder="8 أحرف أو أكثر">
+              <div class="row"><button id="cloudSignIn" class="btn primary">تسجيل الدخول</button><button id="cloudSignUp" class="btn ghost">إنشاء حساب سوالف</button></div>
+              <p class="muted">حساب سوالف مستقل عن حساب لوحة Supabase. المحادثات القديمة تبقى على الجهاز حتى تختار استيرادها.</p>
+            </div>
+            <div id="cloudActions" class="cloud-actions hidden">
+              <button id="cloudOpenProfile" class="btn primary hidden">فتح بيانات حسابي</button>
+              <button id="cloudSync" class="btn primary">مزامنة الآن</button>
+              <button id="cloudImport" class="btn ghost">استيراد محادثات هذا الجهاز للحساب</button>
+              <button id="cloudSignOut" class="btn ghost">تسجيل الخروج</button>
+              <p class="muted">تتزامن المحادثات والصور والتعليمات. مفاتيح المزوّدين تبقى على كل جهاز. المزامنة تلقائية أثناء فتح سوالف.</p>
+            </div>
+            <p id="cloudStatus" class="muted" role="status"></p>
+            <div id="cloudConflict" class="hidden"><p>تغيّرت التعليمات على جهازين. أي نسخة تعتمد؟</p><div class="row"><button id="cloudKeepLocal" class="btn ghost">نسخة هذا الجهاز</button><button id="cloudKeepRemote" class="btn ghost">نسخة السحابة</button></div></div>
+          </div>
+        </details>
+        <details class="settings-group" name="settings-sections" data-settings="agent">
+          <summary><span><strong>محرك البرمجة على الكمبيوتر</strong><small>Claude Code أو Codex</small></span></summary>
+          <div class="settings-body">
+            <p id="codingStatus" class="muted" role="status"></p>
+            <a href="http://127.0.0.1:4781/" class="btn ghost" target="_blank" rel="noopener noreferrer">فتح نسخة الكمبيوتر ↗</a>
+            <label for="codingProvider">مزوّد محرك البرمجة</label><select id="codingProvider"><option value="openrouter">OpenRouter</option><option value="anthropic">Anthropic API</option><option value="openai" disabled>OpenAI API — Codex</option></select>
+            <p id="codingKeyHint" class="muted"></p>
+            <input id="codingKey" type="password" dir="ltr" autocomplete="off" aria-label="مفتاح محرك البرمجة" placeholder="مفتاح API">
+            <button id="saveCodingKey" class="btn primary">حفظ المفتاح</button>
+            <button id="forgetCodingKey" class="btn ghost">مسح مفتاح المحرك</button>
+            <details class="settings-subgroup"><summary>خيارات المحرك</summary><div class="settings-subbody">
+            <label for="codingModel">معرّف النموذج · اختياري</label><input id="codingModel" type="text" dir="ltr" placeholder="اتركه فارغاً للاختيار التلقائي" maxlength="150">
+            <label for="codingBudget">حد التكلفة التقديري لطلب Claude · بالدولار</label><input id="codingBudget" type="number" min="0.1" max="10" step="0.1" value="2">
+            <p class="muted">حد Claude تقديري. مهلة التنفيذ 20 دقيقة. Codex يستخدم مفتاح OpenAI API مستقلاً.</p></div></details>
+            <p class="muted">المفاتيح محلية. التنفيذ داخل نسخة معزولة في Docker، ثم تراجع التغييرات وتحفظها في مجلدك.</p>
+          </div>
+        </details>
         <details class="settings-group" name="settings-sections" data-settings="models">
           <summary><span><strong>المحادثة والنماذج</strong><small>المزوّد، المفتاح والنموذج</small></span></summary>
           <div class="settings-body">
@@ -227,7 +278,11 @@
               <p id="piapiKeyState" class="muted" role="status"></p>
               <label for="piapiImageModel">نموذج الصور</label><select id="piapiImageModel"></select>
               <label for="piapiVideoModel">نموذج الفيديو وتحريك الصور</label><select id="piapiVideoModel"></select>
-              <p class="muted">للصور المحلية اختر نموذجاً يدعمها؛ بعض نماذج PiAPI تحتاج رابطاً عاماً. <a href="https://app.piapi.ai" target="_blank" rel="noopener noreferrer">حساب PiAPI ↗</a></p></div></details><label for="piapiDuration">مدة الفيديو</label><select id="piapiDuration"><option value="5">5 ثوانٍ</option><option value="10">10 ثوانٍ</option></select>
+              <p class="muted">بعد تسجيل الدخول، تُرفع المراجع إلى تخزين سوالف الخاص تلقائياً. روابط الصور مؤقتة للمزوّد الذي تختاره.</p>
+              <label for="referenceUploadProvider">رفع المراجع بدون تسجيل دخول</label>
+              <select id="referenceUploadProvider"><option value="piapi">PiAPI — من نسخة الكمبيوتر المحلية</option><option value="kie">kie.ai — يعمل أيضاً على الآيفون</option></select>
+              <p class="muted">اختيار kie.ai يرفع الصور إليه ويرسل روابطها إلى PiAPI للتوليد. يحتاج مفتاح kie.ai. Veo 3.1 يقبل حتى 3 مراجع بمقاس 16:9 ومدة 8 ثوانٍ.</p>
+              <p class="muted"><a href="https://app.piapi.ai" target="_blank" rel="noopener noreferrer">حساب PiAPI ↗</a></p></div></details><label for="piapiDuration">مدة الفيديو</label><select id="piapiDuration"><option value="5">5 ثوانٍ</option><option value="10">10 ثوانٍ</option></select>
               <p class="muted">Framepack مدته 10 ثوانٍ. احفظ الفيديو قبل انتهاء رابطه.</p>
             </section>
           </div>
@@ -308,6 +363,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=19"></script>
+  <script type="module" src="js/app.js?v=20"></script>
 </body>
 </html>

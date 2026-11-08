@@ -1,5 +1,5 @@
 // Independent media provider: never uses or forwards chat-provider credentials.
-import { settings } from './db.js?v=16';
+import { settings } from './db.js?v=20';
 
 export const IMAGE_MODELS = [
   { id: 'auto', name: 'تلقائي — Flux Schnell / Kontext' },
@@ -42,11 +42,22 @@ export function mediaIntent(text = '') {
   return null;
 }
 
-export function mediaSpec(kind, prompt, { aspect = 'auto', reference, videoReference, imageModel, videoModel, duration } = {}) {
+// Validate before uploading files or submitting a paid task. Never discard extra references.
+export function referencePlan(kind, { count = 0, aspect = 'auto', videoReference, imageModel, videoModel } = {}) {
+  const chosen = kind === 'video' ? videoModel ?? settings.get('piapiVideoModel', 'auto') : imageModel ?? settings.get('piapiImageModel', 'auto');
+  const selected = chosen === 'auto' ? (kind === 'video' ? (videoReference ? 'seedance-2.5' : count > 1 ? 'veo3.1-video' : count ? 'framepack' : '2.6') : count ? 'kontext' : 'schnell') : chosen;
+  const multiple = kind === 'video' && selected === 'veo3.1-video';
+  if (count > (multiple ? 3 : 1)) throw new Error(multiple ? 'Veo يقبل حتى 3 صور مرجعية؛ احذف الصور الزائدة.' : 'هذا النموذج يقبل صورة واحدة في سوالف. للمراجع المتعددة اختر PiAPI ثم Veo 3.1 العادي أو تلقائي.');
+  if (multiple && count > 1 && !['auto', '16:9'].includes(aspect)) throw new Error('Veo مع عدة صور مرجعية يحتاج مقاس 16:9. اختره أو اختر المقاس التلقائي.');
+  return { [kind === 'video' ? 'videoModel' : 'imageModel']: selected, inline: kind === 'video' && selected === 'framepack' };
+}
+
+export function mediaSpec(kind, prompt, { aspect = 'auto', reference, references = reference ? [reference] : [], videoReference, imageModel, videoModel, duration } = {}) {
   if (!prompt?.trim()) throw new Error('اكتب وصفاً لما تريد إنشاءه');
+  const plan = referencePlan(kind, { count: references.length, aspect, videoReference, imageModel, videoModel });
+  reference = references[0];
   if (kind === 'video') {
-    const chosen = videoModel ?? settings.get('piapiVideoModel', 'auto');
-    const version = chosen === 'auto' ? (videoReference ? 'seedance-2.5' : reference ? 'framepack' : '2.6') : chosen;
+    const version = plan.videoModel;
     const model = VIDEO_MODELS.find(m => m.id === version);
     if (!model) throw new Error('اختر نموذج فيديو صالحاً من الإعدادات');
     if (videoReference && model.family !== 'seedance') throw new Error('لتعديل فيديو، اختر Seedance 2.5 أو تلقائي من إعدادات PiAPI.');
@@ -55,7 +66,7 @@ export function mediaSpec(kind, prompt, { aspect = 'auto', reference, videoRefer
       if (!reference) throw new Error('أرفق صورة لاستخدام Framepack أو اختر تلقائي للفيديو من النص');
       return { name: 'Framepack · 10 ثوانٍ', body: { model: 'Qubico/framepack', task_type: 'img2video', input: { prompt, start_image: reference.startsWith('data:') ? reference.slice(reference.indexOf(',') + 1) : reference, duration: 10 } } };
     }
-    if (reference && !/^https?:\/\//i.test(reference)) {
+    if (references.some(url => !/^https?:\/\//i.test(url))) {
       if (model.family === 'seedance') throw new Error('Seedance 2.5 عبر PiAPI يحتاج رابط صورة عام. لاستخدام الصورة المرفقة مباشرة، اختر مزوّد الوسائط kie.ai ثم Seedance 2.5 من إعدادات الصور والفيديو.');
       throw new Error(`${model.name} يحتاج رابط صورة عام. اختر تلقائي أو Framepack لتحريك صورة مرفقة من جهازك.`);
     }
@@ -83,15 +94,15 @@ export function mediaSpec(kind, prompt, { aspect = 'auto', reference, videoRefer
     }
     if (model.family === 'veo3.1') {
       const input = { prompt, duration: '8s', resolution: '720p', aspect_ratio: aspect === '9:16' ? '9:16' : '16:9', generate_audio: false };
-      if (reference) input.image_url = reference;
+      if (reference) input.image_url = reference; // Required by PiAPI's image-to-video schema.
+      if (references.length > 1) input.reference_image_urls = references;
       return { name: model.name, body: { model: model.family, task_type: version, input } };
     }
     const input = { prompt, version, mode: 'std', duration: seconds === 10 ? 10 : 5, aspect_ratio: ['16:9', '9:16', '1:1'].includes(aspect) ? aspect : '16:9' };
     if (reference) input.image_url = reference;
     return { name: `Kling ${version}`, body: { model: 'kling', task_type: 'video_generation', input, config: { service_mode: 'public' } } };
   }
-  const chosen = imageModel ?? settings.get('piapiImageModel', 'auto');
-  const selected = chosen === 'auto' ? (reference ? 'kontext' : 'schnell') : chosen;
+  const selected = plan.imageModel;
   const model = IMAGE_MODELS.find(m => m.id === selected);
   if (!model) throw new Error('اختر نموذج صور صالحاً من الإعدادات');
   if (model.family) {

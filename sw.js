@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v19';
-const SHELL = ['./', 'index.html', 'style.css?v=19', 'js/app.js?v=19', 'js/media-push.js?v=16', 'js/project.js?v=16', 'js/project-github.js?v=16', 'js/project-folder.js?v=16', 'js/db.js?v=16', 'js/kie.js?v=16', 'js/chat.js?v=16', 'js/models.js?v=16', 'js/openrouter.js?v=16', 'js/memory.js?v=16', 'js/piapi.js?v=16', 'js/media.js?v=16', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v20';
+const SHELL = ['./', 'index.html', 'style.css?v=20', 'js/app.js?v=20', 'js/local-agent.js?v=20', 'js/media-references.js?v=20', 'js/prompt-studio.js?v=20', 'js/cloud.js?v=20', 'js/cloud-config.js?v=20', 'js/cloud-payload.js?v=20', 'js/media-push.js?v=20', 'js/project.js?v=20', 'js/project-github.js?v=20', 'js/project-folder.js?v=20', 'js/db.js?v=20', 'js/kie.js?v=20', 'js/chat.js?v=20', 'js/models.js?v=20', 'js/openrouter.js?v=20', 'js/memory.js?v=20', 'js/piapi.js?v=20', 'js/media.js?v=20', 'vendor/supabase.js?v=20', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -35,6 +35,8 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  // Local engine state and project previews must never enter the offline cache.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/preview/')) return;
   if (url.pathname.startsWith('/api/media-push/')) return;
   // طلبات kie.ai وغيرها تمر مباشرة بدون حفظ
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;

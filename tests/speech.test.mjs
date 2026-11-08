@@ -5,8 +5,8 @@ import { mkdtemp, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
-import { applyProjectProposal } from '../js/project.js?v=16';
-import { writeProjectDirectory } from '../js/project-folder.js?v=16';
+import { applyProjectProposal } from '../js/project.js?v=20';
+import { writeProjectDirectory } from '../js/project-folder.js?v=20';
 
 function app({ navigator = {}, coarsePointer = false } = {}) {
   const nodes = new Map();
@@ -39,6 +39,8 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
     db: { settings: { get: (_, d) => d } },
     MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test', OR_DEFAULT_MODEL: 'or:test/model', OR_AUDIO_MODEL: 'or:google/test',
     providerOf: (id) => String(id).startsWith('or:') ? 'openrouter' : 'kie',
+    agentCredentials: () => ({ engine: 'off', provider: 'openrouter', key: '', model: '' }),
+    localAgentOrigin: () => false,
     readPersonalization: () => ({ instructions: '', notes: '', enabled: true, rules: [] }),
     marked: { setOptions() {} },
     setTimeout: setTimer, setInterval: setTimer, clearTimeout: clearTimer, clearInterval: clearTimer,

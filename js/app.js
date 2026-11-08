@@ -1,16 +1,18 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=16';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=16';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=16';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=16';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=16';
-import { mediaProvider } from './media.js?v=16';
-import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=16';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=16';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=16';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=16';
-import { prepareProjectPush, pushProject } from './project-github.js?v=16';
-import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=16';
+import * as db from './db.js?v=20';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=20';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=20';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=20';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=20';
+import { mediaProvider } from './media.js?v=20';
+import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=20';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=20';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=20';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=20';
+import { prepareProjectPush, pushProject } from './project-github.js?v=20';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=20';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject } from './local-agent.js?v=20';
+import { cloud, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=20';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -42,6 +44,7 @@ const S = {
   defaultModel: defaultFor(initialProvider),
   chat: null,
   mode: 'chat',
+  promptMode: false,
   chats: [],
   attachments: [], // { id, name, kind, preview, meta, loading }
   search: db.settings.get('search', false),
@@ -61,23 +64,31 @@ function toast(text, ms = 2600) {
 
 // ---------- البداية ----------
 async function boot() {
+  renderCodingSetup();
+  void refreshCodingStatus();
   for (const [id, models] of [['piapiImageModel', IMAGE_MODELS], ['piapiVideoModel', VIDEO_MODELS]]) {
     $(`#${id}`).replaceChildren(...models.map(model => new Option(model.name, model.id)));
   }
   applyTypography();
   syncToggles();
+  await startCloud();
   S.chats = await db.listChats();
   const id = location.hash.slice(1);
   if (id && S.chats.some((c) => c.id === id)) await openChat(id);
   else newChat();
-  if (!db.settings.get(keySetting(S.provider), '')) {
-    openSettings('models');
-    toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} عشان تبدأ`, 4000);
+  const localCoding = S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off';
+  const mediaKind = selectedMediaKind();
+  if (localCoding && (!localAgentOrigin() || !agentCredentials().key)) {
+    openSettings('agent'); toast('اربط محرك البرمجة عشان تبدأ', 4000);
+  } else if (mediaKind && !db.settings.get(mediaProvider() === 'kie' ? 'kieKey' : 'piapiKey', '')) {
+    openSettings('media');
+  } else if (!localCoding && !mediaKind && !db.settings.get(keySetting(S.provider), '')) {
+    openSettings('models'); toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} عشان تبدأ`, 4000);
   }
 }
 
 const modelOf = (id) => modelById(id);
-const selectedMediaKind = () => isMediaWorkspace() ? S.mode : S.videoMode ? 'video' : S.imageMode ? 'image' : null;
+const selectedMediaKind = () => S.mode === 'image' && S.promptMode ? null : isMediaWorkspace() ? S.mode : S.videoMode ? 'video' : S.imageMode ? 'image' : null;
 const mediaModelKey = (kind, provider) => `${provider === 'kie' ? 'kie' : 'piapi'}${kind === 'video' ? 'Video' : 'Image'}Model`;
 const mediaProviderName = provider => provider === 'kie' ? 'kie.ai' : 'PiAPI';
 
@@ -94,12 +105,20 @@ function renderModelName() {
     $('#modelName').textContent = m.name;
     $('#providerBadge').textContent = m.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai';
   }
+  if (S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off') {
+    $('#modelName').textContent = db.settings.get('codingEngine') === 'codex' ? 'Codex' : 'Claude Code';
+    $('#providerBadge').textContent = 'محرك الكمبيوتر';
+  }
   $('#emptyModel').textContent = {
     chat: `${m.name} — ${m.tagline}`,
     image: 'اكتب وصفاً للرسم أو أرفق صورة وقل شنو تبي تغيّر فيها.',
     video: 'صف الفيديو أو أرفق صورة لتحريكها. تعديلات الفيديو تستخدم Seedance 2.5 مع PiAPI.',
     work: 'صف تطبيقًا جديدًا أو استورد ملفات مشروعك واطلب تعديلها.',
   }[S.mode];
+  if (S.mode === 'image') {
+    $('#emptyTitle').textContent = S.promptMode ? 'خلّ الصورة تصير برومبت' : 'شنو تبي ترسم؟';
+    if (S.promptMode) $('#emptyModel').textContent = 'أرفق صورة. تحصل برومبت جاهز وتغييرات سريعة للشخصية والملمس والإضاءة.';
+  }
 }
 
 // ---------- قائمة المحادثات ----------
@@ -188,6 +207,7 @@ let projectSaving = false;
 
 function applyWorkspace(mode) {
   S.mode = mode;
+  S.promptMode = mode === 'image' && !!(S.chat?.promptStudioMode ?? db.settings.get('promptStudioMode', false));
   S.imageMode = false;
   S.videoMode = false;
   for (const button of document.querySelectorAll('#workspaceTabs button')) {
@@ -196,6 +216,8 @@ function applyWorkspace(mode) {
   $('#emptyTitle').textContent = { chat: 'شلون أقدر أساعدك؟', image: 'شنو تبي ترسم؟', video: 'شنو الفيديو اللي تبيه؟', work: 'شنو تبي تبني اليوم؟' }[mode];
   $('#chatChips').classList.toggle('hidden', mode !== 'chat');
   $('#projectBar').classList.toggle('hidden', mode !== 'work');
+  $('#agentActivity').classList.add('hidden');
+  $('#imageTools').classList.toggle('hidden', mode !== 'image');
   $('#newChat').textContent = mode === 'work' ? '＋ مشروع جديد' : '＋ محادثة جديدة';
   $('#newChatTop').setAttribute('aria-label', mode === 'work' ? 'مشروع جديد' : 'محادثة جديدة');
   $('#search').placeholder = mode === 'work' ? 'ابحث في المشاريع' : 'ابحث في المحادثات';
@@ -205,6 +227,14 @@ function applyWorkspace(mode) {
   $('#reuseMedia').checked = true;
   syncToggles();
 }
+
+function selectImageTool(extract) {
+  if (S.controller || projectSaving) return toast('انتظر انتهاء الطلب');
+  S.promptMode = extract; S.chat.promptStudioMode = extract;
+  db.settings.set('promptStudioMode', extract); syncToggles(); input.focus();
+}
+$('#imageCreate').onclick = () => selectImageTool(false);
+$('#imageExtract').onclick = () => selectImageTool(true);
 
 $('#workspaceTabs').onclick = async (e) => {
   const mode = e.target.closest('[data-mode]')?.dataset.mode;
@@ -240,6 +270,7 @@ async function openChat(id) {
   if (rec || voiceJob || micStarting) return toast('أوقف التسجيل أو ألغِه قبل تغيير المحادثة');
   const chat = await db.getChat(id);
   if (!chat) return toast('المحادثة غير موجودة');
+  await hydrateCloudChat(chat).catch(() => {});
   if (chat.mode === 'work' && !linkedFolders.has(id)) {
     const link = await db.getProjectFolder(id).catch(() => null);
     if (link) linkedFolders.set(id, link);
@@ -365,6 +396,12 @@ async function hydrate(root) {
   }
 }
 
+function promptStudioHTML(studio) {
+  return `<section class="prompt-studio"><div class="prompt-studio-head"><strong>البرومبت الجاهز</strong><span>وصف مقارب للصورة</span></div><pre dir="ltr">${esc(studio.prompt || '')}</pre>
+    <div class="row"><button class="btn primary" data-copy-prompt>نسخ البرومبت</button><button class="btn ghost" data-use-prompt>استخدمه للرسم</button></div>
+    ${(studio.changes || []).length ? `<h4>غيّر التفاصيل بضغطة</h4><div class="prompt-changes">${studio.changes.map((change, index) => `<div class="prompt-change"><strong>${esc(change.label)}</strong><div><bdi>${esc(change.from)}</bdi><span> ← </span><bdi>${esc(change.to)}</bdi></div><button class="btn ghost" data-prompt-change="${index}" ${String(studio.prompt || '').includes(change.from) ? '' : 'disabled'}>تطبيق</button></div>`).join('')}</div>` : ''}
+    ${studio.original && studio.original !== studio.prompt ? '<button class="btn ghost" data-reset-prompt>استرجاع البرومبت الأول</button>' : ''}</section>`;
+}
 function messageHTML(m, i) {
   if (m.role === 'user') {
     const files = (m.files || []).map((f) => (f.kind === 'image' ? `<img ${imgAttrs(f)} alt="" data-zoom>` : `<span class="doc-chip">📄 ${esc(f.name)}</span>`)).join('');
@@ -375,17 +412,20 @@ function messageHTML(m, i) {
   return `<div class="msg assistant" data-i="${i}">
     ${imgs ? `<div class="gen">${imgs}</div>` : ''}
     ${m.text ? `<div class="bubble md">${md(m.text)}</div>` : ''}
+    ${m.promptStudio ? promptStudioHTML(m.promptStudio) : ''}
     ${m.error ? `<div class="err-box">⚠️ ${esc(m.error)}</div>` : ''}
     ${S.mode === 'work' && m.projectProposal ? projectProposalHTML(m.projectProposal) : ''}
+    ${m.agentChanges?.length ? `<details class="agent-changes"><summary>تغييرات ${m.agentChanges.length} ملف · محفوظة في نسخة المشروع</summary>${m.agentChanges.map(change => `<details><summary>${esc(change.path)}</summary><div>قبل</div><pre dir="auto">${esc(change.before ?? '(ملف جديد)')}</pre><div>بعد</div><pre dir="auto">${esc(change.after ?? '(محذوف)')}</pre></details>`).join('')}</details>${m.agentAppliedRevision === S.chat.project?.revision ? '<button class="btn ghost" data-undo-agent>التراجع عن تغييرات هذا التنفيذ</button>' : ''}` : ''}
     ${m.memoryAction ? `<div class="memory-notice">✓ ${esc(m.memoryAction)}</div>` : ''}
     ${m.recallUnavailable ? '<div class="memory-notice">تعذّر استرجاع المحادثات السابقة في هذا الرد.</div>' : ''}
     ${m.contextSources?.length ? `<details class="context-sources"><summary>سياق من ${m.contextSources.length} محادثة سابقة</summary>${m.contextSources.map((c) => `<a href="#${encodeURIComponent(c.id)}">${esc(c.title)}</a>`).join('')}</details>` : ''}
     ${m.mediaTask ? `<div class="memory-notice">${m.mediaTask.provider === 'kie' ? 'kie.ai' : 'PiAPI'} · ${esc(m.mediaTask.name)}${m.mediaTask.id ? ` · المهمة: ${esc(m.mediaTask.id)}` : ' · لم يتأكد إنشاء المهمة؛ افحص سجل المزوّد قبل إعادة الطلب.'}</div>` : ''}
-    <div class="meta"><span>${esc(m.mediaTask?.name || modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
+    <div class="meta"><span>${esc(m.agentEngine ? m.agentEngine === 'codex' ? 'Codex' : 'Claude Code' : m.mediaTask?.name || modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
       ${m.text ? '<button data-copy>📋 نسخ</button>' : ''}
       ${m.mediaTask?.id && !m.mediaTask.done ? '<button data-resume-media>متابعة المهمة</button>' : ''}
-      ${isLast && !m.mediaTask ? '<button data-retry>🔄 أعد</button>' : ''}
-      ${isLast && m.error && !m.mediaTask && !['gemini-3-8-flash', OR_AUDIO_MODEL].includes(m.model) ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
+      ${m.agentRunId && !m.agentCompleted ? '<button data-resume-agent>متابعة التنفيذ</button>' : ''}
+      ${isLast && !m.mediaTask && !m.agentEngine ? '<button data-retry>🔄 أعد</button>' : ''}
+      ${isLast && m.error && !m.mediaKind && !m.mediaTask && !m.agentEngine && !['image', 'video'].includes(S.chat?.mode) && !['gemini-3-8-flash', OR_AUDIO_MODEL].includes(m.model) ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
       ${m.error && m.connection ? `<span>مدة الانتظار: ${Math.round(m.connection.totalMs / 1000)} ث · ${m.connection.headersMs == null ? 'بدون بدء استجابة' : 'وصلت استجابة من الخدمة'}</span>` : ''}
     </div></div>`;
 }
@@ -425,7 +465,29 @@ $('#messages').addEventListener('click', async (e) => {
   const msgEl = e.target.closest('.msg[data-i]');
   if (!msgEl || !msgEl.dataset.i) return;
   const m = S.chat.messages[Number(msgEl.dataset.i)];
-  if (e.target.closest('[data-apply-project]')) {
+  if (e.target.closest('[data-copy-prompt]')) {
+    await copy(m.promptStudio.prompt); return toast('تم نسخ البرومبت');
+  } else if (e.target.closest('[data-use-prompt]')) {
+    if (S.controller || input.value.trim() || S.attachments.length) return toast('أرسل المسودة الحالية أو امسحها أولاً');
+    S.mode = 'image'; S.chat.mode = 'image'; S.chat.promptStudioMode = false;
+    applyWorkspace('image'); $('#reuseMedia').checked = false;
+    input.value = m.promptStudio.prompt; autosize(); input.focus(); return;
+  } else if (e.target.closest('[data-prompt-change], [data-reset-prompt]')) {
+    if (S.controller) return;
+    const index = e.target.closest('[data-prompt-change]')?.dataset.promptChange;
+    const change = index === undefined ? null : m.promptStudio.changes[Number(index)];
+    if (change) m.promptStudio.prompt = m.promptStudio.prompt.replace(change.from, change.to);
+    else m.promptStudio.prompt = m.promptStudio.original;
+    await db.saveChat(S.chat); renderMessages(); return;
+  } else if (e.target.closest('[data-resume-agent]')) {
+    return followLocalAgent(m);
+  } else if (e.target.closest('[data-undo-agent]')) {
+    if (S.controller || projectSaving || m.agentAppliedRevision !== S.chat.project?.revision) return;
+    try {
+      await saveProjectFiles(m.agentBefore);
+      toast('تم التراجع في نسخة المشروع.');
+    } catch (error) { toast(error.message); }
+  } else if (e.target.closest('[data-apply-project]')) {
     if (S.controller || projectSaving) return;
     try {
       const files = applyProjectProposal(S.chat.project, m.projectProposal);
@@ -475,6 +537,7 @@ async function copy(text) {
 
 // ---------- اختيار النموذج ----------
 function openModels() {
+  if (S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off') return openSettings('agent');
   const query = $('#modelSearch').value.trim().toLowerCase();
   const kind = selectedMediaKind();
   $('#modelSheetTitle').textContent = kind === 'video' ? 'اختر نموذج الفيديو' : kind === 'image' ? 'اختر نموذج الصور' : 'اختر النموذج';
@@ -496,7 +559,7 @@ function openModels() {
     return;
   }
   const groups = {};
-  for (const m of modelsFor(S.provider).filter((m) => !query || `${m.name} ${m.remoteId || m.id}`.toLowerCase().includes(query))) (groups[m.maker] ||= []).push(m);
+  for (const m of modelsFor(S.provider).filter((m) => !(S.mode === 'image' && S.promptMode && m.vision === false) && (!query || `${m.name} ${m.remoteId || m.id}`.toLowerCase().includes(query)))) (groups[m.maker] ||= []).push(m);
   $('#modelList').innerHTML = Object.entries(groups)
     .map(
       ([maker, list]) =>
@@ -552,7 +615,8 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
-  const image = S.mode === 'image' || S.imageMode;
+  const extracting = S.mode === 'image' && S.promptMode;
+  const image = !extracting && (S.mode === 'image' || S.imageMode);
   const video = S.mode === 'video' || S.videoMode;
   const media = image || video;
   for (const [id, active] of [['searchBtn', S.search && !S.imageMode], ['deepBtn', S.deep && !S.imageMode], ['imgBtn', S.imageMode]]) {
@@ -573,10 +637,13 @@ function syncToggles() {
   $('#mediaReference').classList.toggle('hidden', !media);
   $('#videoReference').classList.toggle('hidden', S.mode !== 'video');
   $('#reuseMediaRow').classList.toggle('hidden', !isMediaWorkspace());
+  $('#mediaReferenceOptions').classList.toggle('hidden', !media);
+  $('#imageCreate').setAttribute('aria-pressed', String(!extracting));
+  $('#imageExtract').setAttribute('aria-pressed', String(extracting));
   for (const id of ['searchBtn', 'deepBtn']) $(`#${id}`).classList.toggle('hidden', isMediaWorkspace());
   for (const id of ['imgBtn', 'videoBtn']) $(`#${id}`).classList.toggle('hidden', S.mode !== 'chat');
   $('#fileInput').accept = isMediaWorkspace() ? 'image/*' : 'image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt';
-  input.placeholder = video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…'
+  input.placeholder = extracting ? 'أرفق الصورة… واكتب التعديلات اللي تبيها (اختياري)' : video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…'
     : S.mode === 'work' ? 'صف التطبيق أو التعديل اللي تبيه…' : 'اكتب رسالتك…';
   renderModelName();
 }
@@ -744,6 +811,7 @@ async function run(opts) {
       think.classList.remove('hidden');
       think.textContent = (think.textContent + d.text).slice(-600);
     } else if (ev === 'status') setStatus(d.text);
+    else if (ev === 'agent') paintAgentActivity(d);
     else if (ev === 'image' || ev === 'video') {
       gen.classList.remove('hidden');
       gen.insertAdjacentHTML('beforeend', ev === 'video' ? videoFigure(d) : genFigure(d));
@@ -752,7 +820,9 @@ async function run(opts) {
     }
   };
   try {
-    const reply = await respond(chat, { model: S.model, search: S.search, deep: S.deep, aspect: $('#aspect').value, ...opts }, emit, ctrl.signal);
+    const local = S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off';
+    const reply = local ? await respondLocal(chat, emit, ctrl.signal) : await respond(chat, { model: S.model, search: S.search, deep: S.deep, aspect: $('#aspect').value, ...opts }, emit, ctrl.signal);
+    if (local) renderProjectCount();
     void notifyCompletion(chat, reply);
   } finally {
     if (frame) cancelAnimationFrame(frame);
@@ -765,16 +835,23 @@ async function send() {
   if (S.controller || projectSaving) return;
   if (diagnosisController) return toast('انتظر انتهاء فحص الاتصال أو ألغِ الفحص');
   if (rec || voiceJob || mic.classList.contains('busy')) return toast('أوقف الإملاء وانتظر اكتمال النص أولاً');
-  const text = input.value.trim();
+  let text = input.value.trim();
   if ((!text && !S.attachments.length) || S.attachments.some((a) => a.loading)) return;
-  const mediaKind = isMediaWorkspace() ? S.mode : S.mode === 'chat' && (S.videoMode ? 'video' : S.imageMode ? 'image' : mediaIntent(text));
+  const extracting = S.mode === 'image' && S.promptMode;
+  if (extracting && !text) text = 'استخرج برومبت يقارب هالصورة مع قائمة مختصرة لتغيير الشخصية والملمس والإضاءة والألوان والخلفية.';
+  const mediaKind = !extracting && (isMediaWorkspace() ? S.mode : S.mode === 'chat' && (S.videoMode ? 'video' : S.imageMode ? 'image' : mediaIntent(text)));
   if (mediaKind && !text) return toast('اكتب وصف الصورة أو الفيديو');
   const mediaKey = mediaProvider() === 'kie' ? 'kieKey' : 'piapiKey';
   if (mediaKind && !db.settings.get(mediaKey, '')) {
     openSettings('media');
     return toast('أضف مفتاح مزوّد الصور والفيديو المحدد في الإعدادات');
   }
-  if (!mediaKind && !db.settings.get(keySetting(S.provider), '')) {
+  const localCoding = S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off';
+  if (localCoding && (!localAgentOrigin() || !agentCredentials().key)) {
+    openSettings('agent');
+    return toast(localAgentOrigin() ? 'أضف مفتاح محرك البرمجة أولاً' : 'افتح نسخة الكمبيوتر لتشغيل المحرك');
+  }
+  if (!localCoding && !mediaKind && !db.settings.get(keySetting(S.provider), '')) {
     openSettings('models');
     return toast(`أضف مفتاح ${S.provider === 'openrouter' ? 'OpenRouter' : 'kie.ai'} أول`);
   }
@@ -784,7 +861,7 @@ async function send() {
   if (mediaReferenceUrl && !/^https?:\/\//i.test(mediaReferenceUrl)) return toast('استخدم رابط صورة يبدأ بـ https://');
   if (videoReferenceUrl && !/^https?:\/\//i.test(videoReferenceUrl)) return toast('استخدم رابط فيديو يبدأ بـ https://');
   const reuseMedia = isMediaWorkspace() && $('#reuseMedia').checked;
-  S.chat.messages.push({ role: 'user', text, files, ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), ...(videoReferenceUrl ? { videoReferenceUrl } : {}), reuseMedia, at: Date.now() });
+  S.chat.messages.push({ role: 'user', text, files, ...(extracting ? { promptStudio: true } : {}), ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), ...(videoReferenceUrl ? { videoReferenceUrl } : {}), reuseMedia, at: Date.now() });
   $('#mediaReference').value = '';
   $('#videoReference').value = '';
   $('#reuseMedia').checked = true;
@@ -809,6 +886,155 @@ async function retry() {
   if (!S.chat.messages.length) return;
   await run({ imageMode: false });
 }
+
+// ---------- محركات البرمجة المحلية ----------
+const cloudIdle = () => !S.controller && !projectSaving && !rec && !voiceJob && !micStarting && !input.value.trim() && !S.attachments.length && !document.activeElement?.matches('#settingsSheet input, #settingsSheet textarea, #projectSheet input, #projectSheet textarea') && $('#projectSheet').classList.contains('hidden');
+async function refreshCloudView() {
+  if (!cloudIdle() || !S.chat) return;
+  S.chats = await db.listChats();
+  if (S.chats.some(chat => chat.id === S.chat.id)) await openChat(S.chat.id);
+  else { renderChatList(); newChat(); }
+  loadPersonalSettings();
+}
+async function renderCloudAccount(user) {
+  user ??= await cloudUser();
+  $('#cloudAccount').textContent = user ? `☁ ${user.email || 'حساب سوالف'}` : db.profileId ? 'الحساب يحتاج تسجيل الدخول مجدداً' : 'بياناتك محفوظة على هذا الجهاز';
+  $('#cloudLogin').classList.toggle('hidden', !!user);
+  $('#cloudActions').classList.toggle('hidden', !user);
+  $('#cloudOpenProfile').classList.toggle('hidden', !user || user.id === db.profileId);
+  for (const id of ['cloudSync', 'cloudImport']) $(`#${id}`).disabled = !user || user.id !== db.profileId;
+}
+async function startCloud() {
+  try {
+    const user = await initCloud({ idle: cloudIdle, refresh: refreshCloudView, status: text => {
+      $('#cloudStatus').textContent = text;
+      $('#cloudConflict').classList.toggle('hidden', !memoryConflict());
+    } });
+    await renderCloudAccount(user);
+  } catch (error) { $('#cloudStatus').textContent = 'الحفظ المحلي شغال. تعذّر الاتصال بالحساب: ' + error.message; }
+}
+async function authenticateCloud(signup) {
+  if (!cloudIdle()) return toast('أكمل الطلب أو المسودة قبل تغيير الحساب');
+  const email = $('#cloudEmail').value.trim(), password = $('#cloudPassword').value;
+  if (!email || password.length < 8) return toast('أدخل بريدك وكلمة مرور من 8 أحرف أو أكثر');
+  for (const id of ['cloudSignIn', 'cloudSignUp']) $(`#${id}`).disabled = true;
+  $('#cloudStatus').textContent = signup ? 'ينشئ حساب سوالف…' : 'يسجّل الدخول…';
+  try {
+    const { data, error } = await (signup ? cloud.auth.signUp({ email, password }) : cloud.auth.signInWithPassword({ email, password }));
+    if (error) throw error;
+    $('#cloudPassword').value = '';
+    if (!data.session) { $('#cloudStatus').textContent = 'افتح رسالة التأكيد في بريدك، ثم ارجع وسجّل الدخول هنا. إذا لم تصلك الرسالة فقد يحتاج المشروع إعداد خدمة البريد.'; return; }
+    localStorage.setItem('sc.cloudProfile', data.user.id); location.reload();
+  } catch (error) { $('#cloudStatus').textContent = 'تعذّر تسجيل الدخول: ' + error.message; }
+  finally { for (const id of ['cloudSignIn', 'cloudSignUp']) $(`#${id}`).disabled = false; }
+}
+$('#cloudSignIn').onclick = () => authenticateCloud(false);
+$('#cloudSignUp').onclick = () => authenticateCloud(true);
+$('#cloudOpenProfile').onclick = async () => { if (!cloudIdle()) return; const user = await cloudUser(); if (user) { localStorage.setItem('sc.cloudProfile', user.id); location.reload(); } };
+$('#cloudSignOut').onclick = async () => {
+  if (!cloudIdle()) return toast('أكمل الطلب أو المسودة قبل تسجيل الخروج');
+  await cloud.auth.signOut({ scope: 'local' }).catch(() => {});
+  localStorage.removeItem('sowalif-auth-v1'); localStorage.removeItem('sc.cloudProfile'); location.reload();
+};
+$('#cloudSync').onclick = () => syncCloud();
+$('#cloudImport').onclick = async (event) => {
+  if (!cloudIdle()) return toast('أكمل الطلب أو المسودة أولاً');
+  if (!confirm('تبي تنقل محادثات وصور وتعليمات هذا الجهاز إلى حساب سوالف؟ مفاتيح المزوّدين ما تُرفع.')) return;
+  event.target.disabled = true;
+  try { const count = await db.importDeviceData(); await syncCloud(); await refreshCloudView(); toast(`تم استيراد ${count} محادثة للحساب`); }
+  catch (error) { toast(error.message, 6000); }
+  finally { event.target.disabled = false; }
+};
+$('#cloudKeepLocal').onclick = () => resolveMemoryConflict('local');
+$('#cloudKeepRemote').onclick = () => resolveMemoryConflict('remote');
+window.addEventListener('storage', event => { if (event.key === 'sc.cloudProfile') location.reload(); });
+
+function renderCodingSetup() {
+  const config = agentCredentials();
+  $('#codingEngine').value = db.settings.get('codingEngine', 'off');
+  $('#codingProvider').value = config.provider;
+  $('#codingProvider').disabled = config.engine === 'codex';
+  $('#codingModel').value = config.model;
+  $('#codingBudget').value = db.settings.get('codingBudget', 2);
+  $('#codingKeyHint').textContent = `${config.engine === 'codex' ? 'مفتاح OpenAI API لـ Codex' : config.provider === 'openrouter' ? 'مفتاح OpenRouter — مشترك مع الشات' : 'مفتاح Anthropic API'} · ${config.key ? 'محفوظ' : 'غير محفوظ'}`;
+  $('#codingStatus').textContent = localAgentOrigin() ? 'نسخة الكمبيوتر · افحص الاتصال من زر ربط المحرك' : 'التنفيذ متاح من نسخة الكمبيوتر المحلية.';
+}
+async function refreshCodingStatus() {
+  try {
+    const status = await localStatus();
+    $('#codingStatus').textContent = status.ready ? '✓ محرك الكمبيوتر جاهز · Claude Code وCodex' : status.local ? 'Docker غير جاهز. شغّل npm run agent:setup على الكمبيوتر.' : 'افتح نسخة الكمبيوتر لتشغيل المحركات.';
+  } catch { $('#codingStatus').textContent = 'تعذّر الاتصال بخدمة الكمبيوتر. شغّل Start-Sowalif.cmd.'; }
+}
+$('#codingEngine').onchange = (e) => {
+  if (S.controller) { e.target.value = db.settings.get('codingEngine', 'off'); return; }
+  db.settings.set('codingEngine', e.target.value);
+  renderCodingSetup(); renderModelName();
+  if (e.target.value !== 'off') openSettings('agent');
+};
+$('#codingSetup').onclick = () => openSettings('agent');
+$('#codingProvider').onchange = (e) => {
+  if (S.controller) return;
+  db.settings.set('codingProvider', e.target.value); $('#codingKey').value = ''; renderCodingSetup();
+};
+$('#saveCodingKey').onclick = () => {
+  const config = agentCredentials();
+  const key = $('#codingKey').value.trim();
+  if (!key) return toast('الصق مفتاح API أولاً');
+  if (!db.settings.set(config.keyName, key)) return toast('تعذّر حفظ المفتاح');
+  $('#codingKey').value = ''; renderCodingSetup(); void refreshCodingStatus(); toast('تم حفظ مفتاح المحرك على هذا المتصفح');
+};
+$('#forgetCodingKey').onclick = () => { db.settings.set(agentCredentials().keyName, ''); $('#codingKey').value = ''; renderCodingSetup(); };
+$('#codingModel').onchange = (e) => db.settings.set(db.settings.get('codingEngine', 'off') === 'codex' ? 'codingCodexModel' : 'codingClaudeModel', e.target.value.trim());
+$('#codingBudget').onchange = (e) => { const value = Math.max(.1, Math.min(10, Number(e.target.value) || 2)); db.settings.set('codingBudget', value); e.target.value = value; };
+function paintAgentActivity(run) {
+  $('#agentActivity').classList.remove('hidden');
+  $('#agentRunState').textContent = `${run.engine === 'codex' ? 'Codex' : 'Claude Code'} · ${{ running: 'جاري التنفيذ', completed: 'اكتمل', stopped: 'متوقف', failed: 'تعذّر الإكمال' }[run.state]}`;
+  const log = $('#agentLog');
+  log.textContent = (run.events || []).map(event => event.type === 'tool' ? `${event.name}: ${event.input}` : event.text || event.message || '').join('\n\n');
+  log.scrollTop = log.scrollHeight;
+  const approval = $('#agentApproval');
+  const next = run.approvals?.[0];
+  approval.classList.toggle('hidden', !next);
+  if (next && approval.dataset.request !== next.id) {
+    approval.dataset.request = next.id;
+    approval.innerHTML = `<strong>السماح بهذا الأمر داخل مساحة المشروع؟</strong><pre dir="auto">${esc(next.input?.command || '')}</pre><div class="row"><button class="btn primary" data-agent-allow="true">سماح مرة واحدة</button><button class="btn ghost" data-agent-allow="false">رفض</button></div>`;
+    approval.dataset.run = run.id;
+  }
+  if (!next) { approval.dataset.request = ''; approval.innerHTML = ''; }
+  const preview = $('#agentPreviewLink');
+  preview.classList.toggle('hidden', run.state === 'running' || !run.previewPath);
+  preview.href = `/preview/${encodeURIComponent(run.projectId)}/${run.previewPath === 'dist/index.html' ? 'dist/index.html' : 'index.html'}`;
+}
+$('#agentApproval').onclick = async (event) => {
+  const button = event.target.closest('[data-agent-allow]');
+  if (!button) return;
+  button.disabled = true;
+  try { await answerAgent($('#agentApproval').dataset.run, $('#agentApproval').dataset.request, button.dataset.agentAllow === 'true'); $('#agentApproval').classList.add('hidden'); }
+  catch (error) { button.disabled = false; toast(error.message); }
+};
+async function followLocalAgent(reply) {
+  if (S.controller || !localAgentOrigin()) return toast('تابع التنفيذ من نسخة الكمبيوتر');
+  const ctrl = new AbortController(); S.controller = ctrl; updateSend();
+  try {
+    delete reply.error; delete reply.stopped;
+    await collectAgentRun(S.chat, reply, (type, data) => { if (type === 'agent') paintAgentActivity(data); if (type === 'status') setStatus(data.text); if (type === 'delta') renderMessages(); }, ctrl.signal);
+    await db.saveChat(S.chat);
+  } catch (error) { toast(error.message); }
+  finally { finishRequest(); renderProjectCount(); }
+}
+$('#codingRecover').onclick = async () => {
+  if (S.controller || projectSaving) return;
+  if (!localAgentOrigin()) return openSettings('agent');
+  if (!confirm('استرجاع نسخة الكمبيوتر يستبدل ملفات نسخة سوالف لهذا المشروع. تبي تكمل؟')) return;
+  try {
+    const state = await recoverLocalProject(S.chat);
+    if (state.activeRun) {
+      let reply = S.chat.messages.find(message => message.agentRunId === state.activeRun);
+      if (!reply) { reply = { role: 'assistant', model: S.model, text: '', at: Date.now(), agentRunId: state.activeRun, agentEngine: db.settings.get('codingEngine', 'claude') }; S.chat.messages.push(reply); }
+      await followLocalAgent(reply);
+    } else { renderProjectCount(); renderMessages(); toast('تم استرجاع ملفات الكمبيوتر'); }
+  } catch (error) { toast(error.message, 5000); }
+};
 
 // ---------- ملفات الشغل ----------
 const projectFiles = () => S.chat?.project?.files || [];
@@ -843,7 +1069,7 @@ async function saveProjectFiles(files, { removedPath, writePaths } = {}) {
   const kept = new Set(files.map(file => file.path.toLowerCase()));
   const removed = [...new Set([...(chat.project?.removed || []), ...(removedPath ? [removedPath] : [])])]
     .filter(path => !kept.has(path.toLowerCase()));
-  const project = { files, removed, revision: (chat.project?.revision || 0) + 1 };
+  const project = { ...chat.project, files, removed, revision: (chat.project?.revision || 0) + 1 };
   const link = writePaths && linkedFolders.get(chat.id);
   let saved = false;
   async function persistProject() {
@@ -1553,6 +1779,8 @@ $('#clearSavedMemory').onclick = () => {
 };
 
 function openSettings(group) {
+  renderCodingSetup();
+  if (group === 'agent') void refreshCodingStatus();
   const sheet = $('#settingsSheet');
   if (sheet.classList.contains('hidden') || typeof group === 'string') {
     for (const section of sheet.querySelectorAll('[data-settings]')) section.open = section.dataset.settings === group;
@@ -1564,6 +1792,7 @@ function openSettings(group) {
   $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';
   for (const id of ['kieImageModel', 'kieVideoModel']) $(`#${id}`).value = db.settings.get(id, 'auto');
   $('#piapiKeyState').textContent = db.settings.get('piapiKey', '') ? '✓ مفتاح PiAPI محفوظ' : 'لا يوجد مفتاح PiAPI';
+  $('#referenceUploadProvider').value = db.settings.get('referenceUploadProvider', 'piapi');
   for (const [id, key, fallback] of [['piapiImageModel', 'piapiImageModel', 'auto'], ['piapiVideoModel', 'piapiVideoModel', 'auto'], ['piapiDuration', 'piapiDuration', 5]]) $(`#${id}`).value = db.settings.get(key, fallback);
   loadPersonalSettings();
   closeSide();
@@ -1609,7 +1838,7 @@ $('#savePiapi').onclick = () => {
   toast('تم حفظ مفتاح PiAPI');
 };
 $('#forgetPiapi').onclick = () => { db.settings.set('piapiKey', ''); $('#piapiKey').value = ''; openSettings(); };
-for (const id of ['piapiImageModel', 'piapiVideoModel', 'piapiDuration']) $(`#${id}`).onchange = saveMediaPreference;
+for (const id of ['piapiImageModel', 'piapiVideoModel', 'piapiDuration', 'referenceUploadProvider']) $(`#${id}`).onchange = saveMediaPreference;
 
 $('#completionNotifications').onchange = async (e) => {
   const toggle = e.target;

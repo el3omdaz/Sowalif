@@ -212,6 +212,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .settings-subgroup > summary::-webkit-details-marker { display: none; }
 .settings-subgroup > summary::after { content: '＋'; color: var(--muted); }
 .settings-subgroup[open] > summary::after { content: '−'; }
+.project-actions #codingEngine { width: auto; min-width: 145px; }
+.agent-activity { margin: 8px 24px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); font-size: 13px; }
+.agent-activity .row { justify-content: space-between; }
+.agent-activity summary, .agent-changes summary { cursor: pointer; padding-block: 8px; }
+.agent-activity pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.agent-approval { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-block: 8px; }
+.agent-changes { margin-block: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.agent-changes pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+@media (max-width: 820px) { .agent-activity { margin-inline: 10px; } }
 .settings summary:focus-visible { outline: 2px solid var(--text); outline-offset: -3px; border-radius: 12px; }
 .personalization-panel > label { display: block; font-size: 14px; margin: 12px 0 6px; }
 .personalization-panel h4 { margin-top: 20px; }
@@ -322,3 +331,87 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 
 .gen video { display: block; width: 100%; max-height: 65vh; border-radius: 14px; background: #111; }
 #piapiKey { width: 100%; }
+
+/* Spacious controls shared by desktop and touch screens. */
+.btn { min-height: 48px; padding: 11px 18px; font-size: 15px; font-weight: 600; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: normal; text-align: center; }
+.icon-btn { min-width: 48px; width: 48px; height: 48px; border-radius: 15px; }
+.icon-btn svg { width: 24px; height: 24px; }
+.send { min-width: 48px; width: 48px; height: 48px; font-size: 30px; }
+.top { min-height: 78px; gap: 12px; }
+.model-btn { min-height: 52px; padding: 8px 14px; border-radius: 16px; }
+.model-btn:hover { background: var(--code); }
+.workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: min(780px, 100%); align-self: center; gap: 8px; padding: 4px 20px 16px; border: 0; }
+.workspace-tabs button { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 54px; padding: 12px; border-radius: 16px; font-size: 16px; font-weight: 600; color: var(--text); background: var(--code); transition: background .15s, color .15s; }
+.workspace-tabs svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.workspace-tabs button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.workspace-tabs button:focus-visible, .btn:focus-visible, .icon-btn:focus-visible, summary:focus-visible { outline: 3px solid #8c9dce; outline-offset: 3px; }
+.project-bar { align-items: flex-start; max-width: 1050px; width: 100%; align-self: center; padding: 12px 22px; gap: 14px; border: 0; }
+#projectCount { padding-top: 14px; white-space: nowrap; }
+.project-actions { gap: 8px; }
+.project-actions .btn, #codingEngine { min-height: 48px; font-size: 14px; border-radius: 13px; }
+#codingEngine { background: var(--panel); padding: 10px 14px; }
+.sheet-card { padding: 10px 22px 24px; box-shadow: 0 18px 80px #0002; }
+.sheet-head { min-height: 70px; }
+.settings { gap: 12px; }
+.settings-group { border-radius: 18px; overflow: clip; }
+.settings .settings-group > summary { min-height: 78px; padding: 16px 18px; }
+.settings-group > summary strong { font-size: 17px; }
+.settings-body { padding: 18px; gap: 12px; }
+.settings-body input:not([type="checkbox"]), .settings-body select, .model-media-options select { min-height: 50px; font-size: 16px; border-radius: 13px; }
+.settings .settings-body .muted { font-size: 13px; line-height: 1.7; }
+.cloud-login, .cloud-actions { display: grid; gap: 12px; }
+.account-state { background: var(--code); padding: 14px 16px; border-radius: 14px; overflow-wrap: anywhere; }
+.tools-start { flex-wrap: wrap; overflow: visible; gap: 6px; }
+.tools-end { gap: 6px; align-self: flex-end; }
+.toggle { min-height: 46px; padding: 9px 11px; font-size: 14px; gap: 6px; border-radius: 13px; }
+.toggle svg { width: 20px; height: 20px; }
+.tools .attach-button { width: auto; min-width: 48px; display: inline-flex; gap: 6px; padding-inline: 10px; font-size: 14px; }
+.tools .attach-button svg { width: 21px; }
+.composer { padding: 14px; border-radius: 26px; }
+.composer textarea { min-height: 54px; padding: 10px 8px; }
+.reference-options { width: min(800px, 100%); margin: 0 auto 10px; border: 1px solid var(--line); border-radius: 15px; padding: 0 14px; background: var(--panel); }
+.reference-options summary { min-height: 48px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: var(--text); font-size: 14px; }
+.reference-options summary span { color: var(--muted); font-size: 12px; }
+.reference-options input[type="url"] { min-height: 48px; margin-bottom: 8px; font-size: 15px; }
+.media-reuse { min-height: 48px; gap: 8px; font-size: 14px; align-items: center; }
+.chip { min-height: 46px; font-size: 14px; color: var(--text); border-radius: 14px; }
+.empty p { font-size: 15px; line-height: 1.8; }
+.chat-list .chat { min-height: 52px; }
+.image-tools { display: flex; justify-content: center; gap: 8px; width: min(780px, 100%); align-self: center; padding: 0 20px 12px; }
+.image-tools button { min-height: 48px; padding: 10px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--muted); font-size: 14px; font-weight: 600; }
+.image-tools button[aria-pressed="true"] { background: var(--code); color: var(--text); border-color: var(--text); }
+.prompt-studio { display: grid; gap: 16px; margin-block: 14px; border: 1px solid var(--line); padding: 20px; border-radius: 20px; }
+.prompt-studio-head { display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+.prompt-studio-head span { color: var(--muted); font-size: 12px; }
+.prompt-studio pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--code); padding: 16px; border-radius: 14px; font-size: 15px; line-height: 1.8; margin: 0; }
+.prompt-studio h4 { margin: 4px 0 0; font-size: 16px; }
+.prompt-studio .row { flex-wrap: wrap; }
+.prompt-changes { display: grid; gap: 8px; }
+.prompt-change { display: grid; grid-template-columns: 80px 1fr auto; gap: 12px; align-items: center; border-top: 1px solid var(--line); padding-top: 10px; font-size: 14px; }
+.prompt-change bdi { overflow-wrap: anywhere; }
+.prompt-change .btn { min-height: 44px; padding: 8px 12px; }
+.meta button { min-height: 40px; padding: 7px 10px; border-radius: 10px; }
+@media (max-width: 820px) {
+  .top { min-height: 68px; gap: 6px; padding-inline: 10px; }
+  .model-btn { font-size: 17px; padding-inline: 4px; }
+  .workspace-tabs { gap: 7px; padding: 3px 12px 12px; }
+  .workspace-tabs button { min-height: 58px; flex-direction: column; gap: 5px; padding: 10px 4px; font-size: 14px; border-radius: 15px; }
+  .workspace-tabs svg { width: 23px; height: 23px; }
+  .project-bar { flex-direction: column; padding: 8px 12px 12px; gap: 8px; }
+  #projectCount { padding-top: 0; }
+  .project-bar .project-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  #codingEngine { grid-column: 1 / -1; width: 100%; }
+  .sheet-card { padding-inline: 16px; }
+  .composer-wrap { padding-inline: 12px; }
+  .composer { padding: 12px 10px 10px; }
+  .tools { align-items: flex-end; gap: 8px; }
+  .tools-start { gap: 3px; }
+  .toggle { padding-inline: 8px; font-size: 13px; }
+  .tools-end { gap: 4px; }
+  .composer-note { font-size: 10px; margin-top: 8px; }
+  .image-tools { padding-inline: 12px; }
+  .image-tools button { flex: 1; padding-inline: 10px; font-size: 13px; }
+  .prompt-studio { padding: 14px; }
+  .prompt-change { grid-template-columns: 1fr auto; gap: 6px; }
+  .prompt-change > strong { grid-column: 1 / -1; }
+}
