@@ -14,6 +14,7 @@ import { prepareProjectPush, pushProject } from './project-github.js?v=20';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=20';
 import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl } from './local-agent.js?v=22';
 import { cloud, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=20';
+import { planImage } from './image-plan.js?v=1';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -688,18 +689,23 @@ function updateSend() {
 $('#sendBtn').onclick = () => (S.controller ? S.controller.abort() : send());
 
 // ---------- المرفقات ----------
-// صور الآيفون كبيرة: نصغرها لـ 2048 بكسل قبل الحفظ والإرسال
+// صور الآيفون كبيرة: نصغرها قبل الحفظ والإرسال (انظر image-plan.js)
 async function shrinkImage(file) {
-  if (file.type === 'image/gif') return file;
+  const media = isMediaWorkspace();
+  if (media && file.type === 'image/gif') return file;
   try {
     const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+    const plan = planImage({ type: file.type, width: bmp.width, height: bmp.height, media });
     const c = document.createElement('canvas');
-    c.width = Math.round(bmp.width * scale);
-    c.height = Math.round(bmp.height * scale);
-    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    const type = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
-    return await new Promise((res) => c.toBlob((b) => res(b || file), type, 0.9));
+    c.width = plan.width;
+    c.height = plan.height;
+    const ctx = c.getContext('2d');
+    if (plan.fill) {
+      ctx.fillStyle = plan.fill;
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
+    ctx.drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise((res) => c.toBlob((b) => res(b || file), plan.type, plan.quality));
   } catch {
     return file;
   }
