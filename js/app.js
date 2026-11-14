@@ -544,15 +544,18 @@ async function copy(text) {
 
 // ---------- اختيار النموذج ----------
 let editingModelVisibility = false;
+let showingAllModels = false;
 
 function openModels() {
   if (S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off') return openSettings('agent');
   const query = $('#modelSearch').value.trim().toLowerCase();
   const kind = selectedMediaKind();
   const visibility = $('#modelVisibility');
-  visibility.classList.toggle('hidden', Boolean(kind));
+  $('#modelFilters').classList.toggle('hidden', Boolean(kind));
   visibility.textContent = editingModelVisibility ? 'تم' : 'تخصيص القائمة';
   visibility.setAttribute('aria-pressed', String(editingModelVisibility));
+  $('#modelFavorites').setAttribute('aria-pressed', String(!editingModelVisibility && !showingAllModels && !query));
+  $('#modelAll').setAttribute('aria-pressed', String(!editingModelVisibility && (showingAllModels || Boolean(query))));
   $('#modelSheetTitle').textContent = kind === 'video' ? 'اختر نموذج الفيديو' : kind === 'image' ? 'اختر نموذج الصور' : 'اختر النموذج';
   $('#modelMediaOptions').classList.toggle('hidden', !kind);
   $('#modelSheet').classList.remove('hidden');
@@ -572,6 +575,8 @@ function openModels() {
     return;
   }
   const hidden = new Set(db.settings.get('hiddenChatModels', []) || []);
+  const favorites = new Set(db.settings.get('favoriteChatModels', []) || []);
+  const favoriteView = !showingAllModels && !query;
   const matches = modelsFor(S.provider).filter(m => (editingModelVisibility || !hidden.has(m.id)) &&
     (editingModelVisibility || !(S.mode === 'image' && S.promptMode && m.vision === false)) &&
     (!query || `${m.name} ${m.remoteId || m.id}`.toLowerCase().includes(query)));
@@ -580,30 +585,42 @@ function openModels() {
       || '<p class="muted">ما لقيت نموذج بهذا الاسم.</p>';
     return;
   }
+  const hasFavorites = matches.some(m => favorites.has(m.id));
   const groups = {};
-  for (const m of matches) (groups[m.maker] ||= []).push(m);
+  for (const m of matches) {
+    if (favoriteView && !(hasFavorites ? favorites.has(m.id) : m.id === S.model || m.id === S.defaultModel)) continue;
+    (groups[m.maker] ||= []).push(m);
+  }
   $('#modelList').innerHTML = Object.entries(groups)
     .map(
       ([maker, list]) =>
         `<div class="maker">${esc(maker)}</div>` +
         list
           .map(
-            (m) => `<button class="model${m.id === S.model ? ' active' : ''}" data-id="${m.id}">
-      <div class="model-title">${esc(m.name)}${m.badge ? `<span class="badge">${m.badge}</span>` : ''}${m.id === S.defaultModel ? '<span class="badge soft">التلقائي</span>' : ''}${m.search === 'native' ? '<span class="badge soft">بحث Google</span>' : ''}</div>
-      <div class="model-tag">${esc(m.tagline)}</div>
-      <ul>${m.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></button>`,
+            (m) => `<div class="model-choice"><button type="button" class="model${m.id === S.model ? ' active' : ''}" data-id="${esc(m.id)}" aria-pressed="${m.id === S.model}">
+      <span class="model-title">${esc(m.name)}${m.id === S.defaultModel ? '<span class="badge soft">التلقائي</span>' : ''}</span></button>
+      <button type="button" class="btn ghost" data-favorite="${esc(m.id)}" aria-pressed="${favorites.has(m.id)}" aria-label="المفضلة: ${esc(m.name)}">${favorites.has(m.id) ? '★' : '☆'}</button></div>`,
           )
           .join(''),
     )
-    .join('') || '<p class="muted">ما فيه نماذج ظاهرة. عدّل البحث أو افتح «تخصيص القائمة» لإظهارها.</p>';
+    .join('') || '<p class="muted">ما فيه نماذج هنا. افتح «كل النماذج» أو «تخصيص القائمة».</p>';
 }
 $('#modelBtn').onclick = () => {
   if (S.controller) return toast('انتظر انتهاء الطلب قبل تغيير النموذج.');
   editingModelVisibility = false;
+  showingAllModels = false;
   $('#modelSearch').value = '';
   openModels();
 };
 $('#modelSearch').addEventListener('input', openModels);
+for (const [id, all] of [['modelFavorites', false], ['modelAll', true]]) {
+  $(`#${id}`).onclick = () => {
+    editingModelVisibility = false;
+    showingAllModels = all;
+    $('#modelSearch').value = '';
+    openModels();
+  };
+}
 $('#modelVisibility').onclick = () => {
   editingModelVisibility = !editingModelVisibility;
   $('#modelSearch').value = '';
@@ -629,6 +646,16 @@ $('#modelMediaProvider').onchange = (event) => {
   openModels();
 };
 $('#modelList').addEventListener('click', (e) => {
+  const favorite = e.target.closest('[data-favorite]');
+  if (favorite?.dataset.favorite) {
+    const id = favorite.dataset.favorite;
+    const favorites = new Set(db.settings.get('favoriteChatModels', []) || []);
+    if (favorites.has(id)) favorites.delete(id);
+    else favorites.add(id);
+    if (!db.settings.set('favoriteChatModels', [...favorites])) return toast('تعذّر حفظ المفضلة.');
+    openModels();
+    return;
+  }
   const b = e.target.closest('.model');
   if (!b || S.controller) return;
   const kind = selectedMediaKind();

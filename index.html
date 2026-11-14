@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
   <div id="app" class="app">
@@ -130,7 +130,11 @@
         <p id="modelMediaHint" class="muted" role="status"></p>
       </div>
       <input id="modelSearch" type="search" placeholder="ابحث عن نموذج" aria-label="ابحث عن نموذج">
-      <button id="modelVisibility" class="btn ghost" type="button" aria-pressed="false">تخصيص القائمة</button>
+      <div id="modelFilters" class="model-filters">
+        <button id="modelFavorites" class="btn ghost" type="button" aria-pressed="true">المفضلة</button>
+        <button id="modelAll" class="btn ghost" type="button" aria-pressed="false">كل النماذج</button>
+        <button id="modelVisibility" class="btn ghost" type="button" aria-pressed="false">تخصيص القائمة</button>
+      </div>
       <div id="modelList" class="model-list"></div>
     </div>
   </div>
@@ -367,6 +371,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=25"></script>
+  <script type="module" src="js/app.js?v=26"></script>
 </body>
 </html>

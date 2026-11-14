@@ -91,7 +91,10 @@ test('chat model picker can hide and restore a model without changing the curren
   const settings = new Map();
   a.ctx.db.settings.get = (key, fallback) => settings.get(key) ?? fallback;
   a.ctx.db.settings.set = (key, value) => (settings.set(key, value), true);
-  a.ctx.modelsFor = () => [{ id: 'astra', name: 'GPT-6 Astra', maker: 'OpenAI', features: [] }];
+  a.ctx.modelsFor = () => [
+    { id: 'astra', name: 'GPT-6 Astra', maker: 'OpenAI', features: [] },
+    { id: 'sol', name: 'GPT-6.1 Sol', maker: 'OpenAI', features: [] },
+  ];
   a.run("S.model = 'astra'");
   a.node('#modelBtn').click();
   a.node('#modelVisibility').click();
@@ -105,6 +108,13 @@ test('chat model picker can hide and restore a model without changing the curren
   toggle(true);
   a.node('#modelVisibility').click();
   assert.match(a.node('#modelList').innerHTML, /GPT-6 Astra/);
+  assert.doesNotMatch(a.node('#modelList').innerHTML, /GPT-6\.1 Sol/);
+  a.node('#modelAll').click();
+  assert.match(a.node('#modelList').innerHTML, /GPT-6\.1 Sol/);
+  a.node('#modelList').listeners.click({ target: { closest: selector => selector === '[data-favorite]' ? { dataset: { favorite: 'sol' } } : null } });
+  a.node('#modelBtn').click();
+  assert.match(a.node('#modelList').innerHTML, /GPT-6\.1 Sol/);
+  assert.doesNotMatch(a.node('#modelList').innerHTML, /GPT-6 Astra/);
 });
 
 test('video model picker changes the media provider and model independently of chat', () => {
