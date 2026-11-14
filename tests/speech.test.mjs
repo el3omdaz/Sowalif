@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import vm from 'node:vm';
 import { applyProjectProposal } from '../js/project.js?v=20';
 import { writeProjectDirectory } from '../js/project-folder.js?v=20';
+import { reasoningLevels } from '../js/reasoning.js?v=1';
 
 function app({ navigator = {}, coarsePointer = false } = {}) {
   const nodes = new Map();
@@ -16,7 +17,7 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
       const classes = new Set();
       nodes.set(s, { value: '', innerHTML: '<svg>mic</svg>', textContent: '', style: {}, scrollHeight: 48,
         classList: { add: (...a) => a.forEach((v) => classes.add(v)), remove: (...a) => a.forEach((v) => classes.delete(v)), contains: (v) => classes.has(v), toggle: () => {} },
-        setAttribute() {}, listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; }, focus() {}, click() { return this.onclick?.(); },
+        setAttribute() {}, replaceChildren() {}, listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; }, focus() {}, click() { return this.onclick?.(); },
       });
     }
     return nodes.get(s);
@@ -39,6 +40,8 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
     db: { settings: { get: (_, d) => d } },
     MODELS: [{ id: 'test' }], DEFAULT_MODEL: 'test', OR_DEFAULT_MODEL: 'or:test/model', OR_AUDIO_MODEL: 'or:google/test',
     providerOf: (id) => String(id).startsWith('or:') ? 'openrouter' : 'kie',
+    reasoningLevels,
+    Option: class { constructor(text, value) { Object.assign(this, { text, value }); } },
     agentCredentials: () => ({ engine: 'off', provider: 'openrouter', key: '', model: '' }),
     localAgentOrigin: () => false,
     fitViewport: () => {},
@@ -299,6 +302,26 @@ test('cancelled conversion cannot insert a late transcript', async () => {
   assert.equal(a.node('#input').value, 'مسودة');
   assert.equal(a.run('voiceJob'), null);
   assert.equal(a.node('#input').readOnly, false);
+});
+
+test('default model search filters by name or ID without changing the saved choice', () => {
+  const a = app();
+  a.ctx.modelsFor = () => [{ id: 'test', name: 'Default model' }, { id: 'gpt-6-astra', name: 'GPT-6 Astra' }];
+  const search = a.node('#defaultModelSearch');
+  const select = a.node('#defaultModel');
+  search.value = ' ASTRA ';
+  search.listeners.input();
+  assert.match(select.innerHTML, /GPT-6 Astra/);
+  assert.doesNotMatch(select.innerHTML, /Default model/);
+  assert.equal(select.value, '');
+  assert.equal(a.run('S.defaultModel'), 'test');
+  search.value = 'missing';
+  search.listeners.input();
+  assert.equal(select.disabled, true);
+  search.value = '';
+  search.listeners.input();
+  assert.equal(select.value, 'test');
+  assert.equal(select.disabled, false);
 });
 
 test('provider switching keeps keys and defaults independent in settings', async () => {

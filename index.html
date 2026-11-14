@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=28">
+  <link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
   <div id="app" class="app">
@@ -41,6 +41,7 @@
         <button type="button" data-mode="video" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="14" height="14" rx="4"/><path d="m16 10 6-4v12l-6-4"/></svg><span>الفيديو</span></button>
         <button type="button" data-mode="work" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span>الشغل</span></button>
         <button type="button" id="openOrganizer" aria-haspopup="dialog" aria-label="إدارة الملفات والبريد"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z"/></svg><span>الإدارة</span></button>
+        <button type="button" id="openMarket" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h18M5 15l5-5 4 3 5-7M15 6h4v4"/></svg><span>السوق</span></button>
       </nav>
       <div id="imageTools" class="image-tools hidden" role="group" aria-label="أدوات الصور">
         <button id="imageCreate" type="button" aria-pressed="true">إنشاء وتعديل صورة</button>
@@ -106,7 +107,8 @@
       <div class="composer-options">
               <button id="attachBtn" class="icon-btn attach-button" aria-label="أرفق صورة أو ملف"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>إرفاق</span></button><input id="fileInput" type="file" multiple hidden>
               <button id="searchBtn" class="toggle on" title="البحث في الإنترنت"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><span>بحث</span></button>
-              <button id="deepBtn" class="toggle" title="تفكير أعمق (أبطأ وأدق)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M9 21h6M8 14a7 7 0 1 1 8 0l-1 2H9l-1-2Z"/></svg><span>تفكير</span></button>
+              <select id="deepBtn" class="toggle" aria-label="مستوى التفكير"><option value="normal">التفكير: عادي</option></select>
+              <button id="executeBtn" class="toggle hidden" type="button" aria-pressed="false">تنفيذ وإنشاء ملفات</button>
               <select id="aspect" class="aspect hidden" title="مقاس الصورة أو الفيديو">
                 <option value="auto">تلقائي</option>
                 <option value="1:1">مربع 1:1</option>
@@ -116,6 +118,45 @@
                 <option value="3:4">3:4</option>
                 <option value="4:3">4:3</option>
               </select>
+      </div>
+    </div>
+  </div>
+
+  <div id="marketSheet" class="sheet hidden" role="dialog" aria-modal="true" aria-labelledby="marketTitle">
+    <div class="sheet-card market-sheet">
+      <div class="sheet-head"><h3 id="marketTitle">السوق والتنبيهات</h3><button class="icon-btn" type="button" data-close aria-label="إغلاق">✕</button></div>
+      <div id="marketAccess" class="market-access row">
+        <input id="marketToken" type="password" autocomplete="off" placeholder="رمز الوصول لخدمة السوق" aria-label="رمز الوصول لخدمة السوق">
+        <button id="marketConnect" class="btn ghost" type="button">ربط</button>
+        <button id="marketForget" class="btn ghost" type="button">مسح الرمز</button>
+      </div>
+      <p id="marketStatus" class="muted" role="status"></p>
+      <div id="marketTools" class="hidden">
+        <div class="row market-actions">
+          <select id="marketFilter" aria-label="الأصل المعروض"></select>
+          <button id="marketRefresh" class="btn ghost" type="button">تحديث الآن</button>
+        </div>
+        <div id="marketNotifyBar" class="row market-actions hidden">
+          <button id="marketEnableNotify" class="btn ghost" type="button">فعّل الإشعارات على هذا الجهاز</button>
+          <button id="marketDisableNotify" class="btn ghost" type="button">أوقف إشعارات السوق</button>
+        </div>
+        <details class="settings-group">
+          <summary><span><strong>إعداد المتابعة</strong><small>الأصول والفواصل الزمنية وحدود السعر</small></span></summary>
+          <form id="marketForm" class="settings-body">
+            <label class="row"><input id="marketEnabled" type="checkbox"> متابعة تلقائية</label>
+            <label for="marketAssets">رموز الأصول</label>
+            <input id="marketAssets" dir="ltr" required placeholder="XAU/USD, EUR/USD">
+            <label for="marketInterval">التحديث كل كم دقيقة</label>
+            <input id="marketInterval" type="number" min="1" max="60" required>
+            <label for="marketLead">نبّهني قبل الموعد بكم دقيقة</label>
+            <input id="marketLead" type="number" min="0" max="120" required>
+            <label for="marketThresholds">حدود السعر (اختياري)</label>
+            <textarea id="marketThresholds" rows="3" dir="ltr" placeholder="XAU/USD > 2500"></textarea>
+            <button class="btn primary" type="submit">حفظ المتابعة</button>
+          </form>
+        </details>
+        <div id="marketQuotes" class="market-quotes"></div>
+        <div id="marketEvents" class="market-events"></div>
       </div>
     </div>
   </div>
@@ -239,6 +280,14 @@
           <a id="projectGithubResult" class="hidden" target="_blank" rel="noopener noreferrer">عرض الفرع وفتح Pull Request في GitHub</a>
         </div>
       </details>
+      <details class="settings-group">
+        <summary><span><strong>تعليمات المشروع</strong><small>يحفظها سوالف ويستخدمها في الطلبات القادمة داخل المشروع</small></span></summary>
+        <div class="settings-body">
+          <label for="projectInstructions">طريقة العمل والمتطلبات الثابتة</label>
+          <textarea id="projectInstructions" rows="5" maxlength="4000" dir="auto"></textarea>
+          <button id="projectSaveInstructions" class="btn ghost" type="button">حفظ التعليمات</button>
+        </div>
+      </details>
       <div class="project-editor">
         <label for="projectFiles">الملفات المحفوظة</label>
         <select id="projectFiles" dir="ltr"></select>
@@ -318,6 +367,8 @@
             </section>
             <section>
               <h4>النموذج التلقائي</h4>
+              <input id="defaultModelSearch" type="search" dir="auto" placeholder="ابحث عن نموذج" aria-label="ابحث في نماذج المزوّد الحالي" aria-controls="defaultModel">
+              <label for="defaultModel">اختر النموذج التلقائي</label>
               <select id="defaultModel"></select>
               <button id="refreshModels" class="btn ghost hidden">تحديث نماذج OpenRouter</button>
               <p id="catalogMsg" class="muted"></p>
@@ -438,6 +489,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=29"></script>
+  <script type="module" src="js/app.js?v=31"></script>
 </body>
 </html>

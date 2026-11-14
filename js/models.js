@@ -1,5 +1,5 @@
 // النماذج المتاحة عبر kie.ai (docs.kie.ai — نوفمبر 2026)
-import { settings } from './db.js?v=20';
+import { settings } from './db.js?v=21';
 // api: anthropic = /claude/v1/messages · responses = صيغة OpenAI Responses · chat = صيغة Chat Completions
 // tools: يقدر يستدعي أدوات البحث وتوليد الصور بنفسه · search: native = بحث Google مدمج، tool = أداتنا، pre = نبحث قبل السؤال
 
@@ -12,7 +12,7 @@ export const MODELS = [
     url: '/codex/v1/responses',
     tools: true,
     search: 'tool',
-    effort: ['low', 'high'],
+    effort: ['low', 'high', 'max'],
     tagline: 'للمنطق والتحليل والبرمجة المعقّدة',
     features: ['يدعم التفكير المتعمّق والصور والملفات'],
   },
@@ -76,7 +76,7 @@ export const MODELS = [
     url: '/codex/v1/responses',
     tools: true,
     search: 'tool',
-    effort: ['low', 'high'],
+    effort: ['low', 'high', 'max'],
     tagline: 'أحدث نموذج رئيسي من OpenAI',
     features: ['ذاكرة ضخمة: مليون توكن (كتب وملفات طويلة كاملة)', 'قوي في الرياضيات والمنطق والتحليل', 'تفكير قابل للتعميق', 'يقرأ الصور والملفات ويبحث ويرسم بنفسه'],
   },
@@ -88,7 +88,7 @@ export const MODELS = [
     url: '/codex/v1/responses',
     tools: true,
     search: 'tool',
-    effort: ['low', 'high'],
+    effort: ['low', 'high', 'max'],
     tagline: 'GPT اقتصادي بنفس الذاكرة الضخمة',
     features: ['ذاكرة مليون توكن', 'سعره منخفض جداً للاستخدام الكثير', 'يقرأ الصور والملفات ويبحث ويرسم بنفسه'],
   },
@@ -161,19 +161,22 @@ export const IMAGE_MODEL = 'nano-banana-2-1';
 export const OR_DEFAULT_MODEL = 'or:anthropic/claude-sonnet-5.5';
 export const OR_AUDIO_MODEL = 'or:google/gemini-3.8-flash';
 const starters = [
-  ['openai/gpt-6-astra', 'GPT-6 Astra', ['text', 'image']],
-  ['anthropic/claude-fable-5.2', 'Claude Fable 5.2', ['text', 'image']],
+  ['openai/gpt-6-astra', 'GPT-6 Astra', ['text', 'image'], ['max', 'high', 'low']],
+  ['anthropic/claude-fable-5.2', 'Claude Fable 5.2', ['text', 'image'], ['max', 'high', 'low']],
   ['google/gemini-4-carbon', 'Gemini 4 Carbon', ['text', 'image', 'audio']],
-  ['anthropic/claude-sonnet-5.5', 'Claude Sonnet 5.5', ['text', 'image']],
-  ['openai/gpt-6.1-sol', 'GPT 6.1 Sol', ['text', 'image']],
-  ['openai/gpt-6.1-terra', 'GPT 6.1 Terra', ['text', 'image']],
+  ['anthropic/claude-sonnet-5.5', 'Claude Sonnet 5.5', ['text', 'image'], ['max', 'high', 'low']],
+  ['openai/gpt-6.1-sol', 'GPT 6.1 Sol', ['text', 'image'], ['max', 'high', 'low']],
+  ['openai/gpt-6.1-terra', 'GPT 6.1 Terra', ['text', 'image'], ['max', 'high', 'low']],
   ['google/gemini-3.8-flash', 'Gemini 3.8 Flash', ['text', 'image', 'audio']],
-].map(([id, name, input]) => ({ id, name, architecture: { input_modalities: input, output_modalities: ['text'] }, supported_parameters: ['reasoning', 'tools'] }));
+].map(([id, name, input, supported_efforts = ['high', 'low']]) => ({ id, name, architecture: { input_modalities: input, output_modalities: ['text'] }, supported_parameters: ['reasoning', 'tools'], reasoning: { supported_efforts } }));
+const starterEfforts = new Map(starters.map((model) => [model.id, model.reasoning.supported_efforts]));
 
 export function registerOpenRouterModels(raw) {
   const fresh = (Array.isArray(raw) ? raw : []).filter((m) => typeof m.id === 'string' && /^[\w./:-]+$/.test(m.id) && !m.id.endsWith(':batch') && m.architecture?.output_modalities?.includes('text') && m.architecture?.input_modalities?.includes('text')).map((m) => {
     const input = m.architecture.input_modalities;
-    return { id: `or:${m.id}`, remoteId: m.id, provider: 'openrouter', api: 'openrouter', name: String(m.name || m.id).replace(/^[^:]+: /, ''), maker: m.id.split('/')[0], search: 'openrouter', tools: false, reasoning: m.supported_parameters?.includes('reasoning'), vision: input.includes('image'), audio: input.includes('audio'), tagline: 'عبر OpenRouter', features: ['محادثة وبحث عبر OpenRouter', ...(input.includes('image') ? ['يفهم الصور المرفقة'] : []), ...(input.includes('audio') ? ['يدعم إدخال الصوت'] : [])] };
+    const reasoning = Boolean(m.reasoning || m.supported_parameters?.includes('reasoning'));
+    const reasoningEfforts = m.reasoning ? (m.reasoning.supported_efforts === undefined ? [] : m.reasoning.supported_efforts) : starterEfforts.get(m.id);
+    return { id: `or:${m.id}`, remoteId: m.id, provider: 'openrouter', api: 'openrouter', name: String(m.name || m.id).replace(/^[^:]+: /, ''), maker: m.id.split('/')[0], search: 'openrouter', tools: false, reasoning, reasoningEfforts, vision: input.includes('image'), audio: input.includes('audio'), tagline: 'عبر OpenRouter', features: ['محادثة وبحث عبر OpenRouter', ...(input.includes('image') ? ['يفهم الصور المرفقة'] : []), ...(input.includes('audio') ? ['يدعم إدخال الصوت'] : [])] };
   });
   if (!fresh.length) return false;
   const seen = new Set(fresh.map((m) => m.id));

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const storage = new Map();
 globalThis.localStorage = { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) };
-const { readPersonalization, savePersonalization, saveRule, removeRule, captureMemory, preparePersonalContext, parseMemoryCommand, retrieveContext, mergePersonalization } = await import('../js/memory.js?v=20');
+const { readPersonalization, savePersonalization, saveRule, removeRule, captureMemory, preparePersonalContext, parseMemoryCommand, retrieveContext, mergePersonalization } = await import('../js/memory.js?v=21');
 test.beforeEach(() => storage.clear());
 
 test('gold shortcut is captured once and works in another chat with fresh search enabled', async () => {
@@ -59,6 +59,86 @@ test('recall finds matching Arabic topics across chats, excludes the current cha
   assert.equal(result[0].chatId, 'old');
   assert.match(result[0].assistant, /العائد الحقيقي/);
   assert.ok(result.every((r) => r.chatId !== 'current' && r.chatId !== 'rules' && r.chatId !== 'other'));
+});
+
+test('recall crosses older conversations and workspace modes on the same topic', async () => {
+  const chats = [
+    { id: 'gold-risk', title: 'مخاطر صفقة سابقة', updatedAt: 10, messages: [
+      { role: 'user', text: 'تحليل XAU/USD يوم التضخم' },
+      { role: 'assistant', text: 'كان هامش المخاطرة نصف بالمئة.' },
+      { role: 'user', text: 'يعطيك العافية' },
+    ] },
+    { id: 'gold-ea', title: 'مشروع المنصة', mode: 'work', updatedAt: 20, messages: [
+      { role: 'user', text: 'برمجة تنبيهات الذهب في MetaTrader 5' },
+      { role: 'assistant', text: 'جرس واحد لكل شمعة.' },
+    ] },
+    ...Array.from({ length: 28 }, (_, i) => ({
+      id: `recent-${i}`, updatedAt: 100 + i, messages: [{ role: 'user', text: 'تجربة وصفة الكيك' }],
+    })),
+    { id: 'current', updatedAt: 200, messages: [{ role: 'user', text: 'الذَّهَب في MT5' }] },
+  ];
+  const context = await preparePersonalContext(chats.at(-1), 'الذَّهَب في MT5', async (options) => {
+    assert.deepEqual(options, { includeWorkspaces: true });
+    return chats;
+  });
+  assert.deepEqual(context.sources.map(source => source.id), ['gold-ea', 'gold-risk']);
+  assert.match(context.prompt, /هامش المخاطرة نصف بالمئة/);
+  assert.match(context.prompt, /جرس واحد لكل شمعة/);
+  assert.doesNotMatch(context.prompt, /وصفة الكيك|يعطيك العافية/);
+});
+
+test('a short follow-up can use the current topic, and an unnamed guess stays in chat', async () => {
+  const chats = [
+    { id: 'work', mode: 'work', updatedAt: 20, messages: [{ role: 'user', text: 'تصميم قاعدة البيانات' }] },
+    { id: 'normal', updatedAt: 10, messages: [{ role: 'user', text: 'تصميم حديقة المنزل' }] },
+  ];
+  const query = 'كمل عن الموضوع السابق';
+  const context = await preparePersonalContext({ id: 'new', messages: [
+    { role: 'user', text: 'قاعدة البيانات' }, { role: 'assistant', text: 'شلون تبيها؟' }, { role: 'user', text: query },
+  ] }, query, async () => chats);
+  assert.deepEqual(context.sources.map(source => source.id), ['work']);
+  assert.equal(retrieveContext(chats, query, 'new')[0].chatId, 'normal');
+  assert.deepEqual(retrieveContext(chats, 'كمل عن العملات الرقمية', 'new'), []);
+});
+
+test('workspace recall reads only transcript text from the selected profile', async () => {
+  const oldIndexedDB = globalThis.indexedDB;
+  const opened = [];
+  const databases = new Map([
+    ['smart-chat', [{ id: 'guest-private' }]],
+    ['smart-chat-cloud-memory-test', [
+      { id: 'image', mode: 'image', title: 'صورة الذهب', project: { files: [{ content: 'private source' }] }, messages: [
+        { role: 'user', text: 'صمم صورة ذهب', at: 1, files: [{ text: 'private attachment' }] },
+        { role: 'assistant', text: 'جهزت التصميم', at: 2, image: 'private asset' },
+        { role: 'assistant', text: 'تعذّر توليد الصورة', error: true },
+      ] },
+      { id: 'chat', messages: [] },
+    ]],
+  ]);
+  storage.set('sc.cloudProfile', 'memory-test');
+  globalThis.indexedDB = { open(name) {
+    opened.push(name);
+    const request = { result: { transaction() {
+      const transaction = { objectStore: () => ({ getAll: () => ({ result: databases.get(name) }) }) };
+      queueMicrotask(() => transaction.oncomplete());
+      return transaction;
+    } } };
+    queueMicrotask(() => request.onsuccess());
+    return request;
+  } };
+  try {
+    const { recallChats } = await import('../js/db.js?memory-profile-fixture');
+    assert.deepEqual((await recallChats()).map(chat => chat.id), ['chat']);
+    const [image, chat] = await recallChats({ includeWorkspaces: true });
+    assert.equal(chat.id, 'chat');
+    assert.deepEqual(image, { id: 'image', title: 'صورة الذهب', mode: 'image', updatedAt: undefined, messages: [
+      { role: 'user', text: 'صمم صورة ذهب', at: 1 }, { role: 'assistant', text: 'جهزت التصميم', at: 2 },
+    ] });
+    assert.deepEqual(opened, ['smart-chat-cloud-memory-test']);
+  } finally {
+    storage.delete('sc.cloudProfile');
+    globalThis.indexedDB = oldIndexedDB;
+  }
 });
 
 test('recall is bounded and labels ambiguous references as tentative', () => {

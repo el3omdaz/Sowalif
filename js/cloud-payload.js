@@ -8,11 +8,12 @@ export function cloudChat(chat) {
   const result = pick(chat, ['id', 'title', 'model', 'createdAt', 'updatedAt', 'pinned', 'mode', 'promptStudioMode']);
   result.messages = (chat.messages || []).filter(m => ['user', 'assistant'].includes(m.role)).map(message => {
     const value = pick(message, ['role', 'text', 'model', 'at', 'error', 'stopped', 'credits', 'searches', 'imagePrompt', 'mediaKind', 'mediaReferenceUrl', 'videoReferenceUrl', 'reuseMedia', 'contextSources', 'memoryAction', 'recallUnavailable', 'projectProposal', 'agentEngine', 'agentCompleted', 'promptStudio']);
+    if (message.modelRecommendation) value.modelRecommendation = pick(message.modelRecommendation, ['id', 'name', 'reason', 'isCurrent']);
     for (const key of ['files', 'images', 'videos']) if (message[key]) value[key] = message[key].map(cloudFile);
     if (message.mediaTask) value.mediaTask = pick(message.mediaTask, ['id', 'provider', 'kind', 'name', 'prompt', 'done', 'submitting']);
     return value;
   });
-  if (chat.project) result.project = pick(chat.project, ['files', 'revision', 'removed']);
+  if (chat.project) result.project = pick(chat.project, ['files', 'revision', 'removed', 'instructions']);
   return result;
 }
 export function cloudMemory(memory) {

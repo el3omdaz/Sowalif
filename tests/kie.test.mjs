@@ -27,6 +27,20 @@ test('Responses streams Arabic and handles a final event without trailing newlin
   assert.equal(body.reasoning.effort, 'low');
 });
 
+test('KIE Responses keeps legacy deep and sends max where advertised', async () => {
+  let body;
+  globalThis.fetch = async (_, init) => {
+    body = JSON.parse(init.body);
+    return json({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'OK' }] }] });
+  };
+  await runModel('gpt-6-1-sol', { ...opts, deep: true });
+  assert.equal(body.reasoning.effort, 'high');
+  await runModel('gpt-6-1-sol', { ...opts, reasoningLevel: 'max' });
+  assert.equal(body.reasoning.effort, 'max');
+  await runModel('grok-4-7', { ...opts, reasoningLevel: 'max' });
+  assert.equal(body.reasoning.effort, 'high');
+});
+
 test('temporary server rejection retries once, including HTTP 200 error bodies', async () => {
   let calls = 0;
   globalThis.fetch = async () => ++calls === 1 ? json({ code: 500, msg: 'Internal error' }) : json({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Recovered' }] }] });
@@ -69,6 +83,12 @@ test('Anthropic completion and thinking switch', async () => {
   assert.equal(body.thinkingFlag, false);
   await runModel('claude-sonnet-5-5', { ...opts, deep: true });
   assert.equal(body.thinkingFlag, true);
+  await runModel('claude-sonnet-5-5', { ...opts, reasoningLevel: 'deep' });
+  assert.equal(body.thinkingFlag, true);
+  assert.equal(body.max_tokens, 16000);
+  await runModel('claude-sonnet-5-5', { ...opts, deep: true, reasoningLevel: 'normal' });
+  assert.equal(body.thinkingFlag, false);
+  assert.equal(body.max_tokens, 4096);
 });
 
 test('Gemini audio media contract and complete SSE response', async () => {
@@ -80,6 +100,8 @@ test('Gemini audio media contract and complete SSE response', async () => {
   assert.equal((await runModel('gemini-3-8-flash', { ...opts, messages: [{ role: 'user', files: [{ kind: 'audio', url: 'https://example.test/voice.m4a' }] }] })).text, 'نص التسجيل');
   assert.equal(body.messages[1].content[0].image_url.url, 'https://example.test/voice.m4a');
   assert.equal(body.tools, undefined);
+  await runModel('gemini-4-carbon', { ...opts, reasoningLevel: 'max' });
+  assert.equal(body.reasoning_effort, 'high');
 });
 
 test('abort during retry delay stops the second request', async () => {

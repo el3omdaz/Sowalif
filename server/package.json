@@ -2,6 +2,6 @@
   "name": "sowalif-media-push",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node media-push.js" },
+  "scripts": { "start": "node media-push.js", "market": "node market-service.mjs" },
   "dependencies": { "web-push": "^3.6.7" }
 }

@@ -1,6 +1,7 @@
-import { settings } from './db.js?v=20';
-import { readSSE } from './kie.js?v=20';
-import { registerOpenRouterModels } from './models.js?v=24';
+import { settings } from './db.js?v=21';
+import { readSSE } from './kie.js?v=21';
+import { registerOpenRouterModels } from './models.js?v=25';
+import { reasoningEffort } from './reasoning.js?v=1';
 
 const BASE = 'https://openrouter.ai/api/v1';
 export const openRouterKey = () => {
@@ -50,7 +51,7 @@ export async function checkOpenRouterKey(signal) {
 }
 export async function refreshOpenRouterModels(signal) {
   const { json } = await request('/models', { signal, authenticated: false });
-  const clean = (json.data || []).map((m) => ({ id: m.id, name: m.name, architecture: m.architecture, supported_parameters: m.supported_parameters }));
+  const clean = (json.data || []).map((m) => ({ id: m.id, name: m.name, architecture: m.architecture, supported_parameters: m.supported_parameters, reasoning: m.reasoning }));
   const count = registerOpenRouterModels(clean);
   if (!count) throw new Error('لم يصل كتالوج نماذج صالح من OpenRouter');
   settings.set('orCatalog', clean);
@@ -77,11 +78,13 @@ function messagesFor(messages, model) {
   });
 }
 
-export async function runOpenRouter(model, { system, messages, search, deep, maxOutputTokens, signal, onDelta, onThinking, onTransport }) {
+export async function runOpenRouter(model, { system, messages, search, webFetch, deep, reasoningLevel, maxOutputTokens, signal, onDelta, onThinking, onTransport }) {
   const body = { model: model.remoteId, messages: [{ role: 'system', content: system }, ...messagesFor(messages, model)], stream: true };
-  if (model.reasoning) body.reasoning = { effort: deep ? 'high' : 'low' };
+  const effort = reasoningEffort(model, reasoningLevel, deep);
+  if (effort) body.reasoning = { effort };
   if (maxOutputTokens) body.max_tokens = maxOutputTokens;
   if (search) body.tools = [{ type: 'openrouter:web_search' }];
+  if (search && webFetch) body.tools.push({ type: 'openrouter:web_fetch' });
   const r = await request('/chat/completions', { body, signal, onTransport });
   if (r.json) {
     const choice = r.json.choices?.[0];

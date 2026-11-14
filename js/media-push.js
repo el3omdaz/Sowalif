@@ -1,4 +1,4 @@
-import { settings } from './db.js?v=20';
+import { settings } from './db.js?v=21';
 
 let pushSetup;
 const api = '/api/media-push/';
@@ -21,9 +21,11 @@ export async function enableCompletionNotifications() {
 }
 
 export async function disableMediaPush() {
-  const registration = await navigator.serviceWorker?.getRegistration();
-  const subscription = await registration?.pushManager?.getSubscription();
-  await subscription?.unsubscribe();
+  if (!localStorage.getItem('sowalifMarketPush')) {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    const subscription = await registration?.pushManager?.getSubscription();
+    await subscription?.unsubscribe();
+  }
   if (pushSetup) pushSetup.subscription = null;
 }
 

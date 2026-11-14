@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { validProjectPath, mergeProjectFiles } from '../../js/project.js?v=20';
 import { artifactFile, listArtifacts } from './artifacts.mjs';
 import { createFileService } from './files.mjs';
+import { createMarketFeed } from '../market-feed.mjs';
 
 export const IMAGE = 'sowalif-coding-agent:1';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -104,7 +105,8 @@ export async function uploadPiapi(input, request = fetch) {
   return { url: result.data.url };
 }
 
-export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-agent'), launch = launchDocker, ready = dockerReady, upload = uploadPiapi } = {}) {
+export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-agent'), launch = launchDocker, ready = dockerReady, upload = uploadPiapi,
+  market = createMarketFeed({ dataDir }) } = {}) {
   const csrf = randomBytes(32).toString('hex');
   const files = createFileService(resolve(dataDir));
   const runs = new Map();
@@ -132,6 +134,19 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
       if (url.pathname.startsWith('/api/')) {
         res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
         if (req.method !== 'GET' && (req.headers.origin !== `http://${host}` || req.headers['x-sowalif-csrf'] !== csrf || !req.headers['content-type']?.startsWith('application/json'))) return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
+        if (url.pathname.startsWith('/api/market/')) {
+          if ((req.headers.origin && req.headers.origin !== `http://${host}`) || ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) return json(res, 403, { error: 'افتح السوق من واجهة سوالف.' });
+          const action = url.pathname.slice('/api/market/'.length);
+          if (req.method === 'GET') {
+            if (action === 'status') return json(res, 200, { ...await market.status(), csrf });
+            if (action === 'events') return json(res, 200, await market.events(url.searchParams.get('asset')));
+            if (action === 'article') return json(res, 200, await market.article(url.searchParams.get('id')));
+          } else if (req.method === 'POST') {
+            if (action === 'config') return json(res, 200, await market.configure(await body(req, 16000)));
+            if (action === 'refresh') { await body(req, 1000); return json(res, 200, await market.refresh()); }
+          }
+          return json(res, 404, { error: 'الخدمة غير متاحة.' });
+        }
         if (url.pathname.startsWith('/api/files/')) {
           if ((req.headers.origin && req.headers.origin !== `http://${host}`) ||
               ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) {
@@ -333,9 +348,10 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
       const path = decodeURIComponent(url.pathname);
       if (!/^\/(?:index.html|oauth-microsoft.html|style.css|sw.js|manifest.webmanifest|icon-[\w.-]+\.png|(?:js|vendor)\/[\w.-]+\.(?:js|mjs))?$/.test(path)) throw failure('Not found', 404);
       return await serve(res, join(root, path === '/' ? 'index.html' : path));
-    } catch (error) { if (!res.headersSent) json(res, typeof error.code === 'number' ? error.code : error.code === 'ENOENT' ? 404 : 400, { error: error.message }); else res.end(); }
+    } catch (error) { if (!res.headersSent) json(res, error.statusCode || (typeof error.code === 'number' ? error.code : error.code === 'ENOENT' ? 404 : 400), { error: error.message }); else res.end(); }
   });
-  server.on('close', () => { for (const run of runs.values()) run.handle?.stop(); });
+  server.on('listening', () => market.start());
+  server.on('close', () => { market.close(); for (const run of runs.values()) run.handle?.stop(); });
   return server;
 }
 async function serve(res, path) {

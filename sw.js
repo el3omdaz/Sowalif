@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v29';
-const SHELL = ['./', 'index.html', 'style.css?v=28', 'js/app.js?v=29', 'js/image-plan.js?v=1', 'js/viewport.js?v=21', 'js/local-agent.js?v=27', 'js/media-references.js?v=25', 'js/prompt-studio.js?v=20', 'js/cloud.js?v=25', 'js/cloud-config.js?v=25', 'js/cloud-payload.js?v=20', 'js/media-push.js?v=20', 'js/project.js?v=20', 'js/project-github.js?v=20', 'js/project-folder.js?v=20', 'js/db.js?v=20', 'js/kie.js?v=20', 'js/chat.js?v=27', 'js/zip-text.js?v=27', 'js/organizer.js?v=29', 'js/organizer-intent.js?v=1', 'js/connected-accounts.js?v=28', 'js/account-oauth.js?v=28', 'js/oauth-microsoft-callback.js?v=28', 'js/models.js?v=24', 'js/openrouter.js?v=20', 'js/memory.js?v=20', 'js/piapi.js?v=20', 'js/media.js?v=20', 'vendor/supabase.js?v=20', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v31';
+const SHELL = ['./', 'index.html', 'style.css?v=29', 'js/app.js?v=31', 'js/model-recommendation.js?v=1', 'js/reasoning.js?v=1', 'js/docs-context.js?v=1', 'js/xlsx-text.js?v=1', 'js/market.js?v=1', 'js/image-plan.js?v=1', 'js/viewport.js?v=21', 'js/local-agent.js?v=28', 'js/media-references.js?v=26', 'js/prompt-studio.js?v=20', 'js/cloud.js?v=26', 'js/cloud-config.js?v=25', 'js/cloud-payload.js?v=21', 'js/media-push.js?v=21', 'js/project.js?v=20', 'js/project-github.js?v=20', 'js/project-folder.js?v=20', 'js/db.js?v=21', 'js/kie.js?v=21', 'js/chat.js?v=28', 'js/zip-text.js?v=28', 'js/organizer.js?v=30', 'js/organizer-intent.js?v=1', 'js/connected-accounts.js?v=28', 'js/account-oauth.js?v=28', 'js/oauth-microsoft-callback.js?v=28', 'js/models.js?v=25', 'js/openrouter.js?v=21', 'js/memory.js?v=21', 'js/piapi.js?v=21', 'js/media.js?v=21', 'vendor/supabase.js?v=20', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -13,7 +13,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = new URL('./', self.registration.scope);
-  url.hash = encodeURIComponent(e.notification.data?.chatId || '');
+  if (e.notification.data?.marketId) url.searchParams.set('market', e.notification.data.marketId);
+  else url.hash = encodeURIComponent(e.notification.data?.chatId || '');
   e.waitUntil(self.clients.matchAll({ type: 'window' }).then(async (windows) => {
     const client = windows.find(window => new URL(window.url).pathname === url.pathname);
     if (client?.url === url.href) return client.focus();
@@ -25,6 +26,14 @@ self.addEventListener('notificationclick', (e) => {
 self.addEventListener('push', (e) => {
   let payload;
   try { payload = e.data?.json(); } catch {}
+  if (payload?.type === 'market') {
+    const marker = payload.direction === 'positive' ? '🟢' : payload.direction === 'negative' ? '🔴' : '⚪';
+    e.waitUntil(self.registration.showNotification(`${marker} ${payload.asset || 'السوق'}`, {
+      body: payload.title || 'افتح سوالف لعرض التفاصيل.', icon: new URL('icon-192.png', self.registration.scope).href,
+      tag: payload.tag, data: { marketId: payload.id },
+    }));
+    return;
+  }
   e.waitUntil(self.registration.showNotification('سوالف', {
     body: payload?.outcome === 'failed' ? 'تعذّر إكمال مهمة التوليد.' : 'اكتملت مهمة التوليد.',
     icon: new URL('icon-192.png', self.registration.scope).href,

@@ -1,6 +1,7 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
-import { settings, putBlob } from './db.js?v=20';
-import { modelById } from './models.js?v=24';
+import { settings, putBlob } from './db.js?v=21';
+import { modelById } from './models.js?v=25';
+import { reasoningEffort } from './reasoning.js?v=1';
 
 // sc.base / sc.upload لتجربة التطبيق على خادم وهمي فقط
 const BASE = () => settings.get('base', 'https://api.kie.ai');
@@ -187,10 +188,10 @@ function toChat(messages) {
 
 // ---------- البث ----------
 // يعيد { text, calls, credits } ويمرر النص أولاً بأول عبر onDelta، والتفكير عبر onThinking
-async function runAnthropic(model, { system, messages, tools, deep, signal, onDelta, onThinking, onTransport, maxOutputTokens }) {
-  const body = { model: model.id, max_tokens: maxOutputTokens || (deep ? 16000 : 4096), system, messages: toAnthropic(messages), stream: true, thinkingFlag: !!deep };
+async function runAnthropic(model, { system, messages, tools, deep, reasoningLevel, signal, onDelta, onThinking, onTransport, maxOutputTokens }) {
+  const thinkingFlag = reasoningEffort(model, reasoningLevel, deep);
+  const body = { model: model.id, max_tokens: maxOutputTokens || (thinkingFlag ? 16000 : 4096), system, messages: toAnthropic(messages), stream: true, thinkingFlag };
   if (tools?.length) body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
-  if (deep) body.thinkingFlag = true;
   const r = await post('/claude/v1/messages', body, signal, { 'anthropic-version': '2023-06-01' }, onTransport);
   if (r.json) {
     const content = r.json.content || [];
@@ -237,13 +238,14 @@ const textFromOutput = (output = []) =>
     .map((c) => c.text)
     .join('');
 
-async function runResponses(model, { system, messages, tools, deep, signal, onDelta, onThinking, onTransport, maxOutputTokens }) {
+async function runResponses(model, { system, messages, tools, deep, reasoningLevel, signal, onDelta, onThinking, onTransport, maxOutputTokens }) {
   const body = { model: model.id, instructions: system, input: toResponses(messages), stream: true };
   if (tools?.length) {
     body.tools = tools.map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters }));
     body.tool_choice = 'auto';
   }
-  if (model.effort) body.reasoning = { effort: deep ? model.effort[1] : model.effort[0] };
+  const effort = reasoningEffort(model, reasoningLevel, deep);
+  if (effort) body.reasoning = { effort };
   if (maxOutputTokens) body.max_output_tokens = maxOutputTokens;
   const r = await post(model.url, body, signal, {}, onTransport);
   if (r.json) {
@@ -277,8 +279,8 @@ async function runResponses(model, { system, messages, tools, deep, signal, onDe
   return { text, calls: callsFromOutput(final?.output), credits };
 }
 
-async function runChat(model, { system, messages, search, deep, signal, onDelta, onThinking, onTransport }) {
-  const body = { messages: [{ role: 'system', content: system }, ...toChat(messages)], stream: true, reasoning_effort: deep ? 'high' : 'low' };
+async function runChat(model, { system, messages, search, deep, reasoningLevel, signal, onDelta, onThinking, onTransport }) {
+  const body = { messages: [{ role: 'system', content: system }, ...toChat(messages)], stream: true, reasoning_effort: reasoningEffort(model, reasoningLevel, deep) };
   if (search) body.tools = [{ type: 'function', function: { name: 'googleSearch' } }];
   const r = await post(model.url, body, signal, {}, onTransport);
   if (r.json) {
@@ -305,7 +307,7 @@ async function runChat(model, { system, messages, search, deep, signal, onDelta,
 
 export async function runModel(modelId, opts) {
   const model = modelById(modelId);
-  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=20')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
+  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=21')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
   const started = Date.now();
   const connection = { model: model.id, provider: model.provider || 'kie', phase: 'preparing', firstTextMs: null };
   const onTransport = (state) => {
@@ -349,8 +351,8 @@ export async function diagnoseModels(ids, { signal, onProgress } = {}) {
 }
 
 // طلب واحد بدون عرض متدفق (البحث وتحويل الصوت)
-export async function ask(modelId, system, user, { search = false, signal } = {}) {
-  const out = await runModel(modelId, { system, messages: [user], search, signal });
+export async function ask(modelId, system, user, { search = false, webFetch, signal } = {}) {
+  const out = await runModel(modelId, { system, messages: [user], search, webFetch, signal });
   return { text: out.text, credits: out.credits };
 }
 

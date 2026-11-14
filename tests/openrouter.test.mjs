@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 
 const storage = new Map([['sc.openRouterKey', '"or-test-key"'], ['sc.kieKey', '"kie-test-key"']]);
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
-const { runModel, diagnoseModels } = await import('../js/kie.js?v=20');
-const { checkOpenRouterKey, refreshOpenRouterModels } = await import('../js/openrouter.js?v=20');
-const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=24');
+const { runModel, diagnoseModels } = await import('../js/kie.js?v=21');
+const { checkOpenRouterKey, refreshOpenRouterModels } = await import('../js/openrouter.js?v=21');
+const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=25');
+const { reasoningLevels } = await import('../js/reasoning.js?v=1');
 const opts = { system: 'Test', messages: [{ role: 'user', text: 'مرحبا' }] };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const sse = (chunks) => new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
@@ -37,6 +38,14 @@ test('web search stays in OpenRouter and image input is inline', async () => {
     return json({ choices: [{ message: { content: 'نتيجة البحث' }, finish_reason: 'stop' }] });
   };
   await runModel(OR_DEFAULT_MODEL, { ...opts, search: true, messages: [{ role: 'user', text: 'حلل', files: [{ kind: 'image', dataUrl: 'data:image/png;base64,AAAA' }] }] });
+});
+
+test('source comparison enables provider page reading alongside search', async () => {
+  globalThis.fetch = async (_url, { body }) => {
+    assert.deepEqual(JSON.parse(body).tools, [{ type: 'openrouter:web_search' }, { type: 'openrouter:web_fetch' }]);
+    return json({ choices: [{ message: { content: 'Result' }, finish_reason: 'stop' }] });
+  };
+  await runModel(OR_DEFAULT_MODEL, { ...opts, search: true, webFetch: true });
 });
 
 test('audio is sent as base64 without upload to kie.ai', async () => {
@@ -78,6 +87,34 @@ test('catalog loads public models, filters batches and persists supported capabi
   assert.ok(storage.has('sc.orCatalog'));
 });
 
+test('OpenRouter respects advertised effort values and preserves them in its cache', async () => {
+  const architecture = { input_modalities: ['text'], output_modalities: ['text'] };
+  const supportedEfforts = ['xhigh', 'high', 'medium'];
+  let body;
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/models')) return json({ data: [
+      { id: 'test/reasoner', architecture, reasoning: { supported_efforts: supportedEfforts } },
+      { id: 'test/fixed-reasoner', architecture, reasoning: { mandatory: true }, supported_parameters: ['reasoning'] },
+    ] });
+    body = JSON.parse(init.body);
+    return json({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] });
+  };
+  await refreshOpenRouterModels();
+  assert.deepEqual(JSON.parse(storage.get('sc.orCatalog'))[0].reasoning.supported_efforts, supportedEfforts);
+  assert.deepEqual(reasoningLevels(modelById('or:test/reasoner')), ['normal', 'deep', 'max']);
+  assert.deepEqual(reasoningLevels(modelById('or:test/fixed-reasoner')), ['normal']);
+  await runModel('or:test/reasoner', { ...opts, reasoningLevel: 'max' });
+  assert.deepEqual(body.reasoning, { effort: 'xhigh' });
+  await runModel('or:test/reasoner', { ...opts, reasoningLevel: 'normal', deep: true });
+  assert.deepEqual(body.reasoning, { effort: 'medium' });
+  await runModel('or:test/fixed-reasoner', { ...opts, reasoningLevel: 'deep' });
+  assert.equal(body.reasoning, undefined);
+  await runModel(OR_DEFAULT_MODEL, { ...opts, deep: true });
+  assert.deepEqual(body.reasoning, { effort: 'high' });
+  await runModel('or:anthropic/claude-fable-5.2', { ...opts, reasoningLevel: 'max' });
+  assert.deepEqual(body.reasoning, { effort: 'max' });
+});
+
 test('OpenRouter errors and incomplete streams do not identify themselves as kie.ai', async () => {
   for (const code of [401, 402, 429, 503]) {
     globalThis.fetch = async () => json({ error: { code, message: 'upstream error' } }, code);
@@ -110,7 +147,7 @@ test('diagnostics stays on selected provider', async () => {
 });
 
 test('recorded speech conversion routes directly to OpenRouter with no kie.ai upload', async () => {
-  const { transcribe } = await import('../js/chat.js?v=20');
+  const { transcribe } = await import('../js/chat.js?v=28');
   globalThis.FileReader = class {
     readAsDataURL(blob) {
       blob.arrayBuffer().then((bytes) => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString('base64')}`; this.onload(); });

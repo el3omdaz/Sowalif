@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { cloudChat, cloudMemory } from '../js/cloud-payload.js?v=20';
+import { cloudChat, cloudMemory } from '../js/cloud-payload.js?v=21';
 
 function fixture({ local = [], remote = [], versions = {}, dirty = {}, beforeUpdate } = {}) {
   const user = { id: '11111111-1111-4111-8111-111111111111' };

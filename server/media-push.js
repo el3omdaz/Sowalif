@@ -2,10 +2,10 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
+import { validSubscription } from './push-subscription.mjs';
 
 const route = '/api/media-push/';
 const hour = 60 * 60 * 1000;
-const pushHosts = /^(?:[\w-]+\.push\.apple\.com|fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com)$/;
 const chatIdPattern = /^[a-zA-Z0-9_-]{1,100}$/;
 
 async function readJSON(req, max) {
@@ -17,14 +17,6 @@ async function readJSON(req, max) {
     chunks.push(chunk);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-}
-
-function validSubscription(subscription) {
-  const { endpoint, keys } = subscription || {};
-  if (typeof endpoint !== 'string' || endpoint.length > 2048) return false;
-  const url = URL.parse(endpoint);
-  return url?.protocol === 'https:' && !url.port && !url.username && !url.password &&
-    pushHosts.test(url.hostname) && /^[\w-]{87}$/.test(keys?.p256dh) && /^[\w-]{22}$/.test(keys?.auth);
 }
 
 export function createMediaPushService({ origin, key, database, sendPush }) {

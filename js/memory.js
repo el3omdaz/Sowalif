@@ -1,12 +1,22 @@
-import { settings, recallChats, uid } from './db.js?v=20';
+import { settings, recallChats, uid } from './db.js?v=21';
 
 export const normalize = (value) => String(value || '').normalize('NFKC').toLowerCase().replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 const STOP = new Set('من في على الي الى عن ان انا انت هو هي هذا هذي هذه ذاك ذلك اللي لي لك له لها مع او و يا هل ما لا اي كل بس ابي اريد شنو وش كيف متي متى كان تكون يكون عند عندي عندك قل قلت قول قولي عطيني عطني اكتب اشرح موضوع الموضوع the a an is of to and for it this that'.split(' '));
-for (const word of 'كمل السابق سابق سابقة السابقة تكلمنا كلمتك ناقشنا تذكر تتذكر موضوعنا قبل last time we discussed continue previous'.split(' ')) STOP.add(word);
-const terms = (s) => [...new Set(normalize(s).split(' ').flatMap((word) => {
-  const stem = word.replace(/^(?:وال|بال|لل|ال)(?=.{3})/u, '');
-  return [word, stem];
-}).filter((word) => word.length > 1 && !STOP.has(word)))];
+for (const word of 'كمل نكمل كملي كملها السابق سابق سابقا سابقة السابقة تكلمنا كلمتك ناقشنا تذكر تتذكر موضوعنا قبل عنه عنها عنهما فيه عليها عليه المحادثه محادثه شات last time we discussed continue previous conversation chat talked earlier about'.split(' ')) STOP.add(word);
+const aliases = new Map([
+  ['gold', 'ذهب'], ['xauusd', 'ذهب'], ['xau', 'ذهب'],
+  ['forex', 'فوركس'], ['sowalif', 'سوالف'], ['metatrader5', 'mt5'], ['ميتاتريدر5', 'mt5'],
+]);
+function term(word) {
+  const stem = word.replace(/^(?:وال|بال|فال|كال|لل|ال)(?=\p{Script=Arabic}{3})/u, '').replace(/ة$/u, 'ه');
+  return aliases.get(stem) || stem;
+}
+function terms(text) {
+  const tokens = new Set(normalize(text).replace(/\bmeta\s*trader\s+5\b/gu, 'metatrader5')
+    .replace(/ميتاتريدر\s+5\b/gu, 'ميتاتريدر5').replace(/\bxau\s+usd\b/gu, 'xauusd').split(' '));
+  return [...new Set([...tokens]
+    .map(term).filter(word => word.length > 1 && !STOP.has(word)))];
+}
 const cleanRule = (r) => r && typeof r.trigger === 'string' && typeof r.action === 'string' && normalize(r.trigger) && r.action.trim() ? { id: String(r.id || uid()), trigger: r.trigger.trim().slice(0, 80), action: r.action.trim().slice(0, 1500), search: !!r.search } : null;
 export function readPersonalization() {
   const rawRules = settings.get('sharedRules', []);
@@ -66,51 +76,101 @@ export function captureMemory(text) {
   return null;
 }
 
-function excerpt(text, needles, max = 1300) {
+function excerpt(text, needles, max) {
+  if (!max) return '';
   if (text.length <= max) return text;
-  const index = needles.map((word) => normalize(text).indexOf(word)).filter((n) => n >= 0).sort((a, b) => a - b)[0] || 0;
-  const start = Math.max(0, index - 250);
+  let index = 0;
+  let weight = 0;
+  const maxWeight = Math.max(...needles.values());
+  for (const match of text.matchAll(/\bmeta\s*trader\s+5\b|ميتاتريدر\s+5\b|\bxau[^\p{L}\p{N}]+usd\b|[\p{L}\p{N}\p{M}\u0640]+/giu)) {
+    const next = needles.get(terms(match[0])[0]) || 0;
+    if (next > weight) {
+      weight = next;
+      index = match.index;
+      if (weight === maxWeight) break;
+    }
+  }
+  const start = Math.min(text.length - max, Math.max(0, index - 250));
   return `${start ? '…' : ''}${text.slice(start, start + max)}${start + max < text.length ? '…' : ''}`;
 }
-export function retrieveContext(chats, query, currentId) {
-  const queryTerms = terms(query);
+
+const followUp = /(?:\b(?:continue|previous|last time|we discussed)\b|موضوعنا|موضوع السابق|تكلمنا|كلمتك|ناقشنا|تذكر|تتذكر|كمل|نكمل|متابعه)/iu;
+const workspaceModes = new Set(['image', 'video', 'work']);
+const isUserTurn = m => m.role === 'user' && typeof m.text === 'string' && m.text.trim() && !parseMemoryCommand(m.text);
+
+export function retrieveContext(chats, query, currentId, topicHint = '') {
+  const queryWords = terms(query).slice(0, 48);
+  const hintWords = queryWords.length < 2 && followUp.test(normalize(query)) ? terms(topicHint).slice(0, 16) : [];
+  const queryWeight = new Map(hintWords.map(word => [word, .55]));
+  for (const word of queryWords) queryWeight.set(word, 1);
   const candidates = [];
   const relevantChats = chats.filter((c) => c.id !== currentId);
   const counts = new Map();
-  for (const c of relevantChats) {
-    const words = new Set(terms(`${c.title} ${(c.messages || []).map((m) => m.text).join(' ')}`));
-    for (const word of queryTerms) if (words.has(word)) counts.set(word, (counts.get(word) || 0) + 1);
-  }
-  for (const c of relevantChats) {
+  if (queryWeight.size) for (const c of relevantChats) {
     const messages = c.messages || [];
+    const title = new Set(terms(c.title));
+    const foundInChat = new Set();
+    let titleCandidate;
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
-      if (m.role !== 'user' || !m.text?.trim() || parseMemoryCommand(m.text)) continue;
+      if (!isUserTurn(m)) continue;
       const next = messages[i + 1];
-      const answer = next?.role === 'assistant' ? next.text : '';
-      const words = new Set(terms(`${c.title} ${m.text} ${answer}`));
-      let score = 0;
-      for (const word of queryTerms) if (words.has(word)) score += 1 + Math.log(1 + relevantChats.length / (counts.get(word) || 1));
-      if (score > 0) candidates.push({ chatId: c.id, title: c.title, at: m.at || c.updatedAt || 0, score, user: excerpt(m.text, queryTerms, 1000), assistant: excerpt(answer || '', queryTerms, 1500) });
+      const answer = next?.role === 'assistant' ? String(next.text || '') : '';
+      const userWords = new Set(terms(m.text));
+      const answerWords = new Set(terms(answer));
+      const hits = new Map();
+      let contentMatch = false;
+      for (const word of queryWeight.keys()) {
+        const content = userWords.has(word) ? 1 : answerWords.has(word) ? .7 : 0;
+        if (content) contentMatch = true;
+        const weight = content + (title.has(word) ? .35 : 0);
+        if (weight) hits.set(word, weight);
+      }
+      if (!hits.size) continue;
+      for (const word of hits.keys()) foundInChat.add(word);
+      const candidate = { chatId: c.id, title: c.title, at: m.at || c.updatedAt || 0, hits, user: m.text, assistant: answer };
+      if (contentMatch) candidates.push(candidate);
+      else titleCandidate = candidate;
+    }
+    // A title match can help reopen a named thread, but it doesn't make every turn relevant.
+    if (titleCandidate) candidates.push(titleCandidate);
+    for (const word of foundInChat) counts.set(word, (counts.get(word) || 0) + 1);
+  }
+
+  const weights = new Map([...queryWeight].map(([word, weight]) => [word, weight * (1 + Math.log(1 + relevantChats.length / (counts.get(word) || 1)))]));
+  for (const candidate of candidates) {
+    candidate.score = [...candidate.hits].reduce((score, [word, match]) => score + weights.get(word) * match, 0);
+  }
+
+  // Leave unnamed or unmatched topics tentative, and don't guess from separate workspaces.
+  if (!candidates.length && !queryWeight.size && followUp.test(normalize(query))) {
+    const recent = relevantChats.filter(c => !workspaceModes.has(c.mode)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    for (const chat of recent) {
+      const user = [...(chat.messages || [])].reverse().find(isUserTurn);
+      if (user) return [{ chatId: chat.id, title: chat.title, at: user.at || chat.updatedAt, score: .1, user: user.text.slice(-1200), assistant: '', tentative: true }];
     }
   }
-  // «كمل عن الموضوع اللي تكلمنا عنه» يرجع لآخر موضوع على هذا الجهاز إن لم يسمّه.
-  if (!candidates.length && /(?:الموضوع|موضوعنا|تكلمنا|كلمتك|ناقشنا|تذكر|تتذكر|السابق|last time|we discussed)/i.test(query)) {
-    const last = [...relevantChats].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-    const user = [...(last?.messages || [])].reverse().find((m) => m.role === 'user' && !parseMemoryCommand(m.text));
-    if (user) candidates.push({ chatId: last.id, title: last.title, at: last.updatedAt, score: .1, user: user.text.slice(-1200), assistant: '', tentative: true });
-  }
+
+  const ranked = candidates.sort((a, b) => b.score - a.score || b.at - a.at);
+  const seen = new Set();
+  const diverse = ranked.filter(candidate => {
+    if (seen.has(candidate.chatId)) return false;
+    seen.add(candidate.chatId);
+    return true;
+  });
+  const primary = new Set(diverse);
+  const countByChat = new Map();
   const selected = [];
-  const perChat = new Map();
   let remaining = 6500;
-  for (const candidate of candidates.sort((a, b) => b.score - a.score || b.at - a.at)) {
-    if ((perChat.get(candidate.chatId) || 0) >= 2) continue;
-    const size = candidate.user.length + candidate.assistant.length;
-    if (size > remaining) continue;
-    selected.push(candidate);
-    remaining -= size;
-    perChat.set(candidate.chatId, (perChat.get(candidate.chatId) || 0) + 1);
-    if (selected.length >= 4) break;
+  for (const { hits, ...candidate } of [...diverse, ...ranked.filter(candidate => !primary.has(candidate))]) {
+    if (selected.length >= 4 || remaining < 200) break;
+    if (candidate.score < ranked[0].score * .35 || (countByChat.get(candidate.chatId) || 0) >= 2) continue;
+    const user = excerpt(candidate.user, weights, Math.min(900, remaining - 2));
+    const assistant = excerpt(candidate.assistant, weights, Math.max(0, Math.min(1350, remaining - user.length - 2)));
+    if (selected.some(item => item.user === user && item.assistant === assistant)) continue;
+    selected.push({ ...candidate, user, assistant });
+    countByChat.set(candidate.chatId, (countByChat.get(candidate.chatId) || 0) + 1);
+    remaining -= user.length + assistant.length;
   }
   return selected;
 }
@@ -123,7 +183,10 @@ export async function preparePersonalContext(chat, query, loadChats = recallChat
   let recalled = [];
   let recallUnavailable = false;
   if (config.enabled) {
-    try { recalled = retrieveContext(await loadChats(), expanded, chat.id); }
+    try {
+      const topicHint = (chat.messages || []).filter(m => isUserTurn(m) && m.text !== query).slice(-2).map(m => m.text).join(' ');
+      recalled = retrieveContext(await loadChats({ includeWorkspaces: true }), expanded, chat.id, topicHint);
+    }
     catch { recallUnavailable = true; }
   }
   const sections = [];

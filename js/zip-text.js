@@ -1,8 +1,9 @@
-const MAX_ENTRY = 400_000;
-const MAX_TOTAL = 400_000;
+// Keep decompression bounded even when the uploaded ZIP itself is small.
+const MAX_EXPANDED_TEXT_BYTES = 32 * 1024 * 1024;
 
-export async function zipText(file, readable) {
+export async function readZipEntries(file, readable, signal) {
   const bytes = new Uint8Array(await file.arrayBuffer());
+  signal?.throwIfAborted();
   const view = new DataView(bytes.buffer);
   const u16 = offset => view.getUint16(offset, true);
   const u32 = offset => view.getUint32(offset, true);
@@ -12,10 +13,11 @@ export async function zipText(file, readable) {
   while (end >= floor && (u32(end) !== 0x06054b50 || end + 22 + u16(end + 20) !== bytes.length)) end--;
   if (end < floor || u16(end + 4) || u16(end + 6)) throw new Error('تعذّر قراءة أرشيف ZIP.');
   let offset = u32(end + 16);
-  const sections = [];
+  const entries = [];
   let used = 0;
   const skipped = [];
   for (let i = 0; i < u16(end + 10); i++) {
+    signal?.throwIfAborted();
     if (offset + 46 > end || u32(offset) !== 0x02014b50) throw new Error('جدول ملفات ZIP غير صالح.');
     const nameLength = u16(offset + 28);
     const name = utf8.decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
@@ -23,7 +25,7 @@ export async function zipText(file, readable) {
     const compressed = u32(offset + 20), local = u32(offset + 42);
     offset += 46 + nameLength + u16(offset + 30) + u16(offset + 32);
     if (name.endsWith('/')) continue;
-    if (!readable(name) || flags & 1 || ![0, 8].includes(method) || size > MAX_ENTRY || used + size > MAX_TOTAL) {
+    if (!readable(name) || flags & 1 || ![0, 8].includes(method) || used + size > MAX_EXPANDED_TEXT_BYTES) {
       if (skipped.length < 100) skipped.push(name);
       continue;
     }
@@ -39,6 +41,7 @@ export async function zipText(file, readable) {
       try {
         for (;;) {
           const { done, value } = await reader.read();
+          signal?.throwIfAborted();
           if (done) break;
           count += value.length;
           if (count > size) throw new Error('حجم ملف ZIP الداخلي غير مطابق.');
@@ -49,7 +52,13 @@ export async function zipText(file, readable) {
     }
     if (content.length !== size) throw new Error('حجم ملف ZIP الداخلي غير مطابق.');
     used += size;
-    sections.push(`[${name}]\n${utf8.decode(content)}`);
+    entries.push([name, utf8.decode(content)]);
   }
+  return { entries, skipped };
+}
+
+export async function zipText(file, readable, signal) {
+  const { entries, skipped } = await readZipEntries(file, readable, signal);
+  const sections = entries.map(([name, content]) => `[${name}]\n${content}`);
   return [...sections, ...(skipped.length ? [`ملفات لم يُقرأ محتواها: ${skipped.join('، ')}`] : [])].join('\n\n');
 }

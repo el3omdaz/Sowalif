@@ -17,7 +17,7 @@ function formatSize(size) {
   return `${(size / 1024 ** unit).toFixed(1)} ${['B', 'KB', 'MB', 'GB', 'TB'][unit]}`;
 }
 
-export function initOrganizer({ localAgentOrigin, settings }) {
+export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, attachDocument, attachFile }) {
   const $ = id => document.getElementById(id);
   const sheet = $('organizerSheet');
   const source = $('organizerSource');
@@ -205,6 +205,12 @@ export function initOrganizer({ localAgentOrigin, settings }) {
       preview.textContent = output.text || 'ملف نصي فارغ.';
       status.textContent = output.partial ? 'تم عرض أول جزء من الملف.' : 'تم عرض نص الملف.';
     })));
+    controls.append(button('أرفق النص بالشات', () => void action(async () => {
+      const chat = getAttachmentChat();
+      const output = await local('read', { root: roots.value, path: file.path });
+      await attachDocument(file.name, output.text, output.partial, chat);
+      visible(sheet, false);
+    })));
     function transfer(actionName, label) {
       controls.append(button(label, () => {
         const destination = prompt('الصق المسار الكامل للملف في مكانه الجديد', file.path)?.trim();
@@ -270,12 +276,26 @@ export function initOrganizer({ localAgentOrigin, settings }) {
       body.textContent = full.body || full.snippet || 'الرسالة بدون نص مقروء.';
       const files = document.createElement('div');
       files.className = 'row';
-      for (const file of full.attachments || []) files.append(button(`تنزيل ${file.name}`, () => void action(async () => {
-        download(file.name, await api().mailAttachment(provider(), message.id, file));
-      })));
+      for (const file of full.attachments || []) {
+        files.append(button(`تنزيل ${file.name}`, () => void action(async () => {
+          download(file.name, await api().mailAttachment(provider(), message.id, file));
+        })), button(`أرفق ${file.name} بالشات`, () => void action(async () => {
+          const chat = getAttachmentChat();
+          const blob = await api().mailAttachment(provider(), message.id, file);
+          await attachFile(new File([blob], file.name, { type: blob.type }), chat);
+          visible(sheet, false);
+        })));
+      }
       element.querySelector('.organizer-attachments')?.remove();
       files.classList.add('organizer-attachments');
       element.append(files);
+    })));
+    controls.append(button('أرفق الرسالة بالشات', () => void action(async () => {
+      const chat = getAttachmentChat();
+      const full = await api().readMail(provider(), message.id);
+      const text = [full.from, full.date, full.body || full.snippet].filter(Boolean).join('\n');
+      await attachDocument(full.subject || message.subject || 'رسالة بريد', text, false, chat);
+      visible(sheet, false);
     })));
     const mark = button(message.unread ? 'تحديد كمقروءة' : 'تحديد كغير مقروءة', () => void action(async () => {
       await api().updateMail(provider(), message.id, message.unread ? 'read' : 'unread');
@@ -317,6 +337,11 @@ export function initOrganizer({ localAgentOrigin, settings }) {
     else controls.append(button('تنزيل', () => void action(async () => {
       const { name, blob } = await api().driveDownload(provider(), file.id);
       download(name, blob);
+    })), button('أرفق بالشات', () => void action(async () => {
+      const chat = getAttachmentChat();
+      const { name, blob } = await api().driveDownload(provider(), file.id);
+      await attachFile(new File([blob], name, { type: blob.type || file.mimeType }), chat);
+      visible(sheet, false);
     })));
     controls.append(button('نقل', () => {
       const name = prompt('اكتب اسم المجلد الذي تريد النقل إليه')?.trim();

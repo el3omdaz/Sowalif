@@ -48,12 +48,16 @@ export async function listChats() {
 
 export const getChat = (id) => tx('chats', 'readonly', (s) => s.get(id));
 // النصوص فقط للاسترجاع المحلي؛ لا نعيد المرفقات أو مفاتيح المزوّدين.
-export async function recallChats() {
+export async function recallChats({ includeWorkspaces = false } = {}) {
   const all = await tx('chats', 'readonly', (s) => s.getAll());
-  return all.filter(c => !['image', 'video', 'work'].includes(c.mode)).map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt, messages: (c.messages || []).filter((m) => !m.error && ['user', 'assistant'].includes(m.role)).map((m) => ({ role: m.role, text: String(m.text || ''), at: m.at })) }));
+  return all.filter(c => includeWorkspaces || !['image', 'video', 'work'].includes(c.mode)).map((c) => ({
+    id: c.id, title: c.title, mode: c.mode, updatedAt: c.updatedAt,
+    messages: (c.messages || []).filter(m => !m.error && ['user', 'assistant'].includes(m.role))
+      .map(m => ({ role: m.role, text: String(m.text || ''), at: m.at })),
+  }));
 }
 
-export async function saveChat(chat, touch = true, preserveProject = chat.mode === 'work') {
+export async function saveChat(chat, touch = true, preserveProject = true) {
   if (touch) chat.updatedAt = Date.now();
   // نخزن نسخة نظيفة بدون عناصر مؤقتة للواجهة
   const snapshot = JSON.parse(JSON.stringify(chat));
@@ -227,7 +231,7 @@ export async function importDeviceData() {
       for (const id of blobIds(chat)) { const blob = await read('blobs', id); if (blob instanceof Blob) await tx('blobs', 'readwrite', store => store.put(blob, id)); }
       await saveChat(chat, false, false); count++;
     }
-    const { mergePersonalization } = await import('./memory.js?v=20');
+    const { mergePersonalization } = await import('./memory.js?v=21');
     const readOld = (key, fallback) => { try { return JSON.parse(localStorage.getItem('sc.' + key)) ?? fallback; } catch { return fallback; } };
     mergePersonalization({ instructions: readOld('customInstructions', ''), notes: readOld('personalNotes', ''), enabled: readOld('memoryEnabled', true), rules: readOld('sharedRules', []) });
     return count;
@@ -244,7 +248,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=20');
+  const { readPersonalization } = await import('./memory.js?v=21');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -271,7 +275,7 @@ export async function importAll(file) {
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=20');
+    const { mergePersonalization } = await import('./memory.js?v=21');
     mergePersonalization(data.personalization);
   }
   return n;
