@@ -15,7 +15,7 @@ import { readProjectDirectory, writeProjectDirectory } from './project-folder.js
 import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=27';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=25';
 import { planImage } from './image-plan.js?v=1';
-import { initOrganizer } from './organizer.js?v=1';
+import { initOrganizer } from './organizer.js?v=29';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -67,7 +67,7 @@ function toast(text, ms = 2600) {
 
 // ---------- البداية ----------
 async function boot() {
-  initOrganizer({ localAgentOrigin, localStatus, settings: db.settings });
+  initOrganizer({ localAgentOrigin, settings: db.settings });
   const confirmation = await confirmCloudEmail();
   renderCodingSetup();
   void refreshCodingStatus();

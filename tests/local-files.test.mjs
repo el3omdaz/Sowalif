@@ -25,14 +25,17 @@ test('local file tools keep actions in approved folders and preserve deleted fil
     if (error.code === 'EPERM') return false;
     throw error;
   });
-  const server = createLocalServer({ dataDir, ready: async () => true });
+  let dockerChecks = 0;
+  const server = createLocalServer({ dataDir, ready: async () => { dockerChecks++; return true; } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     await new Promise(resolve => server.close(resolve));
     await rm(base, { recursive: true, force: true });
   });
   const origin = 'http://127.0.0.1:' + server.address().port;
-  const { csrf } = await (await fetch(origin + '/api/agent/status')).json();
+  const { csrf } = await (await fetch(origin + '/api/files/session')).json();
+  assert.equal(typeof csrf, 'string');
+  assert.equal((await fetch(origin + '/api/files/session', { headers: { Origin: 'https://other.test' } })).status, 403);
   const headers = { Origin: origin, 'Content-Type': 'application/json', 'X-Sowalif-CSRF': csrf };
   const request = (route, params, overrides = {}) => fetch(origin + '/api/files/' + route, {
     method: 'POST',
@@ -97,4 +100,5 @@ test('local file tools keep actions in approved folders and preserve deleted fil
   assert.deepEqual((await post('roots', { path: root, remove: true })).roots, []);
   assert.equal((await request('scan', { root, action: 'largest' })).status, 403);
   assert.equal(await readFile(outside, 'utf8'), 'private');
+  assert.equal(dockerChecks, 0);
 });

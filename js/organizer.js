@@ -17,7 +17,7 @@ function formatSize(size) {
   return `${(size / 1024 ** unit).toFixed(1)} ${['B', 'KB', 'MB', 'GB', 'TB'][unit]}`;
 }
 
-export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
+export function initOrganizer({ localAgentOrigin, settings }) {
   const $ = id => document.getElementById(id);
   const sheet = $('organizerSheet');
   const source = $('organizerSource');
@@ -26,6 +26,9 @@ export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
   const task = $('organizerTask');
   const client = $('organizerClient');
   const status = $('organizerStatus');
+  const fileStatus = $('organizerFileStatus');
+  const linkForm = $('organizerLinkForm');
+  const createForm = $('organizerCreateForm');
   const more = $('organizerMore');
   const tokens = {};
   let csrf = '';
@@ -33,6 +36,7 @@ export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
   let nextPage = null;
   let lastSearch = null;
   let localDirectory = '';
+  let rootsAvailable = false;
 
   const mode = () => source.value === 'files' ? 'files' : ['gmail', 'outlook'].includes(source.value) ? 'mail' : 'drive';
   const provider = () => ['gmail', 'gdrive'].includes(source.value) ? 'google' : 'microsoft';
@@ -42,36 +46,52 @@ export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
 
   async function local(path, data) {
     if (!localAgentOrigin()) throw new Error('افتح نسخة سوالف للكمبيوتر على http://127.0.0.1:4781/ لإدارة ملفات الجهاز.');
-    if (!csrf) csrf = (await localStatus()).csrf;
-    const response = await fetch(`/api/files/${path}`, {
-      method: data === undefined ? 'GET' : 'POST',
-      headers: { 'X-Sowalif-CSRF': csrf, ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      body: data === undefined ? undefined : JSON.stringify(data),
-      cache: 'no-store',
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      if (response.status === 403) csrf = '';
-      throw new Error(result.error || 'تعذّر تنفيذ مهمة الملفات. تأكد أنك تشغّل أحدث نسخة للكمبيوتر.');
+    async function request(route, options) {
+      let response;
+      try {
+        response = await fetch(`/api/files/${route}`, { ...options, cache: 'no-store', signal: AbortSignal.timeout(route === 'scan' ? 60_000 : 15_000) });
+      } catch {
+        throw new Error('تعذّر الاتصال بخدمة ملفات الكمبيوتر. شغّل سوالف من Start-Sowalif.cmd وحاول مرة ثانية.');
+      }
+      let result;
+      try { result = await response.json(); } catch { /* An older service can return a page. */ }
+      if (!response.ok || !result) {
+        if (response.status === 403) csrf = '';
+        throw new Error(response.status === 404 || !result ? 'خدمة الملفات تحتاج تحديث. أعد تشغيل نسخة سوالف للكمبيوتر.' :
+          result.error || 'تعذّر تنفيذ مهمة الملفات.');
+      }
+      return result;
     }
-    return result;
+    if (data === undefined) return request(path);
+    if (!csrf) {
+      ({ csrf } = await request('session'));
+      if (!csrf) throw new Error('تعذّر بدء جلسة ملفات الكمبيوتر.');
+    }
+    return request(path, { method: 'POST', headers: { 'X-Sowalif-CSRF': csrf, 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   }
 
-  async function action(fn) {
+  function updateLocalControls() {
+    const selected = rootsAvailable && Boolean(roots.value);
+    roots.disabled = busy || !selected;
+    $('organizerLink').disabled = busy || !localAgentOrigin();
+    $('organizerUnlink').disabled = $('organizerCreate').disabled = busy || !selected || roots.value === '*';
+  }
+
+  async function action(fn, feedback = status) {
     if (busy) return;
     busy = true;
     source.disabled = true;
-    roots.disabled = true;
-    status.textContent = 'جاري التنفيذ…';
+    updateLocalControls();
+    feedback.textContent = 'جاري التنفيذ…';
     try {
       await fn();
-      if (status.textContent === 'جاري التنفيذ…') status.textContent = '';
+      if (feedback.textContent === 'جاري التنفيذ…') feedback.textContent = '';
     } catch (error) {
-      status.textContent = error.message;
+      feedback.textContent = error.message;
     } finally {
       source.disabled = false;
-      roots.disabled = false;
       busy = false;
+      updateLocalControls();
     }
   }
 
@@ -109,11 +129,12 @@ export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
 
   async function loadRoots(selection = roots.value) {
     const { roots: entries } = await local('roots');
-    roots.replaceChildren(...entries.map(entry => new Option(entry.path, entry.path)));
+    rootsAvailable = entries.length > 0;
+    roots.replaceChildren(...(rootsAvailable ? entries.map(entry => new Option(entry.path, entry.path)) :
+      [new Option('ما أضفت مجلد أو قرص للحين', '')]));
     if (entries.length > 1) roots.append(new Option('كل المجلدات والأقراص المرتبطة', '*'));
     if (entries.some(entry => entry.path === selection) || selection === '*' && entries.length > 1) roots.value = selection;
-    $('organizerUnlink').disabled = $('organizerCreate').disabled = !roots.value || roots.value === '*';
-    status.textContent = entries.length ? '' : 'أضف مجلدًا أو قرصًا لبدء البحث.';
+    fileStatus.textContent = rootsAvailable ? '' : 'أضف مجلد أو قرص عشان تبدأ البحث فيه.';
   }
 
   function showConnection() {
@@ -137,7 +158,14 @@ export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
       void runSearch();
     })));
     if (mode() === 'files') {
-      void action(loadRoots);
+      status.textContent = '';
+      const localPage = localAgentOrigin();
+      const notice = $('organizerLocalNotice');
+      notice.textContent = 'إدارة ملفات ويندوز تعمل من نسخة الكمبيوتر. شغّل Start-Sowalif.cmd، ثم افتح نسخة الكمبيوتر.';
+      visible(notice, !localPage);
+      visible($('organizerOpenLocal'), !localPage);
+      updateLocalControls();
+      if (localPage) void action(loadRoots, fileStatus);
     } else {
       const service = provider();
       client.value = settings.get(`organizerClient.${service}`, '');
@@ -370,7 +398,9 @@ export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
   roots.onchange = () => {
     localDirectory = '';
     clearResults();
-    $('organizerUnlink').disabled = $('organizerCreate').disabled = !roots.value || roots.value === '*';
+    updateLocalControls();
+    toggleForm(createForm, $('organizerCreate'), false);
+    fileStatus.textContent = '';
     status.textContent = '';
   };
   $('organizerSearch').onsubmit = event => { event.preventDefault(); void runSearch(); };
@@ -402,32 +432,71 @@ export function initOrganizer({ localAgentOrigin, localStatus, settings }) {
       });
     };
   }
+  function toggleForm(form, control, expanded) {
+    visible(form, expanded);
+    control.setAttribute('aria-expanded', String(expanded));
+  }
   $('organizerLink').onclick = () => {
+    if (busy || !localAgentOrigin()) return;
+    const expanded = linkForm.classList.contains('hidden');
+    toggleForm(linkForm, $('organizerLink'), expanded);
+    toggleForm(createForm, $('organizerCreate'), false);
+    if (expanded) $('organizerRootPath').focus();
+  };
+  linkForm.onsubmit = event => {
+    event.preventDefault();
     if (busy) return;
-    if (!localAgentOrigin()) {
-      status.textContent = 'افتح نسخة سوالف للكمبيوتر على http://127.0.0.1:4781/ أولًا.';
-      return;
-    }
-    const path = prompt('الصق المسار الكامل للمجلد أو القرص من مستكشف الملفات', 'C:\\')?.trim().replace(/^"|"$/g, '');
-    if (path) void action(async () => { await local('roots', { path }); await loadRoots(path); clearResults(); });
+    const path = $('organizerRootPath').value.trim().replace(/^"(.*)"$/, '$1');
+    if (!path) { fileStatus.textContent = 'أدخل مسار المجلد أو القرص.'; return; }
+    void action(async () => {
+      const { roots: entries } = await local('roots', { path });
+      const selection = entries.find(entry => entry.path.toLowerCase() === path.toLowerCase())?.path || entries.at(-1)?.path;
+      await loadRoots(selection);
+      clearResults();
+      linkForm.reset();
+      toggleForm(linkForm, $('organizerLink'), false);
+      fileStatus.textContent = `تمت إضافة «${roots.value}».`;
+    }, fileStatus);
   };
   $('organizerUnlink').onclick = () => {
     const path = roots.value;
     if (busy || !path || path === '*' || !confirm(`تلغي وصول سوالف إلى «${path}»؟`)) return;
-    void action(async () => { await local('roots', { path, remove: true }); clearResults(); await loadRoots(); });
+    void action(async () => {
+      await local('roots', { path, remove: true });
+      clearResults();
+      toggleForm(createForm, $('organizerCreate'), false);
+      await loadRoots();
+      fileStatus.textContent = `تمت إزالة الوصول إلى «${path}».`;
+    }, fileStatus);
   };
   $('organizerCreate').onclick = () => {
     if (busy || !roots.value || roots.value === '*') return;
+    const expanded = createForm.classList.contains('hidden');
+    toggleForm(createForm, $('organizerCreate'), expanded);
+    toggleForm(linkForm, $('organizerLink'), false);
+    if (expanded) $('organizerNewName').focus();
+  };
+  $('organizerNewType').onchange = () => visible($('organizerNewText'), $('organizerNewType').value === 'create');
+  createForm.onsubmit = event => {
+    event.preventDefault();
+    if (busy || !roots.value || roots.value === '*') return;
     const root = roots.value;
-    const directory = confirm('اضغط موافق لإنشاء مجلد، أو إلغاء لإنشاء ملف نصي.');
-    const path = prompt('الصق المسار الكامل للعنصر الجديد', root.endsWith('\\') || root.endsWith('/') ? root : root + '\\')?.trim();
-    if (!path) return;
-    const content = directory ? undefined : prompt('اكتب محتوى الملف النصي', '');
-    if (content === null) return;
+    const name = $('organizerNewName').value.trim();
+    if (!name || /[\\/:*?"<>|]/.test(name) || name === '.' || name === '..') {
+      fileStatus.textContent = 'اكتب اسم ملف أو مجلد صالح داخل المسار المحدد.';
+      return;
+    }
+    const directory = localDirectory || root;
+    const separator = directory.includes('\\') ? '\\' : '/';
+    const path = directory.endsWith(separator) ? directory + name : directory + separator + name;
+    const kind = $('organizerNewType').value;
     void action(async () => {
-      const changed = await local('change', { root, path, action: directory ? 'mkdir' : 'create', content });
-      status.textContent = `تم إنشاء ${changed.path}.`;
-    });
+      const changed = await local('change', { root, path, action: kind, content: $('organizerNewContent').value });
+      fileStatus.textContent = `تم إنشاء ${changed.path}.`;
+      createForm.reset();
+      visible($('organizerNewText'), false);
+      toggleForm(createForm, $('organizerCreate'), false);
+    }, fileStatus);
   };
   $('organizerConnect').onclick = () => {
     if (busy) return;

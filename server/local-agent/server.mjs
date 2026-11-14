@@ -138,6 +138,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
           }
           const action = url.pathname.slice('/api/files/'.length);
+          if (action === 'session' && req.method === 'GET') return json(res, 200, { csrf });
           if (action === 'roots' && req.method === 'GET') return json(res, 200, await files.readRoots());
           if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
           const input = await body(req, action === 'change' ? 7 * 1024 * 1024 : 32 * 1024);

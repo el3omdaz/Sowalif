@@ -153,13 +153,29 @@
         <option value="onedrive">OneDrive</option>
       </select>
       <div id="organizerLocal">
+        <p id="organizerLocalNotice" class="muted hidden" role="status"></p>
+        <a id="organizerOpenLocal" class="btn ghost hidden" href="http://localhost:4781/" target="_blank" rel="noopener">فتح نسخة الكمبيوتر</a>
         <label for="organizerRoot">المجلد أو القرص</label>
-        <select id="organizerRoot"></select>
+        <select id="organizerRoot" disabled><option value="">ما أضفت مجلد أو قرص للحين</option></select>
         <div class="row">
-          <button id="organizerLink" class="btn ghost" type="button">إضافة مجلد أو قرص</button>
-          <button id="organizerUnlink" class="btn ghost" type="button">إزالة الوصول</button>
-          <button id="organizerCreate" class="btn ghost" type="button">إضافة ملف أو مجلد</button>
+          <button id="organizerLink" class="btn ghost" type="button" aria-expanded="false" aria-controls="organizerLinkForm">إضافة مجلد أو قرص</button>
+          <button id="organizerUnlink" class="btn ghost" type="button" disabled>إزالة الوصول</button>
+          <button id="organizerCreate" class="btn ghost" type="button" aria-expanded="false" aria-controls="organizerCreateForm" disabled>إضافة ملف أو مجلد</button>
         </div>
+        <form id="organizerLinkForm" class="hidden">
+          <label for="organizerRootPath">مسار المجلد أو القرص في ويندوز</label>
+          <div class="row"><input id="organizerRootPath" type="text" dir="ltr" placeholder="C:\Users\…\Documents" required><button class="btn primary" type="submit">إضافة للمجلدات</button></div>
+          <p class="muted">انسخ المسار من شريط العنوان في مستكشف الملفات. لإضافة قرص كامل اكتب مساره، مثل <bdi>C:\</bdi>.</p>
+        </form>
+        <form id="organizerCreateForm" class="hidden">
+          <label for="organizerNewType">نوع العنصر</label>
+          <select id="organizerNewType"><option value="mkdir">مجلد</option><option value="create">ملف نصي</option></select>
+          <label for="organizerNewName">الاسم داخل المجلد المحدد</label>
+          <input id="organizerNewName" type="text" dir="auto" required>
+          <div id="organizerNewText" class="hidden"><label for="organizerNewContent">محتوى الملف</label><textarea id="organizerNewContent" rows="4"></textarea></div>
+          <button class="btn primary" type="submit">إنشاء</button>
+        </form>
+        <p id="organizerFileStatus" class="muted" role="status"></p>
       </div>
       <div id="organizerCloud" class="hidden">
         <div class="row"><button id="organizerConnect" class="btn ghost" type="button">ربط الحساب</button><button id="organizerDisconnect" class="btn ghost hidden" type="button">فصل الحساب</button><button id="organizerCompose" class="btn ghost hidden" type="button">رسالة جديدة</button></div>
@@ -422,6 +438,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=28"></script>
+  <script type="module" src="js/app.js?v=29"></script>
 </body>
 </html>
