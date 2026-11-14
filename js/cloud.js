@@ -1,8 +1,10 @@
 import { createClient } from '../vendor/supabase.js?v=20';
-import { CLOUD } from './cloud-config.js?v=20';
+import { CLOUD } from './cloud-config.js?v=25';
 import * as db from './db.js?v=20';
 import { readPersonalization } from './memory.js?v=20';
 import { cloudChat, cloudMemory } from './cloud-payload.js?v=20';
+
+export const cloudConfirmationUrl = () => new URL('?confirm=1', CLOUD.siteUrl).href;
 
 export const cloud = createClient(CLOUD.url, CLOUD.publishableKey, { auth: { storageKey: 'sowalif-auth-v1', detectSessionInUrl: false }, global: {
   fetch: (url, options = {}) => fetch(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) }),

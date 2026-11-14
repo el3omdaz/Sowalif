@@ -71,6 +71,42 @@ test('Enter sends regardless of browser device classification', () => {
   press({ repeat: true }, { sent: false, prevented: true });
 });
 
+test('email confirmation removes credentials from the URL and accepts the signup session', async () => {
+  const a = app();
+  a.ctx.URL = URL;
+  a.ctx.URLSearchParams = URLSearchParams;
+  a.ctx.location = { href: 'https://example.test/Sowalif/?confirm=1#access_token=test&refresh_token=refresh&type=signup' };
+  let cleanUrl;
+  a.ctx.history = { replaceState: (_, __, url) => { cleanUrl = url.href; } };
+  a.ctx.cloud = { auth: { setSession: async tokens => {
+    assert.equal(cleanUrl, 'https://example.test/Sowalif/');
+    assert.equal(tokens.access_token, 'test');
+    return { data: { session: { user: { id: 'confirmed' } } } };
+  } } };
+  assert.match(await a.run('confirmCloudEmail()'), /فتح بيانات حسابي/);
+});
+
+test('chat model picker can hide and restore a model without changing the current selection', () => {
+  const a = app();
+  const settings = new Map();
+  a.ctx.db.settings.get = (key, fallback) => settings.get(key) ?? fallback;
+  a.ctx.db.settings.set = (key, value) => (settings.set(key, value), true);
+  a.ctx.modelsFor = () => [{ id: 'astra', name: 'GPT-6 Astra', maker: 'OpenAI', features: [] }];
+  a.run("S.model = 'astra'");
+  a.node('#modelBtn').click();
+  a.node('#modelVisibility').click();
+  const toggle = checked => a.node('#modelList').listeners.change({ target: { dataset: { modelVisibility: 'astra' }, checked } });
+  toggle(false);
+  a.node('#modelVisibility').click();
+  assert.doesNotMatch(a.node('#modelList').innerHTML, /GPT-6 Astra/);
+  assert.equal(a.run('S.model'), 'astra');
+  a.node('#modelVisibility').click();
+  assert.match(a.node('#modelList').innerHTML, /GPT-6 Astra/);
+  toggle(true);
+  a.node('#modelVisibility').click();
+  assert.match(a.node('#modelList').innerHTML, /GPT-6 Astra/);
+});
+
 test('video model picker changes the media provider and model independently of chat', () => {
   const a = app();
   const prefs = new Map();

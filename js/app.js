@@ -1,9 +1,9 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
 import * as db from './db.js?v=20';
 import { fitViewport } from './viewport.js?v=21';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=20';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=24';
 import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=20';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=20';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=25';
 import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=20';
 import { mediaProvider } from './media.js?v=20';
 import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=20';
@@ -13,7 +13,7 @@ import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, re
 import { prepareProjectPush, pushProject } from './project-github.js?v=20';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=20';
 import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl } from './local-agent.js?v=22';
-import { cloud, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=20';
+import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=25';
 import { planImage } from './image-plan.js?v=1';
 
 const $ = (s) => document.querySelector(s);
@@ -66,6 +66,7 @@ function toast(text, ms = 2600) {
 
 // ---------- البداية ----------
 async function boot() {
+  const confirmation = await confirmCloudEmail();
   renderCodingSetup();
   void refreshCodingStatus();
   for (const [id, models] of [['piapiImageModel', IMAGE_MODELS], ['piapiVideoModel', VIDEO_MODELS]]) {
@@ -80,7 +81,10 @@ async function boot() {
   else newChat();
   const localCoding = S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off';
   const mediaKind = selectedMediaKind();
-  if (localCoding && (!localAgentOrigin() || !agentCredentials().key)) {
+  if (confirmation) {
+    openSettings('cloud');
+    $('#cloudStatus').textContent = confirmation;
+  } else if (localCoding && (!localAgentOrigin() || !agentCredentials().key)) {
     openSettings('agent'); toast('اربط محرك البرمجة عشان تبدأ', 4000);
   } else if (mediaKind && !db.settings.get(mediaProvider() === 'kie' ? 'kieKey' : 'piapiKey', '')) {
     openSettings('media');
@@ -539,10 +543,16 @@ async function copy(text) {
 }
 
 // ---------- اختيار النموذج ----------
+let editingModelVisibility = false;
+
 function openModels() {
   if (S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off') return openSettings('agent');
   const query = $('#modelSearch').value.trim().toLowerCase();
   const kind = selectedMediaKind();
+  const visibility = $('#modelVisibility');
+  visibility.classList.toggle('hidden', Boolean(kind));
+  visibility.textContent = editingModelVisibility ? 'تم' : 'تخصيص القائمة';
+  visibility.setAttribute('aria-pressed', String(editingModelVisibility));
   $('#modelSheetTitle').textContent = kind === 'video' ? 'اختر نموذج الفيديو' : kind === 'image' ? 'اختر نموذج الصور' : 'اختر النموذج';
   $('#modelMediaOptions').classList.toggle('hidden', !kind);
   $('#modelSheet').classList.remove('hidden');
@@ -561,8 +571,17 @@ function openModels() {
       .join('') || '<p class="muted">ما لقيت نموذج بهذا الاسم.</p>';
     return;
   }
+  const hidden = new Set(db.settings.get('hiddenChatModels', []) || []);
+  const matches = modelsFor(S.provider).filter(m => (editingModelVisibility || !hidden.has(m.id)) &&
+    (editingModelVisibility || !(S.mode === 'image' && S.promptMode && m.vision === false)) &&
+    (!query || `${m.name} ${m.remoteId || m.id}`.toLowerCase().includes(query)));
+  if (editingModelVisibility) {
+    $('#modelList').innerHTML = matches.map(m => `<label class="model model-visibility-row"><input type="checkbox" data-model-visibility="${esc(m.id)}"${hidden.has(m.id) ? '' : ' checked'}> <span>${esc(m.name)}</span></label>`).join('')
+      || '<p class="muted">ما لقيت نموذج بهذا الاسم.</p>';
+    return;
+  }
   const groups = {};
-  for (const m of modelsFor(S.provider).filter((m) => !(S.mode === 'image' && S.promptMode && m.vision === false) && (!query || `${m.name} ${m.remoteId || m.id}`.toLowerCase().includes(query)))) (groups[m.maker] ||= []).push(m);
+  for (const m of matches) (groups[m.maker] ||= []).push(m);
   $('#modelList').innerHTML = Object.entries(groups)
     .map(
       ([maker, list]) =>
@@ -576,14 +595,32 @@ function openModels() {
           )
           .join(''),
     )
-    .join('');
+    .join('') || '<p class="muted">ما فيه نماذج ظاهرة. عدّل البحث أو افتح «تخصيص القائمة» لإظهارها.</p>';
 }
 $('#modelBtn').onclick = () => {
   if (S.controller) return toast('انتظر انتهاء الطلب قبل تغيير النموذج.');
+  editingModelVisibility = false;
   $('#modelSearch').value = '';
   openModels();
 };
 $('#modelSearch').addEventListener('input', openModels);
+$('#modelVisibility').onclick = () => {
+  editingModelVisibility = !editingModelVisibility;
+  $('#modelSearch').value = '';
+  openModels();
+};
+$('#modelList').addEventListener('change', event => {
+  const field = event.target;
+  const id = field.dataset.modelVisibility;
+  if (!editingModelVisibility || !id) return;
+  const hidden = new Set(db.settings.get('hiddenChatModels', []) || []);
+  if (field.checked) hidden.delete(id);
+  else hidden.add(id);
+  if (!db.settings.set('hiddenChatModels', [...hidden])) {
+    field.checked = !field.checked;
+    toast('تعذّر حفظ تخصيص القائمة.');
+  }
+});
 $('#modelMediaProvider').onchange = (event) => {
   if (S.controller || !db.settings.set('mediaProvider', event.target.value)) {
     toast('تعذّر تغيير مزوّد الوسائط الآن.');
@@ -931,23 +968,70 @@ async function startCloud() {
     await renderCloudAccount(user);
   } catch (error) { $('#cloudStatus').textContent = 'الحفظ المحلي شغال. تعذّر الاتصال بالحساب: ' + error.message; }
 }
+async function confirmCloudEmail() {
+  const url = new URL(location.href);
+  const params = new URLSearchParams(url.hash.slice(1));
+  const type = params.get('type');
+  const linkError = params.get('error_code') || url.searchParams.get('error_code');
+  const access = params.get('access_token');
+  const refresh = params.get('refresh_token');
+  if (!url.searchParams.has('confirm') && !linkError && !(['signup', 'email'].includes(type) && access && refresh)) return '';
+  if (access || refresh || linkError) url.hash = '';
+  for (const key of ['confirm', 'error', 'error_code', 'error_description']) url.searchParams.delete(key);
+  history.replaceState(null, '', url);
+  if (linkError) return 'رابط التفعيل غير صالح أو انتهت صلاحيته. جرّب تسجيل الدخول، أو اطلب رابط تفعيل جديد بنفس البريد.';
+  if (!access || !refresh || !['signup', 'email'].includes(type)) return 'جرّب تسجيل الدخول بنفس بريدك. إذا كان الحساب بانتظار التفعيل، اطلب رابطًا جديدًا.';
+  try {
+    const { data, error } = await cloud.auth.setSession({ access_token: access, refresh_token: refresh });
+    if (error || !data.session) throw error || new Error();
+    return db.profileId === data.session.user.id
+      ? 'تم تأكيد البريد وتسجيل الدخول.'
+      : 'تم تأكيد البريد. اضغط «فتح بيانات حسابي» لبدء المزامنة.';
+  } catch {
+    return 'تعذّر فتح جلسة من رابط التفعيل. جرّب تسجيل الدخول بنفس بريدك، أو اطلب رابطًا جديدًا.';
+  }
+}
+
+const cloudAuthButtons = ['cloudSignIn', 'cloudSignUp', 'cloudResend'];
 async function authenticateCloud(signup) {
   if (!cloudIdle()) return toast('أكمل الطلب أو المسودة قبل تغيير الحساب');
   const email = $('#cloudEmail').value.trim(), password = $('#cloudPassword').value;
   if (!email || password.length < 8) return toast('أدخل بريدك وكلمة مرور من 8 أحرف أو أكثر');
-  for (const id of ['cloudSignIn', 'cloudSignUp']) $(`#${id}`).disabled = true;
+  for (const id of cloudAuthButtons) $(`#${id}`).disabled = true;
   $('#cloudStatus').textContent = signup ? 'ينشئ حساب سوالف…' : 'يسجّل الدخول…';
   try {
-    const { data, error } = await (signup ? cloud.auth.signUp({ email, password }) : cloud.auth.signInWithPassword({ email, password }));
+    const { data, error } = await (signup
+      ? cloud.auth.signUp({ email, password, options: { emailRedirectTo: cloudConfirmationUrl() } })
+      : cloud.auth.signInWithPassword({ email, password }));
     if (error) throw error;
     $('#cloudPassword').value = '';
     if (!data.session) { $('#cloudStatus').textContent = 'افتح رسالة التأكيد في بريدك، ثم ارجع وسجّل الدخول هنا. إذا لم تصلك الرسالة فقد يحتاج المشروع إعداد خدمة البريد.'; return; }
     localStorage.setItem('sc.cloudProfile', data.user.id); location.reload();
-  } catch (error) { $('#cloudStatus').textContent = 'تعذّر تسجيل الدخول: ' + error.message; }
-  finally { for (const id of ['cloudSignIn', 'cloudSignUp']) $(`#${id}`).disabled = false; }
+  } catch (error) {
+    $('#cloudStatus').textContent = error.code === 'email_not_confirmed'
+      ? 'البريد بانتظار التفعيل. اضغط «إعادة إرسال رابط التفعيل» وافتح أحدث رسالة.'
+      : (signup ? 'تعذّر إنشاء الحساب: ' : 'تعذّر تسجيل الدخول: ') + error.message;
+  } finally { for (const id of cloudAuthButtons) $(`#${id}`).disabled = false; }
 }
 $('#cloudSignIn').onclick = () => authenticateCloud(false);
 $('#cloudSignUp').onclick = () => authenticateCloud(true);
+$('#cloudResend').onclick = async () => {
+  const field = $('#cloudEmail');
+  const email = field.value.trim();
+  if (!email || !field.checkValidity()) return field.reportValidity();
+  for (const id of cloudAuthButtons) $(`#${id}`).disabled = true;
+  const status = $('#cloudStatus');
+  status.textContent = 'جاري طلب رابط تفعيل جديد…';
+  try {
+    const { error } = await cloud.auth.resend({ type: 'signup', email, options: { emailRedirectTo: cloudConfirmationUrl() } });
+    if (error) throw error;
+    status.textContent = 'إذا كان البريد بانتظار التفعيل، افتح أحدث رسالة من سوالف وتفقّد البريد غير المرغوب فيه.';
+  } catch (error) {
+    status.textContent = Number(error.status) === 429 ? 'انتظر قليلًا قبل طلب رابط آخر.' : 'تعذّر إرسال الرابط: ' + error.message;
+  } finally {
+    for (const id of cloudAuthButtons) $(`#${id}`).disabled = false;
+  }
+};
 $('#cloudOpenProfile').onclick = async () => { if (!cloudIdle()) return; const user = await cloudUser(); if (user) { localStorage.setItem('sc.cloudProfile', user.id); location.reload(); } };
 $('#cloudSignOut').onclick = async () => {
   if (!cloudIdle()) return toast('أكمل الطلب أو المسودة قبل تسجيل الخروج');

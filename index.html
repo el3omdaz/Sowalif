@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=24">
 </head>
 <body>
   <div id="app" class="app">
@@ -130,6 +130,7 @@
         <p id="modelMediaHint" class="muted" role="status"></p>
       </div>
       <input id="modelSearch" type="search" placeholder="ابحث عن نموذج" aria-label="ابحث عن نموذج">
+      <button id="modelVisibility" class="btn ghost" type="button" aria-pressed="false">تخصيص القائمة</button>
       <div id="modelList" class="model-list"></div>
     </div>
   </div>
@@ -198,6 +199,7 @@
               <label for="cloudEmail">البريد الإلكتروني</label><input id="cloudEmail" type="email" dir="ltr" autocomplete="email" placeholder="you@example.com">
               <label for="cloudPassword">كلمة مرور حساب سوالف</label><input id="cloudPassword" type="password" autocomplete="current-password" minlength="8" placeholder="8 أحرف أو أكثر">
               <div class="row"><button id="cloudSignIn" class="btn primary">تسجيل الدخول</button><button id="cloudSignUp" class="btn ghost">إنشاء حساب سوالف</button></div>
+              <button id="cloudResend" class="btn ghost" type="button">إعادة إرسال رابط التفعيل</button>
               <p class="muted">حساب سوالف مستقل عن حساب لوحة Supabase. المحادثات القديمة تبقى على الجهاز حتى تختار استيرادها.</p>
             </div>
             <div id="cloudActions" class="cloud-actions hidden">
@@ -365,6 +367,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=23"></script>
+  <script type="module" src="js/app.js?v=25"></script>
 </body>
 </html>

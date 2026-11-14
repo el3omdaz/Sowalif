@@ -5,7 +5,7 @@ const storage = new Map([['sc.openRouterKey', '"or-test-key"'], ['sc.kieKey', '"
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
 const { runModel, diagnoseModels } = await import('../js/kie.js?v=20');
 const { checkOpenRouterKey, refreshOpenRouterModels } = await import('../js/openrouter.js?v=20');
-const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=20');
+const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=24');
 const opts = { system: 'Test', messages: [{ role: 'user', text: 'مرحبا' }] };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const sse = (chunks) => new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });

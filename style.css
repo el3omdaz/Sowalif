@@ -179,6 +179,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--panel); padding: 8px 0; z-index: 1; }
 .sheet-head h3 { margin: 0; }
 .model-list { display: grid; gap: 8px; }
+#modelVisibility { margin-block: 8px; }
+.model.model-visibility-row { display: flex; align-items: center; gap: 10px; }
 .model-media-options { margin-bottom: 10px; }
 .model-media-options label { display: block; margin-bottom: 5px; }
 .model-media-options p { margin: 6px 0 0; font-size: 13px; }

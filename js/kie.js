@@ -1,6 +1,6 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
 import { settings, putBlob } from './db.js?v=20';
-import { modelById } from './models.js?v=20';
+import { modelById } from './models.js?v=24';
 
 // sc.base / sc.upload لتجربة التطبيق على خادم وهمي فقط
 const BASE = () => settings.get('base', 'https://api.kie.ai');

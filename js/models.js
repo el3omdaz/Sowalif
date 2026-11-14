@@ -5,15 +5,37 @@ import { settings } from './db.js?v=20';
 
 export const MODELS = [
   {
+    id: 'gpt-6-astra',
+    name: 'GPT-6 Astra',
+    maker: 'OpenAI',
+    api: 'responses',
+    url: '/codex/v1/responses',
+    tools: true,
+    search: 'tool',
+    effort: ['low', 'high'],
+    tagline: 'للمنطق والتحليل والبرمجة المعقّدة',
+    features: ['يدعم التفكير المتعمّق والصور والملفات'],
+  },
+  {
+    id: 'gemini-4-carbon',
+    name: 'Gemini 4 Carbon',
+    maker: 'Google',
+    api: 'chat',
+    url: '/gemini-4-carbon-openai/v1/chat/completions',
+    tools: false,
+    search: 'native',
+    tagline: 'للتحليل متعدد الوسائط والمهام الطويلة',
+    features: ['يدعم الصور والتفكير المتعمّق وبحث Google'],
+  },
+  {
     id: 'claude-fable-5',
     name: 'Claude Fable 5',
     maker: 'Anthropic',
     api: 'anthropic',
     tools: true,
     search: 'tool',
-    badge: 'الأقوى',
-    tagline: 'أقوى نموذج متاح — للمهام الصعبة والطويلة',
-    features: ['أعمق تفكير وتحليل بين كل النماذج', 'أفضل كتابة عربية وإبداعية ونصوص إعلانية', 'برمجة ومهام معقدة متعددة الخطوات', 'يقرأ الصور والملفات ويبحث ويرسم بنفسه'],
+    tagline: 'للمهام الصعبة والطويلة',
+    features: ['كتابة عربية وإبداعية ونصوص إعلانية', 'برمجة ومهام معقدة متعددة الخطوات', 'يقرأ الصور والملفات ويبحث ويرسم بنفسه'],
   },
   {
     id: 'claude-opus-5-5',
@@ -78,7 +100,7 @@ export const MODELS = [
     url: '/gemini-4-argon-openai/v1/chat/completions',
     tools: false,
     search: 'native',
-    tagline: 'أقوى نماذج Google — بحث Google مدمج',
+    tagline: 'تحليل متعدد الوسائط مع بحث Google',
     features: ['بحث Google مباشر بمعلومات اليوم', 'يفهم الصور وPDF والفيديو والصوت', 'ممتاز في الأسئلة العامة والمعلومات الحديثة'],
   },
   {
@@ -139,6 +161,9 @@ export const IMAGE_MODEL = 'nano-banana-2-1';
 export const OR_DEFAULT_MODEL = 'or:anthropic/claude-sonnet-5.5';
 export const OR_AUDIO_MODEL = 'or:google/gemini-3.8-flash';
 const starters = [
+  ['openai/gpt-6-astra', 'GPT-6 Astra', ['text', 'image']],
+  ['anthropic/claude-fable-5.2', 'Claude Fable 5.2', ['text', 'image']],
+  ['google/gemini-4-carbon', 'Gemini 4 Carbon', ['text', 'image', 'audio']],
   ['anthropic/claude-sonnet-5.5', 'Claude Sonnet 5.5', ['text', 'image']],
   ['openai/gpt-6.1-sol', 'GPT 6.1 Sol', ['text', 'image']],
   ['openai/gpt-6.1-terra', 'GPT 6.1 Terra', ['text', 'image']],
