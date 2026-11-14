@@ -3,7 +3,7 @@ import * as db from './db.js?v=20';
 import { fitViewport } from './viewport.js?v=21';
 import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=24';
 import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=20';
-import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=25';
+import { respond, resumeMedia, transcribe, makeAttachment } from './chat.js?v=27';
 import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=20';
 import { mediaProvider } from './media.js?v=20';
 import { credits, CREDIT_USD, diagnoseModels } from './kie.js?v=20';
@@ -12,9 +12,10 @@ import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } fro
 import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=20';
 import { prepareProjectPush, pushProject } from './project-github.js?v=20';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=20';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl } from './local-agent.js?v=22';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=27';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=25';
 import { planImage } from './image-plan.js?v=1';
+import { initOrganizer } from './organizer.js?v=1';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -66,6 +67,7 @@ function toast(text, ms = 2600) {
 
 // ---------- البداية ----------
 async function boot() {
+  initOrganizer({ localAgentOrigin, localStatus, settings: db.settings });
   const confirmation = await confirmCloudEmail();
   renderCodingSetup();
   void refreshCodingStatus();
@@ -268,8 +270,13 @@ function newChat(mode = S.mode) {
   closeSide();
   if (matchMedia('(min-width: 821px)').matches) $('#input').focus();
 }
-$('#newChat').onclick = () => newChat();
-$('#newChatTop').onclick = () => newChat();
+async function newWorkspace() {
+  const previous = S.chat;
+  newChat();
+  if (S.chat !== previous && S.mode === 'work' && localAgentOrigin()) await linkWorkDirectory();
+}
+$('#newChat').onclick = newWorkspace;
+$('#newChatTop').onclick = newWorkspace;
 
 async function openChat(id) {
   if (S.controller || projectSaving) return toast('انتظر يخلص الطلب');
@@ -706,7 +713,7 @@ function syncToggles() {
   $('#imageCreate').setAttribute('aria-pressed', String(!extracting));
   $('#imageExtract').setAttribute('aria-pressed', String(extracting));
   for (const id of ['searchBtn', 'deepBtn']) $(`#${id}`).classList.toggle('hidden', isMediaWorkspace());
-  $('#fileInput').accept = isMediaWorkspace() ? 'image/*' : 'image/*,.pdf,.docx,.txt,.md,.csv,.json,.js,.ts,.py,.html,.css,.xml,.srt';
+  $('#fileInput').accept = isMediaWorkspace() && !S.promptMode ? 'image/*' : '';
   input.placeholder = extracting ? 'أرفق الصورة… واكتب التعديلات اللي تبيها (اختياري)' : video ? 'صف الفيديو أو التعديل اللي تبيه…' : image ? 'صف الصورة أو التعديل اللي تبيه…'
     : S.mode === 'work' ? 'صف التطبيق أو التعديل اللي تبيه…' : 'اكتب رسالتك…';
   renderModelName();
@@ -777,7 +784,7 @@ async function shrinkImage(file) {
 
 async function addFiles(files) {
   for (const file of files) {
-    if (isMediaWorkspace() && !file.type.startsWith('image/')) {
+    if (isMediaWorkspace() && !S.promptMode && !file.type.startsWith('image/')) {
       toast('أرفق صورة أو استخدم خانة الرابط للمرجع.');
       continue;
     }
@@ -793,7 +800,7 @@ async function addFiles(files) {
       const blob = isImg ? await shrinkImage(file) : null;
       if (blob) a.preview = URL.createObjectURL(blob);
       renderAttachments();
-      a.meta = await makeAttachment(file, blob);
+      a.meta = await makeAttachment(file, blob, S.model);
       a.loading = false;
       if (a.meta.cut) toast(`«${a.name}» طويل — تم أخذ أول جزء منه`);
     } catch (e) {
@@ -814,7 +821,7 @@ $('#attachRow').addEventListener('click', (e) => {
   const id = e.target.dataset.rm;
   if (!id) return;
   const a = S.attachments.find((x) => x.id === id);
-  if (a?.meta?.blob) db.deleteBlob(a.meta.blob);
+  if (a?.meta?.blob || a?.meta?.localFile) db.deleteBlob(a.meta.blob || a.meta.localFile);
   S.attachments = S.attachments.filter((x) => x.id !== id);
   renderAttachments();
 });
@@ -1167,10 +1174,59 @@ $('#codingRecover').onclick = async () => {
 
 // ---------- ملفات الشغل ----------
 const projectFiles = () => S.chat?.project?.files || [];
+const agentDirectory = () => S.chat && db.settings.get(`agentDirectory.${S.chat.id}`, '');
+
+async function linkWorkDirectory() {
+  if (S.controller || projectSaving) return;
+  const directory = prompt('الصق المسار الكامل لمجلد المشروع من مستكشف ملفات ويندوز', agentDirectory() || '')?.trim().replace(/^"|"$/g, '');
+  if (!directory) return;
+  projectSaving = true;
+  try {
+    const linked = await linkAgentDirectory(S.chat, directory);
+    db.settings.set(`agentDirectory.${S.chat.id}`, linked.directory);
+    if (db.settings.get('codingEngine', 'off') === 'off') db.settings.set('codingEngine', 'codex');
+    await db.saveChat(S.chat);
+    history.replaceState(null, '', `#${S.chat.id}`);
+    renderProjectCount();
+    renderCodingSetup();
+    renderModelName();
+    void loadChats();
+    if (!agentCredentials().key) openSettings('agent');
+  } catch (error) { toast(error.message, 6000); }
+  finally { projectSaving = false; }
+}
+
+$('#agentGit').onclick = async () => {
+  if (S.controller || projectSaving || !agentDirectory()) return;
+  projectSaving = true;
+  try {
+    const status = await agentGit(S.chat, 'status');
+    if (status.text.trim()) {
+      const message = prompt(`الملفات التي سيشملها Commit:\n${status.text}\nاكتب وصف التعديل للمتابعة:`, 'Update project')?.trim();
+      if (!message) return;
+      await agentGit(S.chat, 'commit', message);
+      toast('تم إنشاء Commit.');
+    }
+    if (confirm('ترفع الـCommits إلى الفرع الحالي في GitHub؟')) {
+      const result = await agentGit(S.chat, 'push');
+      toast(result.text);
+    }
+  } catch (error) { toast(error.message, 6000); }
+  finally { projectSaving = false; }
+};
 const selectedProjectFile = () => projectFiles().find(file => file.path === $('#projectFiles').value);
 
 function renderProjectCount() {
   const linked = linkedFolders.get(S.chat?.id);
+  const direct = localAgentOrigin() && agentDirectory();
+  $('#agentGit').classList.toggle('hidden', !direct);
+  if (direct) {
+    $('#projectCount').textContent = direct.split(/[\\/]/).at(-1);
+    $('#projectLinkTop').classList.remove('hidden');
+    $('#openProject').classList.add('hidden');
+    return;
+  }
+  $('#openProject').classList.remove('hidden');
   $('#projectCount').textContent = linked ? `مجلد الجهاز: ${linked.directory.name}`
     : projectFiles().length ? `نسخة سوالف · ${projectFiles().length} ملف` : 'مشروع جديد';
   $('#projectLinkTop').classList.toggle('hidden', Boolean(linked) || typeof window.showDirectoryPicker !== 'function');
@@ -1279,6 +1335,7 @@ $('#openProject').onclick = () => {
 };
 $('#projectLinkTop').onclick = () => {
   if (projectSaving || S.controller) return;
+  if (localAgentOrigin()) return linkWorkDirectory();
   $('#openProject').click();
   $('#projectLinkFolder').click();
 };

@@ -7,6 +7,7 @@ import { resolve, join, dirname, relative, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validProjectPath, mergeProjectFiles } from '../../js/project.js?v=20';
 import { artifactFile, listArtifacts } from './artifacts.mjs';
+import { createFileService } from './files.mjs';
 
 export const IMAGE = 'sowalif-coding-agent:1';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -14,12 +15,14 @@ const json = (res, code, data) => { res.writeHead(code, { 'Content-Type': 'appli
 const hash = id => createHash('sha256').update(String(id)).digest('hex').slice(0, 32);
 const failure = (message, code = 400) => Object.assign(new Error(message), { code });
 async function body(req, limit = 700_000) {
-  let value = '';
+  const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    value += chunk;
-    if (Buffer.byteLength(value) > limit) throw failure('الطلب أكبر من الحد المسموح', 413);
+    size += chunk.length;
+    if (size > limit) throw failure('الطلب أكبر من الحد المسموح', 413);
+    chunks.push(chunk);
   }
-  try { return JSON.parse(value); } catch { throw failure('طلب JSON غير صالح'); }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw failure('طلب JSON غير صالح'); }
 }
 async function command(binary, args) {
   return new Promise((resolveCommand, reject) => {
@@ -103,6 +106,7 @@ export async function uploadPiapi(input, request = fetch) {
 
 export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-agent'), launch = launchDocker, ready = dockerReady, upload = uploadPiapi } = {}) {
   const csrf = randomBytes(32).toString('hex');
+  const files = createFileService(resolve(dataDir));
   const runs = new Map();
   const active = new Map();
   let starting = false;
@@ -117,7 +121,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
     let state;
     try { state = JSON.parse(await readFile(statePath, 'utf8')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; state = { revision: 0, files: [], sessions: {} }; }
-    return { workspace, sessions, statePath, state };
+    return { workspace: state.directory || workspace, sessions, statePath, state };
   };
   const server = http.createServer(async (req, res) => {
     try {
@@ -128,7 +132,70 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
       if (url.pathname.startsWith('/api/')) {
         res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
         if (req.method !== 'GET' && (req.headers.origin !== `http://${host}` || req.headers['x-sowalif-csrf'] !== csrf || !req.headers['content-type']?.startsWith('application/json'))) return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
+        if (url.pathname.startsWith('/api/files/')) {
+          if ((req.headers.origin && req.headers.origin !== `http://${host}`) ||
+              ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) {
+            return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
+          }
+          const action = url.pathname.slice('/api/files/'.length);
+          if (action === 'roots' && req.method === 'GET') return json(res, 200, await files.readRoots());
+          if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+          const input = await body(req, action === 'change' ? 7 * 1024 * 1024 : 32 * 1024);
+          if (!input || typeof input !== 'object' || Array.isArray(input)) throw failure('الطلب غير صالح.');
+          if (action === 'roots') return json(res, 200, await files.changeRoots(input));
+          if (action === 'change') return json(res, 200, await files.change(input));
+          if (action === 'read') return json(res, 200, await files.read(input));
+          if (action === 'scan') {
+            const disconnected = new AbortController();
+            res.once('close', () => disconnected.abort());
+            const result = await files.scan(input, disconnected.signal);
+            if (!res.destroyed) return json(res, 200, result);
+            return;
+          }
+          return json(res, 404, { error: 'Not found' });
+        }
         if (url.pathname === '/api/agent/status' && req.method === 'GET') return json(res, 200, { local: true, ready: await ready(), csrf, engines: ['claude', 'codex'] });
+        if (url.pathname === '/api/agent/link' && req.method === 'POST') {
+          const { projectId, directory } = await body(req);
+          if (active.size || starting) throw failure('انتظر انتهاء التنفيذ أولاً', 409);
+          if (typeof directory !== 'string' || resolve(directory) !== directory || directory.includes(',') || /[\r\n\0]/.test(directory)) throw failure('الصق المسار الكامل لمجلد المشروع');
+          const canonical = await realpath(directory);
+          if (!(await lstat(canonical)).isDirectory() || dirname(canonical) === canonical) throw failure('اختر مجلد المشروع نفسه');
+          const p = await project(projectId);
+          if (active.size || starting) throw failure('انتظر انتهاء التنفيذ أولاً', 409);
+          p.state.directory = canonical;
+          p.state.sessions = {};
+          await writeFile(p.statePath, JSON.stringify(p.state));
+          return json(res, 200, { directory: canonical });
+        }
+        if (url.pathname === '/api/agent/git' && req.method === 'POST') {
+          const { projectId, action, message } = await body(req);
+          if (active.size || starting) throw failure('انتظر انتهاء التنفيذ أولاً', 409);
+          starting = true;
+          try {
+            const { state } = await project(projectId);
+            if (!state.directory || await realpath(state.directory) !== state.directory) throw failure('اربط مجلد المشروع أولاً');
+            const git = (...args) => command('git', ['-C', state.directory, '-c', 'core.hooksPath=/dev/null', ...args]);
+            const top = await git('rev-parse', '--show-toplevel');
+            if (await realpath(top.trim()) !== state.directory) throw failure('اختر جذر مستودع Git');
+            if (action === 'status') return json(res, 200, { text: await git('status', '--short', '--untracked-files=all') });
+            if (action === 'commit') {
+              if (typeof message !== 'string' || !message.trim() || message.length > 160 || /[\r\n\0]/.test(message)) throw failure('اكتب وصفًا للتعديل');
+              const status = await git('status', '--porcelain', '--untracked-files=all');
+              if (!status.trim()) throw failure('لا توجد تغييرات للحفظ');
+              await git('add', '-A', '--', '.');
+              return json(res, 200, { text: await git('commit', '-m', message.trim()) });
+            }
+            if (action === 'push') {
+              const remote = (await git('remote', 'get-url', '--push', 'origin')).trim();
+              if (!/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)[\w-]+\/[\w.-]+$/i.test(remote)) throw failure('اضبط origin على مستودع GitHub');
+              const branch = (await git('symbolic-ref', 'HEAD')).trim();
+              await git('push', '--', 'origin', `HEAD:${branch}`);
+              return json(res, 200, { text: `تم الرفع إلى ${branch.slice('refs/heads/'.length)}.` });
+            }
+            throw failure('عملية Git غير مدعومة');
+          } finally { starting = false; }
+        }
         if (url.pathname === '/api/media/upload' && req.method === 'POST') return json(res, 200, await upload(await body(req, 15 * 1024 * 1024)));
         if (url.pathname === '/api/agent/artifact' && req.method === 'GET') {
           const p = await project(url.searchParams.get('project'));
@@ -142,12 +209,14 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           const id = url.searchParams.get('id');
           const p = await project(id);
           if (active.has(id)) return json(res, 200, { activeRun: active.get(id) });
+          if (p.state.directory) return json(res, 200, { directory: p.state.directory, revision: p.state.revision, artifacts: await listArtifacts(p.workspace) });
           return json(res, 200, { revision: p.state.revision, files: await snapshot(p.workspace), artifacts: await listArtifacts(p.workspace) });
         }
         if (url.pathname === '/api/agent/recover' && req.method === 'POST') {
           const input = await body(req);
           if (active.has(input.projectId) || starting) throw failure('يوجد تنفيذ جارٍ؛ تابعه أولاً', 409);
           const p = await project(input.projectId);
+          if (p.state.directory) return json(res, 200, { directory: p.state.directory, revision: p.state.revision, artifacts: await listArtifacts(p.workspace) });
           p.state.files = await snapshot(p.workspace);
           p.state.revision++;
           await writeFile(p.statePath, JSON.stringify(p.state));
@@ -163,12 +232,16 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 20_000) throw failure('اكتب طلباً ضمن 20 ألف حرف');
           if (input.model && (typeof input.model !== 'string' || input.model.length > 150 || /[\r\n\0]/.test(input.model))) throw failure('معرّف نموذج غير صالح');
           if (!Array.isArray(input.files)) throw failure('ملفات غير صالحة');
-          const files = mergeProjectFiles([], input.files);
+          let files = [];
           starting = true;
           let p;
           try {
             if (!await ready()) throw failure('بيئة Docker غير جاهزة؛ شغّل إعداد المحرك أولاً', 503);
             p = await project(input.projectId);
+            if (Boolean(input.direct) !== Boolean(p.state.directory)) throw failure('أعد ربط مجلد المشروع من قسم الشغل.', 409);
+            if (p.state.directory && await realpath(p.state.directory) !== p.state.directory) throw failure('تغيّر مسار المجلد. اربطه من جديد.');
+            if (!p.state.directory) {
+            files = mergeProjectFiles([], input.files);
             if ((input.workspaceRevision || 0) !== p.state.revision) throw failure('يوجد عمل محفوظ في الكمبيوتر. استخدم «استرجاع ملفات الكمبيوتر» قبل بدء طلب جديد.', 409);
             // Never overwrite a changed workspace from an old browser snapshot.
             const current = await snapshot(p.workspace);
@@ -177,6 +250,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             for (const file of files) await writeFile(await safeFile(p.workspace, file.path, true), file.content);
             p.state.files = files;
             await writeFile(p.statePath, JSON.stringify(p.state));
+            }
           } finally { starting = false; }
           const id = randomUUID();
           const sessionKey = `${input.engine}:${input.provider}:${input.model || 'default'}`;
@@ -197,9 +271,9 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             if (settled) return;
             settled = true;
             try {
-              run.files = await snapshot(p.workspace);
               run.artifacts = await listArtifacts(p.workspace);
-              p.state.files = run.files;
+              if (p.state.directory) run.directory = p.state.directory;
+              else p.state.files = run.files = await snapshot(p.workspace);
               p.state.revision++;
               if (run.sessionId) p.state.sessions[sessionKey] = run.sessionId;
               await writeFile(p.statePath, JSON.stringify(p.state));
@@ -256,7 +330,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         return await serve(res, real);
       }
       const path = decodeURIComponent(url.pathname);
-      if (!/^\/(?:index.html|style.css|sw.js|manifest.webmanifest|icon-[\w.-]+\.png|(?:js|vendor)\/[\w.-]+\.(?:js|mjs))?$/.test(path)) throw failure('Not found', 404);
+      if (!/^\/(?:index.html|oauth-microsoft.html|style.css|sw.js|manifest.webmanifest|icon-[\w.-]+\.png|(?:js|vendor)\/[\w.-]+\.(?:js|mjs))?$/.test(path)) throw failure('Not found', 404);
       return await serve(res, join(root, path === '/' ? 'index.html' : path));
     } catch (error) { if (!res.headersSent) json(res, typeof error.code === 'number' ? error.code : error.code === 'ENOENT' ? 404 : 400, { error: error.message }); else res.end(); }
   });

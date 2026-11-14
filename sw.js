@@ -1,6 +1,6 @@
 // يحفظ واجهة التطبيق ليفتح بسرعة على الآيفون — الشبكة أولاً، والنسخة المحفوظة إن انقطع الاتصال
-const CACHE = 'shell-v26';
-const SHELL = ['./', 'index.html', 'style.css?v=26', 'js/app.js?v=26', 'js/image-plan.js?v=1', 'js/viewport.js?v=21', 'js/local-agent.js?v=22', 'js/media-references.js?v=25', 'js/prompt-studio.js?v=20', 'js/cloud.js?v=25', 'js/cloud-config.js?v=25', 'js/cloud-payload.js?v=20', 'js/media-push.js?v=20', 'js/project.js?v=20', 'js/project-github.js?v=20', 'js/project-folder.js?v=20', 'js/db.js?v=20', 'js/kie.js?v=20', 'js/chat.js?v=25', 'js/models.js?v=24', 'js/openrouter.js?v=20', 'js/memory.js?v=20', 'js/piapi.js?v=20', 'js/media.js?v=20', 'vendor/supabase.js?v=20', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
+const CACHE = 'shell-v28';
+const SHELL = ['./', 'index.html', 'style.css?v=28', 'js/app.js?v=28', 'js/image-plan.js?v=1', 'js/viewport.js?v=21', 'js/local-agent.js?v=27', 'js/media-references.js?v=25', 'js/prompt-studio.js?v=20', 'js/cloud.js?v=25', 'js/cloud-config.js?v=25', 'js/cloud-payload.js?v=20', 'js/media-push.js?v=20', 'js/project.js?v=20', 'js/project-github.js?v=20', 'js/project-folder.js?v=20', 'js/db.js?v=20', 'js/kie.js?v=20', 'js/chat.js?v=27', 'js/zip-text.js?v=27', 'js/organizer.js?v=1', 'js/organizer-intent.js?v=1', 'js/connected-accounts.js?v=28', 'js/account-oauth.js?v=28', 'js/oauth-microsoft-callback.js?v=28', 'js/models.js?v=24', 'js/openrouter.js?v=20', 'js/memory.js?v=20', 'js/piapi.js?v=20', 'js/media.js?v=20', 'vendor/supabase.js?v=20', 'vendor/marked.js', 'vendor/purify.js', 'icon-192.png', 'icon-180.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -36,7 +36,7 @@ self.addEventListener('push', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   // Local engine state and project previews must never enter the offline cache.
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/preview/')) return;
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/preview/') || url.pathname.endsWith('/oauth-microsoft.html')) return;
   if (url.pathname.startsWith('/api/media-push/')) return;
   // طلبات kie.ai وغيرها تمر مباشرة بدون حفظ
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;

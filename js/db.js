@@ -94,7 +94,7 @@ export function newChat(model) {
   return { id: uid(), title: 'محادثة جديدة', model, createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
 }
 
-const blobIds = (chat) => chat.messages.flatMap((m) => [...(m.files || []), ...(m.images || []), ...(m.videos || [])]).map((f) => f.blob).filter(Boolean);
+const blobIds = (chat) => chat.messages.flatMap((m) => [...(m.files || []), ...(m.images || []), ...(m.videos || [])]).map((f) => f.blob || f.localFile).filter(Boolean);
 
 export async function deleteChat(id) {
   const chat = await getChat(id);

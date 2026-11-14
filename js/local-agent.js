@@ -29,6 +29,14 @@ export async function localStatus() {
   csrf = state.csrf;
   return state;
 }
+export async function linkAgentDirectory(chat, directory) {
+  if (!csrf) await localStatus();
+  return api('link', { projectId: projectId(chat), directory });
+}
+export async function agentGit(chat, action, message) {
+  if (!csrf) await localStatus();
+  return api('git', { projectId: projectId(chat), action, message });
+}
 export const answerAgent = (runId, id, allow) => api(`runs/${encodeURIComponent(runId)}/approval`, { id, allow });
 export function agentArtifactUrl(chat, file) {
   if (!localAgentOrigin() || typeof file?.path !== 'string' || !/^outputs\/(?!.*(?:\.\.|\\))[^\u0000-\u001f]+\.(pdf|docx|xlsx|pptx|csv|txt|md|json|zip|png|jpe?g|webp)$/i.test(file.path)) return '';
@@ -91,7 +99,8 @@ export async function respondLocal(chat, emit, signal) {
     if (!config.key) throw new Error('أضف مفتاح محرك البرمجة في الإعدادات');
     if (user.files?.length) throw new Error('استورد ملفات المصدر من «ملفات المشروع» قبل طلب التنفيذ. المرفقات العادية ليست ملفات مشروع.');
     const personal = await preparePersonalContext(chat, user.text);
-    const run = await api('runs', { projectId: projectId(chat), prompt: [personal.prompt, personal.expanded].filter(Boolean).join('\n\n'), files: chat.project?.files || [], workspaceRevision: chat.project?.agentWorkspaceRevision || 0,
+    const direct = settings.get(`agentDirectory.${chat.id}`, '');
+    const run = await api('runs', { projectId: projectId(chat), prompt: [personal.prompt, personal.expanded].filter(Boolean).join('\n\n'), direct: Boolean(direct), files: direct ? [] : chat.project?.files || [], workspaceRevision: chat.project?.agentWorkspaceRevision || 0,
       ...config, keyName: undefined, budget: settings.get('codingBudget', 2) }, signal);
     reply.agentRunId = run.id;
     // The job survives a reload; never create a second job automatically.
@@ -108,6 +117,7 @@ export async function recoverLocalProject(chat) {
   await localStatus();
   const status = await api(`project?id=${encodeURIComponent(projectId(chat))}`);
   if (status.activeRun) return status;
+  if (status.directory) return status;
   const state = await api('recover', { projectId: projectId(chat) });
   await saveProject(chat, { ...chat.project, files: mergeProjectFiles([], state.files), revision: (chat.project?.revision || 0) + 1, agentWorkspaceRevision: state.revision });
   return state;

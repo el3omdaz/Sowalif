@@ -346,7 +346,7 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 .top { min-height: 78px; gap: 12px; }
 .model-btn { min-height: 52px; padding: 8px 14px; border-radius: 16px; }
 .model-btn:hover { background: var(--code); }
-.workspace-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: min(780px, 100%); align-self: center; gap: 8px; padding: 4px 20px 16px; border: 0; }
+.workspace-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: min(780px, 100%); align-self: center; gap: 8px; padding: 4px 20px 16px; border: 0; }
 .workspace-tabs button { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 54px; padding: 12px; border-radius: 16px; font-size: 16px; font-weight: 600; color: var(--text); background: var(--code); transition: background .15s, color .15s; }
 .workspace-tabs svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .workspace-tabs button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
@@ -427,6 +427,18 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 .keyboard-open .composer-wrap { padding-bottom: 6px; }
 .keyboard-open .composer-note { display: none; }
 .keyboard-open .sheet-card { max-height: calc(var(--app-height) - 24px); }
+
+.organizer-card { width: min(720px, 100%); }
+.organizer-card label { display: block; margin: 10px 0 4px; }
+.organizer-card .row { flex-wrap: wrap; }
+.organizer-card .row input { flex: 1; min-width: 140px; }
+.organizer-card input[type=email] { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 10px 12px; width: 100%; }
+.organizer-shortcuts { display: flex; flex-wrap: wrap; gap: 5px; margin-block: 8px; }
+.organizer-card details, .organizer-card article { margin-block: 8px; }
+.organizer-card article { border: 1px solid var(--line); border-radius: 12px; padding: 10px; overflow-wrap: anywhere; }
+.organizer-card article p { margin: 5px 0; }
+.organizer-card textarea { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 8px; }
+.organizer-mail-body { white-space: pre-wrap; max-height: 42vh; overflow: auto; }
 
 /* One compact row, with secondary actions in the + menu. */
 .composer { display: flex; align-items: flex-end; gap: 2px; direction: ltr; padding: 6px; border: 1px solid var(--line); border-radius: 30px; min-height: 58px; }
