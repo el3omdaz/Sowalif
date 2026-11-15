@@ -15,7 +15,7 @@ import { readProjectDirectory, writeProjectDirectory } from './project-folder.js
 import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=29';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=27';
 import { planImage } from './image-plan.js?v=1';
-import { initOrganizer } from './organizer.js?v=30';
+import { initOrganizer } from './organizer.js?v=31';
 import { recommendModel } from './model-recommendation.js?v=1';
 import { reasoningLevels } from './reasoning.js?v=1';
 import { initMarket } from './market.js?v=2';

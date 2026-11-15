@@ -120,6 +120,12 @@ export function connectedAccounts({ googleToken, microsoftToken } = {}, request 
   }
 
   return {
+    async googleProfile() {
+      const url = withParams('https://www.googleapis.com/drive/v3/about', { fields: 'user(emailAddress,permissionId)' });
+      const { user } = await api('google', url);
+      if (!user?.permissionId || !user?.emailAddress) throw new Error('تعذّر تحديد حساب Google. أعد الربط.');
+      return { id: user.permissionId, email: user.emailAddress };
+    },
     async searchMail(provider, query = '', { limit, cursor, unreadOnly, attachmentsOnly, from, review } = {}) {
       const count = pageSize(limit);
       const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
