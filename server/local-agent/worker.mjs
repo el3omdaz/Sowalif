@@ -2,6 +2,8 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { runCodex } from './codex.mjs';
+import { runAntigravity } from './antigravity.mjs';
+import { runOpenCode } from './opencode.mjs';
 
 const input = createInterface({ input: process.stdin });
 const approvals = new Map();
@@ -10,7 +12,10 @@ const abortController = new AbortController();
 const emit = (type, data = {}) => process.stdout.write(JSON.stringify({ type, ...data }) + '\n');
 
 export async function runAgent(config, { send = emit, approve = askApproval } = {}) {
-  if (config.engine === 'codex') return runCodex(config, { send, approve, signal: abortController.signal });
+  const handlers = { send, approve, signal: abortController.signal };
+  if (config.engine === 'codex') return runCodex(config, handlers);
+  if (config.engine === 'antigravity') return runAntigravity(config, handlers);
+  if (config.engine === 'opencode') return runOpenCode(config, handlers);
   const key = String(config.key || '');
   const redact = value => String(value || '').replaceAll(key || '\0', '[key]').slice(0, 12000);
   const env = { ...process.env, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: key,

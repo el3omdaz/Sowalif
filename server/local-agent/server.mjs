@@ -9,8 +9,11 @@ import { validProjectPath, mergeProjectFiles } from '../../js/project.js?v=20';
 import { artifactFile, listArtifacts } from './artifacts.mjs';
 import { createFileService } from './files.mjs';
 import { createMarketFeed } from '../market-feed.mjs';
+import { CODING_ENGINES, codingEngineById } from '../../js/agent-engines.js?v=1';
 
-export const IMAGE = 'sowalif-coding-agent:1';
+export const IMAGE = 'sowalif-coding-agent:2';
+const LEGACY_IMAGE = 'sowalif-coding-agent:1';
+const LEGACY_ENGINES = ['claude', 'codex'];
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const json = (res, code, data) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
 const hash = id => createHash('sha256').update(String(id)).digest('hex').slice(0, 32);
@@ -36,15 +39,23 @@ async function command(binary, args) {
     child.on('close', () => clearTimeout(timeout));
   });
 }
-export async function dockerReady() {
-  try { await command('docker', ['image', 'inspect', IMAGE, '--format', '{{.Id}}']); return true; } catch { return false; }
+async function installedImage(engine) {
+  for (const image of LEGACY_ENGINES.includes(engine) ? [IMAGE, LEGACY_IMAGE] : [IMAGE]) {
+    try {
+      await command('docker', ['image', 'inspect', image, '--format', '{{.Id}}']);
+      return image;
+    } catch { /* Try the compatible older image if present. */ }
+  }
+  return false;
 }
-export function launchDocker({ workspace, sessions, config, emit, done }) {
+export async function dockerReady(engine = 'claude') { return Boolean(await installedImage(engine)); }
+
+export function launchDocker({ workspace, sessions, config, emit, done, image = IMAGE }) {
   const name = `sowalif-agent-${randomUUID()}`;
   const child = spawn('docker', ['run', '--rm', '-i', '--name', name, '--init', '--read-only',
     '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=256', '--memory=3g', '--cpus=2',
     '--tmpfs', '/tmp:rw,nosuid,size=256m', '--tmpfs', '/home/node:rw,nosuid,uid=1000,gid=1000,size=256m',
-    '--mount', `type=bind,source=${workspace},target=/workspace`, '--mount', `type=bind,source=${sessions},target=/sessions`, IMAGE],
+    '--mount', `type=bind,source=${workspace},target=/workspace`, '--mount', `type=bind,source=${sessions},target=/sessions`, image],
     { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const lines = createInterface({ input: child.stdout });
   let finished = false;
@@ -105,7 +116,7 @@ export async function uploadPiapi(input, request = fetch) {
   return { url: result.data.url };
 }
 
-export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-agent'), launch = launchDocker, ready = dockerReady, upload = uploadPiapi,
+export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-agent'), launch = launchDocker, ready = installedImage, upload = uploadPiapi,
   market = createMarketFeed({ dataDir }) } = {}) {
   const csrf = randomBytes(32).toString('hex');
   const files = createFileService(resolve(dataDir));
@@ -170,7 +181,11 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           }
           return json(res, 404, { error: 'Not found' });
         }
-        if (url.pathname === '/api/agent/status' && req.method === 'GET') return json(res, 200, { local: true, ready: await ready(), csrf, engines: ['claude', 'codex'] });
+        if (url.pathname === '/api/agent/status' && req.method === 'GET') {
+          const image = await ready('claude');
+          const engines = image === LEGACY_IMAGE ? LEGACY_ENGINES : image ? Object.keys(CODING_ENGINES) : [];
+          return json(res, 200, { local: true, ready: Boolean(image), csrf, engines });
+        }
         if (url.pathname === '/api/agent/link' && req.method === 'POST') {
           const { projectId, directory } = await body(req);
           if (active.size || starting) throw failure('انتظر انتهاء التنفيذ أولاً', 409);
@@ -224,7 +239,10 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (url.pathname === '/api/agent/project' && req.method === 'GET') {
           const id = url.searchParams.get('id');
           const p = await project(id);
-          if (active.has(id)) return json(res, 200, { activeRun: active.get(id) });
+          if (active.has(id)) {
+            const activeRun = active.get(id);
+            return json(res, 200, { activeRun, activeEngine: runs.get(activeRun)?.engine });
+          }
           if (p.state.directory) return json(res, 200, { directory: p.state.directory, revision: p.state.revision, artifacts: await listArtifacts(p.workspace) });
           return json(res, 200, { revision: p.state.revision, files: await snapshot(p.workspace), artifacts: await listArtifacts(p.workspace) });
         }
@@ -241,9 +259,8 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (url.pathname === '/api/agent/runs' && req.method === 'POST') {
           const input = await body(req);
           if (active.size || starting) throw failure('يوجد تنفيذ جارٍ؛ انتظر أو أوقفه أولاً', 409);
-          if (!['claude', 'codex'].includes(input.engine) || !['openrouter', 'anthropic', 'openai'].includes(input.provider)) throw failure('اختر المحرك ومزوّده');
-          if (input.engine === 'codex' && input.provider !== 'openai') throw failure('Codex يستخدم مفتاح OpenAI في هذا الربط');
-          if (input.engine === 'claude' && input.provider === 'openai') throw failure('Claude يحتاج OpenRouter أو Anthropic');
+          const engine = codingEngineById(input.engine);
+          if (!engine?.providers.includes(input.provider)) throw failure('اختر مزوّد محرك البرمجة الصحيح');
           if (typeof input.key !== 'string' || input.key.length < 8 || input.key.length > 512) throw failure('أدخل مفتاح المزوّد');
           if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 20_000) throw failure('اكتب طلباً ضمن 20 ألف حرف');
           if (input.model && (typeof input.model !== 'string' || input.model.length > 150 || /[\r\n\0]/.test(input.model))) throw failure('معرّف نموذج غير صالح');
@@ -251,8 +268,11 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           let files = [];
           starting = true;
           let p;
+          let image;
+          const model = input.model || engine.defaultModel;
           try {
-            if (!await ready()) throw failure('بيئة Docker غير جاهزة؛ شغّل إعداد المحرك أولاً', 503);
+            image = await ready(input.engine);
+            if (!image) throw failure('بيئة Docker لهذا المحرك غير جاهزة؛ شغّل إعداد المحرك أولاً', 503);
             p = await project(input.projectId);
             if (Boolean(input.direct) !== Boolean(p.state.directory)) throw failure('أعد ربط مجلد المشروع من قسم الشغل.', 409);
             if (p.state.directory && await realpath(p.state.directory) !== p.state.directory) throw failure('تغيّر مسار المجلد. اربطه من جديد.');
@@ -269,7 +289,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             }
           } finally { starting = false; }
           const id = randomUUID();
-          const sessionKey = `${input.engine}:${input.provider}:${input.model || 'default'}`;
+          const sessionKey = `${input.engine}:${input.provider}:${model || 'default'}`;
           const run = { id, projectId: input.projectId, engine: input.engine, state: 'running', text: '', events: [], approvals: [], before: files, revision: p.state.revision, sessionKey, createdAt: Date.now() };
           runs.set(id, run); active.set(input.projectId, id);
           const clean = value => String(value || '').replaceAll(input.key, '[key]').slice(0, 12000);
@@ -308,8 +328,8 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           };
           const context = 'You are working in Sowalif. Work only in /workspace. Do not deploy or publish. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). You can also create real downloadable PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, ZIP and image files whenever the user asks, without requiring a special mode or toggle. Save final deliverables in /workspace/outputs/ with descriptive filenames; put generation scripts outside outputs. Python packages reportlab, docx, openpyxl, pptx, arabic_reshaper and bidi plus Noto Arabic fonts are preinstalled. Use proper RTL and Arabic shaping/fonts for Arabic documents. Verify generated files open correctly; never merely rename plain text to a binary extension. Excel formulas must be real formulas; clearly distinguish calculated/cached values if no calculation engine is available. The app automatically exposes outputs as download links; do not invent public URLs. Reply in the user language.\n\n' + input.prompt;
           try {
-            run.handle = launch({ workspace: p.workspace, sessions: p.sessions,
-              config: { engine: input.engine, provider: input.provider, key: input.key, model: input.model || undefined, prompt: context, budget: Math.max(.1, Math.min(10, Number(input.budget) || 2)), sessionId: p.state.sessions[sessionKey] }, emit, done });
+            run.handle = launch({ workspace: p.workspace, sessions: p.sessions, image: typeof image === 'string' ? image : IMAGE,
+              config: { engine: input.engine, provider: input.provider, key: input.key, model, prompt: context, budget: Math.max(.1, Math.min(10, Number(input.budget) || 2)), sessionId: p.state.sessions[sessionKey] }, emit, done });
           } catch (e) { await done(e); }
           return json(res, 202, { id });
         }

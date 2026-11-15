@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=29">
+  <link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
   <div id="app" class="app">
@@ -52,7 +52,7 @@
         <div class="project-actions">
           <button id="projectLinkTop" class="btn ghost hidden" type="button">ربط مجلد الجهاز</button>
           <button id="openProject" class="btn ghost" type="button">ملفات المشروع</button>
-          <select id="codingEngine" aria-label="محرك البرمجة"><option value="off">اقتراحات فقط</option><option value="claude">Claude Code</option><option value="codex">Codex</option></select>
+          <select id="codingEngine" aria-label="محرك البرمجة"><option value="off">اقتراحات فقط</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="antigravity">Google Antigravity</option><option value="opencode">OpenCode</option></select>
           <button id="codingSetup" class="btn ghost" type="button">ربط المحرك</button>
           <button id="agentGit" class="btn ghost hidden" type="button">GitHub</button>
         </div>
@@ -126,6 +126,7 @@
     <div class="sheet-card market-sheet">
       <div class="sheet-head"><h3 id="marketTitle">السوق والتنبيهات</h3><button class="icon-btn" type="button" data-close aria-label="إغلاق">✕</button></div>
       <div id="marketAccess" class="market-access row">
+        <input id="marketEndpoint" type="url" dir="ltr" autocomplete="off" placeholder="عنوان خادم السوق (اختياري)" aria-label="عنوان خادم السوق">
         <input id="marketToken" type="password" autocomplete="off" placeholder="رمز الوصول لخدمة السوق" aria-label="رمز الوصول لخدمة السوق">
         <button id="marketConnect" class="btn ghost" type="button">ربط</button>
         <button id="marketForget" class="btn ghost" type="button">مسح الرمز</button>
@@ -334,20 +335,20 @@
           </div>
         </details>
         <details class="settings-group" name="settings-sections" data-settings="agent">
-          <summary><span><strong>محرك البرمجة على الكمبيوتر</strong><small>Claude Code أو Codex</small></span></summary>
+          <summary><span><strong>محرك البرمجة على الكمبيوتر</strong><small>النموذج والمزوّد ومفتاح التشغيل</small></span></summary>
           <div class="settings-body">
             <p id="codingStatus" class="muted" role="status"></p>
             <a href="http://127.0.0.1:4781/" class="btn ghost" target="_blank" rel="noopener noreferrer">فتح نسخة الكمبيوتر ↗</a>
-            <label for="codingProvider">مزوّد محرك البرمجة</label><select id="codingProvider"><option value="openrouter">OpenRouter</option><option value="anthropic">Anthropic API</option><option value="openai" disabled>OpenAI API — Codex</option></select>
+            <label for="codingProvider">مزوّد محرك البرمجة</label><select id="codingProvider"><option value="openrouter">OpenRouter</option><option value="anthropic">Anthropic API</option><option value="openai">OpenAI API</option><option value="google">Gemini API</option></select>
             <p id="codingKeyHint" class="muted"></p>
             <input id="codingKey" type="password" dir="ltr" autocomplete="off" aria-label="مفتاح محرك البرمجة" placeholder="مفتاح API">
             <button id="saveCodingKey" class="btn primary">حفظ المفتاح</button>
             <button id="forgetCodingKey" class="btn ghost">مسح مفتاح المحرك</button>
             <details class="settings-subgroup"><summary>خيارات المحرك</summary><div class="settings-subbody">
             <label for="codingModel">معرّف النموذج · اختياري</label><input id="codingModel" type="text" dir="ltr" placeholder="اتركه فارغاً للاختيار التلقائي" maxlength="150">
-            <label for="codingBudget">حد التكلفة التقديري لطلب Claude · بالدولار</label><input id="codingBudget" type="number" min="0.1" max="10" step="0.1" value="2">
-            <p class="muted">حد Claude تقديري. مهلة التنفيذ 20 دقيقة. Codex يستخدم مفتاح OpenAI API مستقلاً.</p></div></details>
-            <p class="muted">المفاتيح محلية. التنفيذ داخل نسخة معزولة في Docker، ثم تراجع التغييرات وتحفظها في مجلدك.</p>
+            <div id="codingBudgetFields"><label for="codingBudget">حد التكلفة التقديري لطلب Claude · بالدولار</label><input id="codingBudget" type="number" min="0.1" max="10" step="0.1" value="2"></div>
+            <p class="muted">مهلة التنفيذ 20 دقيقة. تكلفة الطلب حسب مزوّد المحرك.</p></div></details>
+            <p class="muted">المفاتيح محلية. يعمل المحرك في Docker داخل مجلد المشروع المرتبط أو نسخة سوالف.</p>
           </div>
         </details>
         <details class="settings-group" name="settings-sections" data-settings="models">
@@ -489,6 +490,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=31"></script>
+  <script type="module" src="js/app.js?v=33"></script>
 </body>
 </html>

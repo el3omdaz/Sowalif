@@ -2,7 +2,7 @@
 export const profileId = (() => { try { return localStorage.getItem('sc.cloudProfile') || ''; } catch { return ''; } })();
 const DB_NAME = profileId ? `smart-chat-cloud-${profileId}` : 'smart-chat';
 const personalKeys = new Set(['customInstructions', 'personalNotes', 'memoryEnabled', 'sharedRules', 'cloudSyncState']);
-const accountKeys = new Set([...personalKeys, 'kieKey', 'openRouterKey', 'piapiKey', 'codingOpenAIKey', 'codingAnthropicKey']);
+const accountKeys = new Set([...personalKeys, 'kieKey', 'openRouterKey', 'piapiKey', 'codingOpenAIKey', 'codingAnthropicKey', 'codingGeminiKey']);
 let changeListener = () => {};
 export const onLocalChange = listener => { changeListener = listener; };
 const changed = async (id, deleted = false) => { try { await changeListener({ id, deleted }); } catch { /* Local saving remains available offline. */ } };
@@ -231,7 +231,7 @@ export async function importDeviceData() {
       for (const id of blobIds(chat)) { const blob = await read('blobs', id); if (blob instanceof Blob) await tx('blobs', 'readwrite', store => store.put(blob, id)); }
       await saveChat(chat, false, false); count++;
     }
-    const { mergePersonalization } = await import('./memory.js?v=21');
+    const { mergePersonalization } = await import('./memory.js?v=22');
     const readOld = (key, fallback) => { try { return JSON.parse(localStorage.getItem('sc.' + key)) ?? fallback; } catch { return fallback; } };
     mergePersonalization({ instructions: readOld('customInstructions', ''), notes: readOld('personalNotes', ''), enabled: readOld('memoryEnabled', true), rules: readOld('sharedRules', []) });
     return count;
@@ -248,7 +248,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=21');
+  const { readPersonalization } = await import('./memory.js?v=22');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -275,7 +275,7 @@ export async function importAll(file) {
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=21');
+    const { mergePersonalization } = await import('./memory.js?v=22');
     mergePersonalization(data.personalization);
   }
   return n;

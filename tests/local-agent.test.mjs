@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLocalServer, uploadPiapi } from '../server/local-agent/server.mjs';
+import { createLocalServer, IMAGE, uploadPiapi } from '../server/local-agent/server.mjs';
 
 test('PiAPI local upload targets only the official host and forwards only its key', async () => {
   const input = { key: 'fake-piapi-key', fileName: 'reference-1.png', data: 'data:image/png;base64,AA==' };
@@ -89,4 +89,54 @@ test('local runner guards origins, isolates projects, preserves results and neve
   } while (Date.now() < deadline);
   assert.equal(stopped.state, 'stopped');
   assert.equal(started, 2);
+});
+
+test('the new engine image supports Carbon and Kimi, with legacy fallback for Codex and Claude', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'sowalif-modern-engines-'));
+  let upgraded = false;
+  const launched = [];
+  const legacyImage = 'sowalif-coding-agent:1';
+  const server = createLocalServer({ dataDir,
+    ready: async engine => upgraded ? IMAGE : ['claude', 'codex'].includes(engine) && legacyImage,
+    launch(options) {
+      launched.push(options);
+      return { send() {}, stop() {} };
+    },
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(dataDir, { recursive: true, force: true }); });
+  const status = async () => (await fetch(origin + '/api/agent/status')).json();
+  const before = await status();
+  assert.deepEqual(before.engines, ['claude', 'codex']);
+  const post = (engine, provider) => fetch(origin + '/api/agent/runs', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: origin, 'X-Sowalif-CSRF': before.csrf },
+    body: JSON.stringify({ engine, provider, projectId: engine, prompt: 'Build the app', key: 'fixture-key', files: [] }),
+  });
+  assert.equal((await post('antigravity', 'google')).status, 503);
+  assert.equal((await post('codex', 'openai')).status, 202);
+  assert.equal(launched.at(-1).image, legacyImage);
+  launched.at(-1).emit({ type: 'result' });
+  await launched.at(-1).done(null);
+
+  upgraded = true;
+  assert.deepEqual((await status()).engines, ['claude', 'codex', 'antigravity', 'opencode']);
+  assert.equal((await post('antigravity', 'openrouter')).status, 400);
+  assert.equal((await post('opencode', 'google')).status, 400);
+  for (const [engine, provider, model] of [
+    ['antigravity', 'google', 'gemini-4-carbon-high'], ['opencode', 'openrouter', 'openrouter/moonshotai/kimi-k3.1-pro'],
+  ]) {
+    const response = await post(engine, provider);
+    assert.equal(response.status, 202);
+    const { id } = await response.json();
+    const options = launched.at(-1);
+    assert.equal(options.image, IMAGE);
+    assert.equal(options.config.model, model);
+    const active = await (await fetch(`${origin}/api/agent/project?id=${engine}`)).json();
+    assert.deepEqual(active, { activeRun: id, activeEngine: engine });
+    options.emit({ type: 'delta', text: 'Implemented' });
+    options.emit({ type: 'result' });
+    await options.done(null);
+    assert.equal((await (await fetch(`${origin}/api/agent/runs/${id}`)).json()).state, 'completed');
+  }
 });

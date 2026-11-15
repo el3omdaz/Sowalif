@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 
 const storage = new Map([['sc.openRouterKey', '"or-test-key"'], ['sc.kieKey', '"kie-test-key"']]);
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
-const { runModel, diagnoseModels } = await import('../js/kie.js?v=21');
-const { checkOpenRouterKey, refreshOpenRouterModels } = await import('../js/openrouter.js?v=21');
-const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=25');
+const { runModel, diagnoseModels } = await import('../js/kie.js?v=22');
+const { checkOpenRouterKey, refreshOpenRouterModels } = await import('../js/openrouter.js?v=22');
+const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=26');
 const { reasoningLevels } = await import('../js/reasoning.js?v=1');
 const opts = { system: 'Test', messages: [{ role: 'user', text: 'مرحبا' }] };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -147,7 +147,7 @@ test('diagnostics stays on selected provider', async () => {
 });
 
 test('recorded speech conversion routes directly to OpenRouter with no kie.ai upload', async () => {
-  const { transcribe } = await import('../js/chat.js?v=28');
+  const { transcribe } = await import('../js/chat.js?v=29');
   globalThis.FileReader = class {
     readAsDataURL(blob) {
       blob.arrayBuffer().then((bytes) => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString('base64')}`; this.onload(); });

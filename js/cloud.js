@@ -1,7 +1,7 @@
 import { createClient } from '../vendor/supabase.js?v=20';
 import { CLOUD } from './cloud-config.js?v=25';
-import * as db from './db.js?v=21';
-import { readPersonalization } from './memory.js?v=21';
+import * as db from './db.js?v=22';
+import { readPersonalization } from './memory.js?v=22';
 import { cloudChat, cloudMemory } from './cloud-payload.js?v=21';
 
 export const cloudConfirmationUrl = () => new URL('?confirm=1', CLOUD.siteUrl).href;

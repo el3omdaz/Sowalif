@@ -178,8 +178,16 @@ export function createMarketService({
     };
     try {
       if (!['status', 'events', 'article', 'config', 'refresh', 'subscription'].includes(route)) throw fault(404, 'مسار مراقبة السوق غير موجود.');
-      if (!authMatches(req.headers.authorization, expected)) throw fault(401, 'رمز الوصول لمراقبة السوق غير صالح.');
       const method = ['status', 'events', 'article'].includes(route) ? 'GET' : 'POST';
+      res.setHeader('Vary', 'Origin');
+      if (req.headers.origin === origin) res.setHeader('Access-Control-Allow-Origin', origin);
+      if (req.method === 'OPTIONS') {
+        if (req.headers.origin !== origin || req.headers['access-control-request-method'] !== method) throw fault(403, 'مصدر الطلب غير مصرح به.');
+        res.writeHead(204, { 'Access-Control-Allow-Methods': method, 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' });
+        res.end();
+        return;
+      }
+      if (!authMatches(req.headers.authorization, expected)) throw fault(401, 'رمز الوصول لمراقبة السوق غير صالح.');
       if (req.method !== method) throw fault(405, 'طريقة الطلب غير مدعومة.');
       if ((method === 'POST' || req.headers.origin) && req.headers.origin !== origin) throw fault(403, 'مصدر الطلب غير مصرح به.');
 

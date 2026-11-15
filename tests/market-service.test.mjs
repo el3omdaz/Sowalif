@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import vm from 'node:vm';
 import { createMarketService } from '../server/market-service.mjs';
 
 const origin = 'https://sowalif.example';
@@ -49,7 +50,7 @@ async function launch(t, { dataDir, ...options } = {}) {
     headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { Origin: origin, 'Content-Type': 'application/json' }), ...moreHeaders },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { request, notices, close, dataDir };
+  return { request, notices, close, dataDir, base };
 }
 
 test('only authorized same-origin requests can read or change market data', async (t) => {
@@ -69,6 +70,41 @@ test('only authorized same-origin requests can read or change market data', asyn
   assert.deepEqual(await (await request(`article?id=${eventId}`)).json(), { id: eventId, text: 'Source article' });
   assert.deepEqual(await (await request('refresh', {})).json(), { refreshed: 1, pushKey: null, analysisEnabled: false });
   assert.equal((await request('subscription', { subscription: subscription('test'), enabled: true })).status, 503);
+});
+
+test('a separate HTTPS gateway exposes only the configured app origin', async (t) => {
+  const { base, request } = await launch(t);
+  const preflight = (Origin) => fetch(base + 'config', { method: 'OPTIONS', headers: { Origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' } });
+  const response = await preflight(origin);
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get('access-control-allow-origin'), origin);
+  assert.equal(response.headers.get('access-control-allow-headers'), 'Authorization, Content-Type');
+  const denied = await preflight('https://different.example');
+  assert.equal(denied.status, 403);
+  assert.equal(denied.headers.get('access-control-allow-origin'), null);
+  const status = await request('status', undefined, { Origin: origin });
+  assert.equal(status.headers.get('access-control-allow-origin'), origin);
+  assert.equal(status.status, 200);
+});
+
+test('market notifications put the colored asset first and open the selected event', async () => {
+  let notification, opened, settled;
+  const listeners = new Map();
+  const self = {
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    registration: { scope: `${origin}/Sowalif/`, async showNotification(title, options) { notification = { title, options }; } },
+    clients: { async matchAll() { return []; }, async openWindow(url) { opened = url; } },
+  };
+  vm.runInNewContext(await readFile(new URL('../sw.js', import.meta.url), 'utf8'), { self, URL });
+  const waitUntil = value => { settled = value; };
+  const payload = { type: 'market', id: eventId, asset: 'XAU/USD', direction: 'negative', title: 'Rate decision' };
+  listeners.get('push')({ data: { json: () => payload }, waitUntil });
+  await settled;
+  assert.equal(notification.title, '🔴 XAU/USD');
+  assert.equal(notification.options.body, 'Rate decision');
+  listeners.get('notificationclick')({ notification: { data: notification.options.data, close() {} }, waitUntil });
+  await settled;
+  assert.equal(opened, `${origin}/Sowalif/?market=${eventId}`);
 });
 
 test('automatic analysis is stored and opposite directions get distinct notifications', async (t) => {

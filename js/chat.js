@@ -1,12 +1,12 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=21';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=25';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=21';
-import { preparePersonalContext } from './memory.js?v=21';
-import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=21';
-import { resolveReferences } from './media-references.js?v=26';
-import { mediaProvider, kieMediaSpec } from './media.js?v=21';
-import { withMediaCallback } from './media-push.js?v=21';
+import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=22';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=26';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=22';
+import { preparePersonalContext } from './memory.js?v=22';
+import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=22';
+import { resolveReferences } from './media-references.js?v=27';
+import { mediaProvider, kieMediaSpec } from './media.js?v=22';
+import { withMediaCallback } from './media-push.js?v=22';
 import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=20';
 import { PROMPT_STUDIO_SYSTEM, extractImagePrompt } from './prompt-studio.js?v=20';
 import { zipText } from './zip-text.js?v=28';

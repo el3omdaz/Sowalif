@@ -1,18 +1,24 @@
-import { settings, saveChat, saveProject, profileId } from './db.js?v=21';
+import { settings, saveChat, saveProject, profileId } from './db.js?v=22';
 import { mergeProjectFiles } from './project.js?v=20';
-import { preparePersonalContext } from './memory.js?v=21';
-import { readAttachmentDocuments } from './chat.js?v=28';
+import { preparePersonalContext } from './memory.js?v=22';
+import { readAttachmentDocuments } from './chat.js?v=29';
 import { selectDocumentContext } from './docs-context.js?v=1';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=1';
 
 let csrf = '';
 const projectId = chat => profileId ? `${profileId}-${chat.id}` : chat.id;
 export const localAgentOrigin = () => ['127.0.0.1', 'localhost'].includes(location.hostname) && location.port === '4781';
-export const agentEngine = () => settings.get('codingEngine', 'off');
+export const agentEngine = () => {
+  const saved = settings.get('codingEngine', 'off');
+  return codingEngineById(saved) ? saved : 'off';
+};
 export function agentCredentials() {
   const engine = agentEngine();
-  const provider = engine === 'codex' ? 'openai' : settings.get('codingProvider', 'openrouter');
-  const keyName = provider === 'openai' ? 'codingOpenAIKey' : provider === 'anthropic' ? 'codingAnthropicKey' : 'openRouterKey';
-  return { engine, provider, key: settings.get(keyName, ''), keyName, model: settings.get(engine === 'codex' ? 'codingCodexModel' : 'codingClaudeModel', '') };
+  const spec = codingEngineById(engine) || CODING_ENGINES.claude;
+  const preferred = settings.get('codingProvider', 'openrouter');
+  const provider = spec.providers.includes(preferred) ? preferred : spec.providers[0];
+  const keyName = CODING_PROVIDERS[provider].key;
+  return { engine, provider, key: settings.get(keyName, ''), keyName, model: settings.get(spec.modelSetting, '') || spec.defaultModel || '' };
 }
 async function api(path, data, signal) {
   if (!localAgentOrigin()) throw new Error('افتح نسخة الكمبيوتر: http://127.0.0.1:4781');
@@ -75,7 +81,7 @@ export async function collectAgentRun(chat, reply, emit, signal) {
         emit('status', { text: '' });
         return reply;
       }
-      emit('status', { text: run.approvals.length ? 'بانتظار موافقتك على أمر داخل المشروع…' : `يعمل محرك ${reply.agentEngine === 'codex' ? 'Codex' : 'Claude Code'} على الكمبيوتر…` });
+      emit('status', { text: run.approvals.length ? 'بانتظار موافقتك على أمر داخل المشروع…' : `يعمل ${codingEngineName(reply.agentEngine)} على الكمبيوتر…` });
       await pause();
     }
     await api(`runs/${encodeURIComponent(reply.agentRunId)}/stop`, {}).catch(() => {});
@@ -98,6 +104,7 @@ export async function respondLocal(chat, emit, signal, { research } = {}) {
     const status = await localStatus();
     if (!status.ready) throw new Error('بيئة المحرك غير جاهزة؛ شغّل npm run agent:setup على الكمبيوتر');
     const config = agentCredentials();
+    if (!status.engines?.includes(config.engine)) throw new Error(`جهّز ${codingEngineName(config.engine)} باستخدام npm run agent:setup وأعد تشغيل نسخة الكمبيوتر.`);
     if (!config.key) throw new Error('أضف مفتاح محرك البرمجة في الإعدادات');
     const personal = await preparePersonalContext(chat, user.text || '');
     if (user.files?.some(file => file.kind !== 'doc')) throw new Error('استخدم قراءة الصورة في المحادثة أولًا، ثم اطلب التنفيذ بالاستناد إلى النص الناتج.');

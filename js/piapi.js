@@ -1,5 +1,5 @@
 // Independent media provider: never uses or forwards chat-provider credentials.
-import { settings } from './db.js?v=21';
+import { settings } from './db.js?v=22';
 
 export const IMAGE_MODELS = [
   { id: 'auto', name: 'تلقائي — Flux Schnell / Kontext' },

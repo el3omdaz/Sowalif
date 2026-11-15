@@ -1,6 +1,6 @@
-import { settings } from './db.js?v=21';
-import { readSSE } from './kie.js?v=21';
-import { registerOpenRouterModels } from './models.js?v=25';
+import { settings } from './db.js?v=22';
+import { readSSE } from './kie.js?v=22';
+import { registerOpenRouterModels } from './models.js?v=26';
 import { reasoningEffort } from './reasoning.js?v=1';
 
 const BASE = 'https://openrouter.ai/api/v1';

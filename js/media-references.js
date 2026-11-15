@@ -1,6 +1,6 @@
-import { settings, getBlob, profileId } from './db.js?v=21';
-import { uploadFile } from './kie.js?v=21';
-import { uploadCloudFile, signCloudFile } from './cloud.js?v=26';
+import { settings, getBlob, profileId } from './db.js?v=22';
+import { uploadFile } from './kie.js?v=22';
+import { uploadCloudFile, signCloudFile } from './cloud.js?v=27';
 
 const dataUrl = blob => new Promise((resolve, reject) => {
   const reader = new FileReader();

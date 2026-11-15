@@ -8,6 +8,7 @@ import vm from 'node:vm';
 import { applyProjectProposal } from '../js/project.js?v=20';
 import { writeProjectDirectory } from '../js/project-folder.js?v=20';
 import { reasoningLevels } from '../js/reasoning.js?v=1';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from '../js/agent-engines.js?v=1';
 
 function app({ navigator = {}, coarsePointer = false } = {}) {
   const nodes = new Map();
@@ -43,6 +44,7 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
     reasoningLevels,
     Option: class { constructor(text, value) { Object.assign(this, { text, value }); } },
     agentCredentials: () => ({ engine: 'off', provider: 'openrouter', key: '', model: '' }),
+    CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName,
     localAgentOrigin: () => false,
     fitViewport: () => {},
     readPersonalization: () => ({ instructions: '', notes: '', enabled: true, rules: [] }),

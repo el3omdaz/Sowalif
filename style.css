@@ -462,7 +462,7 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 .model-advice { margin: 0 0 12px; padding: 9px 12px; border-inline-start: 2px solid var(--line); color: var(--muted); font-size: 13px; }
 .model-advice strong, .model-advice span { display: block; }
 .model-advice strong { color: var(--text); }
-.market-sheet { max-width: 720px; }
+.market-sheet { width: min(720px, 100%); }
 .market-sheet :is(form, .market-access) { margin-block: 8px; }
 .market-access input { flex: 1 1 200px; min-width: 0; }
 .market-actions { margin-block: 8px; flex-wrap: wrap; }
@@ -471,16 +471,17 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 .market-quote small, .market-event small { color: var(--muted); }
 .market-events { display: grid; gap: 10px; margin-block: 12px; }
 .market-event { border: 1px solid var(--line); border-radius: 14px; overflow-wrap: anywhere; }
-.market-event > summary { display: grid; gap: 4px; padding: 12px; cursor: pointer; }
-.market-event > summary::after { content: '›'; justify-self: end; grid-row: 1; transform: rotate(90deg); }
+.market-event > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px; cursor: pointer; }
+.market-event > summary > * { grid-column: 1; }
+.market-event > summary::after { content: '›'; grid-area: 1 / 2; align-self: center; transform: rotate(90deg); }
 .market-event[open] > summary::after { transform: rotate(-90deg); }
-.market-assets { font-size: 25px; font-weight: 850; justify-self: start; padding-inline-end: 22px; }
-.market-assets.positive, .market-direction.positive { color: #187547; }
-.market-assets.negative, .market-direction.negative { color: #b72e38; }
-.market-assets.neutral, .market-direction.neutral { color: var(--muted); }
+.market-assets { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 25px; font-weight: 850; justify-self: start; }
+.market-symbol.positive, .market-direction.positive { color: #187547; }
+.market-symbol.negative, .market-direction.negative { color: #b72e38; }
+.market-symbol.neutral, .market-direction.neutral { color: var(--muted); }
 @media (prefers-color-scheme: dark) {
-  .market-assets.positive, .market-direction.positive { color: #6bd99c; }
-  .market-assets.negative, .market-direction.negative { color: #ff8b96; }
+  .market-symbol.positive, .market-direction.positive { color: #6bd99c; }
+  .market-symbol.negative, .market-direction.negative { color: #ff8b96; }
 }
 .market-direction { font-size: 13px; }
 .market-event-body { padding: 0 12px 12px; }

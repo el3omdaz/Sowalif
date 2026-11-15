@@ -5,9 +5,9 @@ const local = new Map();
 globalThis.localStorage = { getItem: key => local.get(key) ?? null, setItem: (key, value) => local.set(key, value), removeItem: key => local.delete(key) };
 globalThis.indexedDB = new IDBFactory();
 globalThis.location = { hostname: 'example.test', port: '' };
-const { settings, putBlob } = await import('../js/db.js?v=21');
-const { resolveReferences } = await import('../js/media-references.js?v=26');
-const { mediaSpec, createMedia } = await import('../js/piapi.js?v=21');
+const { settings, putBlob } = await import('../js/db.js?v=22');
+const { resolveReferences } = await import('../js/media-references.js?v=27');
+const { mediaSpec, createMedia } = await import('../js/piapi.js?v=22');
 
 test('all uploaded references reach Veo and upload credentials stay separate from generation credentials', async () => {
   const files = await Promise.all(['person', 'bag'].map(async name => ({ kind: 'image', name, blob: await putBlob(new Blob([name], { type: 'image/png' })) })));

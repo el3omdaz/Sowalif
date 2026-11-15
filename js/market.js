@@ -4,6 +4,11 @@ const displayTime = value => Number.isFinite(Date.parse(value)) ? times.format(n
 const safeLink = value => {
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.href : ''; } catch { return ''; }
 };
+function marketOrigin(value) {
+  if (!safeLink(value)) return '';
+  const url = new URL(value);
+  return url.pathname === '/' && !url.search && !url.hash ? url.origin : '';
+}
 const element = (tag, value, className) => {
   const node = document.createElement(tag);
   if (value) node.textContent = value;
@@ -18,8 +23,11 @@ export function initMarket({ local, analyze }) {
   const selectedEvent = new URL(location.href).searchParams.get('market');
   const filter = $('marketFilter');
   const apiKey = $('marketToken');
+  const endpointField = $('marketEndpoint');
   let csrf = '';
   let token = local ? '' : localStorage.getItem('sowalifMarketToken') || '';
+  let endpoint = local ? '' : marketOrigin(localStorage.getItem('sowalifMarketEndpoint'));
+  endpointField.value = endpoint;
   let data, openId = selectedEvent;
   let working = false;
   const cachedAnalysis = new Map();
@@ -28,9 +36,11 @@ export function initMarket({ local, analyze }) {
 
   async function api(route, body) {
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    if (body !== undefined) Object.assign(headers, { 'Content-Type': 'application/json', 'X-Sowalif-CSRF': csrf });
-    const response = await fetch(`/api/market/${route}`, { method: body === undefined ? 'GET' : 'POST', headers,
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), cache: 'no-store', signal: AbortSignal.timeout(30000) });
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (body !== undefined && csrf) headers['X-Sowalif-CSRF'] = csrf;
+    const response = await fetch(`${endpoint}/api/market/${route}`, { method: body === undefined ? 'GET' : 'POST', headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), cache: 'no-store', credentials: 'omit', redirect: 'error',
+      referrerPolicy: 'same-origin', signal: AbortSignal.timeout(30000) });
     if (!response.headers.get('content-type')?.includes('application/json') || response.status === 404 && route === 'status') {
       throw new Error(local ? 'أعد تشغيل نسخة سوالف للكمبيوتر لتفعيل السوق.' : 'خدمة السوق تحتاج تشغيلًا على خادم سوالف. افتح نسخة الكمبيوتر لمتابعة السوق محليًا.');
     }
@@ -84,8 +94,15 @@ export function initMarket({ local, analyze }) {
     const summary = element('summary');
     const asset = filter.value || event.assets[0];
     const direction = ['positive', 'negative'].includes(event.direction) ? event.direction : 'neutral';
-    const heading = element('strong', event.assets.join(' · '), `market-assets ${direction}`);
-    heading.dir = 'ltr';
+    const heading = element('strong', '', 'market-assets');
+    for (const symbol of event.assets) {
+      const assessment = event.analyses?.[symbol];
+      const tone = assessment && Object.hasOwn(tones, assessment.direction) ? assessment.direction : direction;
+      const label = element('bdi', symbol, `market-symbol ${tone}`);
+      label.title = tones[tone];
+      label.setAttribute('aria-label', `${symbol} ${tones[tone]}`);
+      heading.append(label);
+    }
     summary.append(heading, element('span', tones[direction], `market-direction ${direction}`), element('span', event.title),
       element('small', [event.source, displayTime(event.scheduledAt || event.publishedAt || event.observedAt)].filter(Boolean).join(' · ')));
     const body = element('div', '', 'market-event-body');
@@ -153,12 +170,25 @@ export function initMarket({ local, analyze }) {
   $('openMarket').onclick = open;
   if (selectedEvent) void open();
   $('marketConnect').onclick = () => {
-    token = apiKey.value.trim();
+    if (working) return;
+    const raw = endpointField.value.trim();
+    const next = marketOrigin(raw);
+    if (raw && !next) {
+      notice.textContent = 'أدخل عنوان خادم يبدأ بـ https:// ويحتوي على النطاق فقط.';
+      return;
+    }
+    const secret = apiKey.value.trim() || (next === endpoint ? token : '');
+    if (!secret) { notice.textContent = 'أدخل رمز الوصول لخدمة السوق.'; return; }
+    csrf = '';
+    endpoint = next;
+    token = secret;
     apiKey.value = '';
+    localStorage.setItem('sowalifMarketEndpoint', endpoint);
     localStorage.setItem('sowalifMarketToken', token);
     void open();
   };
   $('marketForget').onclick = () => {
+    if (working) return;
     token = '';
     data = null;
     localStorage.removeItem('sowalifMarketToken');
@@ -188,6 +218,11 @@ export function initMarket({ local, analyze }) {
     const manager = registration?.pushManager;
     if (!manager || !data?.pushKey) throw new Error('الإشعارات تحتاج متصفحًا يدعمها. على الآيفون افتح سوالف من الشاشة الرئيسية.');
     let subscription = await manager.getSubscription();
+    const registeredKey = subscription?.options?.applicationServerKey;
+    if (enabled && registeredKey) {
+      const current = btoa(String.fromCharCode(...new Uint8Array(registeredKey))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      if (current !== data.pushKey.replace(/=+$/, '')) throw new Error('خادم السوق وإشعارات سوالف يحتاجان مفتاح الإشعارات نفسه على هذا الجهاز.');
+    }
     if (!subscription && enabled) subscription = await manager.subscribe({ userVisibleOnly: true, applicationServerKey: data.pushKey });
     if (subscription) await api('subscription', { enabled, subscription: subscription.toJSON() });
     if (enabled) localStorage.setItem('sowalifMarketPush', 'true');
