@@ -220,6 +220,9 @@
         <p id="organizerFileStatus" class="muted" role="status"></p>
       </div>
       <div id="organizerCloud" class="hidden">
+        <label id="organizerAccountRow" class="hidden"><span id="organizerAccountLabel">الحساب</span>
+          <select id="organizerAccount" aria-label="الحساب"></select>
+        </label>
         <div class="row"><button id="organizerConnect" class="btn ghost" type="button">ربط الحساب</button><button id="organizerDisconnect" class="btn ghost hidden" type="button">فصل الحساب</button><button id="organizerCompose" class="btn ghost hidden" type="button">رسالة جديدة</button></div>
         <details id="organizerConnectConfig"><summary>إعداد الاتصال</summary>
           <label for="organizerClient">معرّف تطبيق OAuth</label>
@@ -494,6 +497,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=33"></script>
+  <script type="module" src="js/app.js?v=35"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
-import { connectedAccounts, CONNECTED_SCOPES } from './connected-accounts.js?v=28';
-import { connectGoogle, connectMicrosoft, microsoftRedirectUri, prepareGoogleOAuth } from './account-oauth.js?v=28';
+import { connectedAccounts, CONNECTED_SCOPES } from './connected-accounts.js?v=30';
+import { connectGoogle, connectMicrosoft, microsoftRedirectUri, prepareGoogleOAuth } from './account-oauth.js?v=30';
 import { organizerIntent } from './organizer-intent.js?v=1';
 import { requestText } from './text-dialog.js?v=1';
 
@@ -31,7 +31,10 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   const linkForm = $('organizerLinkForm');
   const createForm = $('organizerCreateForm');
   const more = $('organizerMore');
-  const tokens = {};
+  const accounts = { google: new Map(), microsoft: new Map() };
+  const selection = { gmail: '', gdrive: '', outlook: '', onedrive: '' };
+  const accountSources = { google: ['gmail', 'gdrive'], microsoft: ['outlook', 'onedrive'] };
+  const accountSelect = $('organizerAccount');
   let csrf = '';
   let busy = false;
   let nextPage = null;
@@ -41,8 +44,9 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
 
   const mode = () => source.value === 'files' ? 'files' : ['gmail', 'outlook'].includes(source.value) ? 'mail' : 'drive';
   const provider = () => ['gmail', 'gdrive'].includes(source.value) ? 'google' : 'microsoft';
-  const tokenKey = () => provider() === 'google' ? 'googleToken' : 'microsoftToken';
-  const api = () => connectedAccounts(tokens);
+  const accountList = () => accounts[provider()];
+  const activeToken = () => accountList().get(selection[source.value])?.token;
+  const api = () => connectedAccounts({ [provider() + 'Token']: activeToken() });
   const visible = (item, show) => item.classList.toggle('hidden', !show);
 
   async function local(path, data) {
@@ -82,6 +86,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     if (busy) return;
     busy = true;
     source.disabled = true;
+    accountSelect.disabled = true;
     updateLocalControls();
     feedback.textContent = 'جاري التنفيذ…';
     try {
@@ -91,6 +96,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       feedback.textContent = error.message;
     } finally {
       source.disabled = false;
+      accountSelect.disabled = false;
       busy = false;
       updateLocalControls();
     }
@@ -139,8 +145,16 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   }
 
   function showConnection() {
-    const connected = Boolean(tokens[tokenKey()]);
-    visible($('organizerConnect'), !connected);
+    const name = provider() === 'google' ? 'Google' : 'Microsoft';
+    const list = accountList();
+    const connected = Boolean(activeToken());
+    visible($('organizerAccountRow'), list.size > 0);
+    $('organizerAccountLabel').textContent = 'حساب ' + name;
+    accountSelect.setAttribute('aria-label', 'حساب ' + name);
+    accountSelect.replaceChildren(...[...list.values()].map(account => new Option(account.email, account.id)));
+    accountSelect.value = selection[source.value];
+    $('organizerConnect').textContent = list.size ? 'إضافة حساب ' + name : 'ربط الحساب';
+    visible($('organizerConnect'), true);
     visible($('organizerDisconnect'), connected);
     visible($('organizerCompose'), connected && mode() === 'mail');
   }
@@ -183,7 +197,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
           : `سجّل تطبيق SPA في Microsoft Entra وأضف عنوان الرجوع ${microsoftRedirectUri()}.`;
       if (service === 'google') void prepareGoogleOAuth().catch(() => {});
       showConnection();
-      status.textContent = tokens[tokenKey()] ? 'الحساب متصل في هذه الجلسة.' : 'اربط حسابك للبحث.';
+      status.textContent = activeToken() ? 'الحساب متصل في هذه الجلسة.' : 'اربط حسابك للبحث.';
     }
   }
 
@@ -395,7 +409,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
         renderLocal(result);
         return;
       }
-      if (!tokens[tokenKey()]) throw new Error('اربط الحساب أولًا.');
+      if (!activeToken()) throw new Error('اربط الحساب أولًا.');
       const options = { limit: 25, cursor: append ? nextPage : undefined, attachmentsOnly: intent.attachmentsOnly,
         unreadOnly: intent.unreadOnly, from: intent.from, review: intent.review, parentId: intent.parentId };
       const method = kind === 'mail' ? 'searchMail' : 'searchDrive';
@@ -426,6 +440,11 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     source.focus();
   };
   source.onchange = showSource;
+  accountSelect.onchange = () => {
+    if (busy || !accountList().has(accountSelect.value)) return;
+    selection[source.value] = accountSelect.value;
+    showSource();
+  };
   roots.onchange = () => {
     localDirectory = '';
     clearResults();
@@ -551,8 +570,14 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     const which = provider();
     void action(async () => {
       const connect = which === 'google' ? connectGoogle : connectMicrosoft;
-      tokens[tokenKey()] = await connect(id, CONNECTED_SCOPES[which]);
+      const token = await connect(id, CONNECTED_SCOPES[which]);
+      const accountApi = connectedAccounts({ [which + 'Token']: token });
+      const account = await accountApi[which + 'Profile']();
+      accounts[which].set(account.id, { ...account, token });
+      selection[source.value] = account.id;
+      for (const key of accountSources[which]) selection[key] ||= account.id;
       settings.set(`organizerClient.${which}`, id);
+      showSource();
       $('organizerConnectConfig').open = false;
       showConnection();
       status.textContent = 'تم ربط الحساب لهذه الجلسة.';
@@ -560,7 +585,12 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   };
   $('organizerDisconnect').onclick = () => {
     if (busy) return;
-    delete tokens[tokenKey()];
+    const list = accountList();
+    const removed = selection[source.value];
+    list.delete(removed);
+    for (const key of accountSources[provider()]) {
+      if (selection[key] === removed) selection[key] = list.keys().next().value || '';
+    }
     showSource();
   };
   $('organizerCompose').onclick = () => {
@@ -570,7 +600,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   };
   $('organizerMessage').onsubmit = event => {
     event.preventDefault();
-    if (busy || !tokens[tokenKey()]) return;
+    if (busy || !activeToken()) return;
     const to = $('organizerTo').value.trim();
     const subject = $('organizerSubject').value.trim();
     const body = $('organizerBody').value.trim();

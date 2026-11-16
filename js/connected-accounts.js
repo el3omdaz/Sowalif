@@ -4,7 +4,7 @@ const GRAPH = 'https://graph.microsoft.com/v1.0/me';
 
 export const CONNECTED_SCOPES = Object.freeze({
   google: Object.freeze(['https://www.googleapis.com/auth/gmail.modify', 'https://www.googleapis.com/auth/drive']),
-  microsoft: Object.freeze(['https://graph.microsoft.com/Mail.ReadWrite', 'https://graph.microsoft.com/Mail.Send', 'https://graph.microsoft.com/Files.ReadWrite']),
+  microsoft: Object.freeze(['https://graph.microsoft.com/User.Read', 'https://graph.microsoft.com/Mail.ReadWrite', 'https://graph.microsoft.com/Mail.Send', 'https://graph.microsoft.com/Files.ReadWrite']),
 });
 
 function part(value) {
@@ -120,6 +120,18 @@ export function connectedAccounts({ googleToken, microsoftToken } = {}, request 
   }
 
   return {
+    async microsoftProfile() {
+      const user = await api('microsoft', withParams(GRAPH, { $select: 'id,mail,userPrincipalName,displayName' }));
+      const email = user.mail || user.userPrincipalName || user.displayName;
+      if (!user.id || !email) throw new Error('تعذّر تحديد حساب Microsoft. أعد الربط.');
+      return { id: user.id, email };
+    },
+    async googleProfile() {
+      const url = withParams('https://www.googleapis.com/drive/v3/about', { fields: 'user(emailAddress,permissionId)' });
+      const { user } = await api('google', url);
+      if (!user?.permissionId || !user?.emailAddress) throw new Error('تعذّر تحديد حساب Google. أعد الربط.');
+      return { id: user.permissionId, email: user.emailAddress };
+    },
     async searchMail(provider, query = '', { limit, cursor, unreadOnly, attachmentsOnly, from, review } = {}) {
       const count = pageSize(limit);
       const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
