@@ -7,7 +7,8 @@ import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } 
 
 let csrf = '';
 const projectId = chat => profileId ? `${profileId}-${chat.id}` : chat.id;
-export const localAgentOrigin = () => ['127.0.0.1', 'localhost'].includes(location.hostname) && location.port === '4781';
+export const localAgentOrigin = () => ['127.0.0.1', 'localhost'].includes(location.hostname) &&
+  (location.port === '4781' || (location.port === '4782' && Boolean(globalThis.sowalifDesktop)));
 export const agentEngine = () => {
   const saved = settings.get('codingEngine', 'off');
   return codingEngineById(saved) ? saved : 'off';

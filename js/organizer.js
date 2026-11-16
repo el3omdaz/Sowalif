@@ -1,6 +1,7 @@
 import { connectedAccounts, CONNECTED_SCOPES } from './connected-accounts.js?v=28';
 import { connectGoogle, connectMicrosoft, microsoftRedirectUri, prepareGoogleOAuth } from './account-oauth.js?v=28';
 import { organizerIntent } from './organizer-intent.js?v=1';
+import { requestText } from './text-dialog.js?v=1';
 
 const shortcutTasks = {
   files: [['تصفح الملفات', 'اعرض الملفات'], ['أكبر الملفات', 'أكبر الملفات'], ['المكررات', 'الملفات المتكررة']],
@@ -149,10 +150,15 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     localDirectory = '';
     task.value = '';
     task.placeholder = mode() === 'files' ? 'مثال: ابحث عن ملف الميزانية' : 'اكتب كلمة للبحث أو اختر مهمة';
-    visible($('organizerLocal'), mode() === 'files');
-    visible($('organizerCloud'), mode() !== 'files');
+    const browsingCloud = mode() !== 'files';
+    const useBrowser = browsingCloud && Boolean(window.sowalifDesktop);
+    visible($('organizerLocal'), !browsingCloud);
+    visible($('organizerCloud'), browsingCloud && !useBrowser);
+    visible($('organizerDesktopCloud'), useBrowser);
+    visible($('organizerSearch'), !useBrowser);
     $('organizerMessage').reset();
     visible($('organizerMessage'), false);
+    if (useBrowser) { status.textContent = ''; return; }
     $('organizerShortcuts').replaceChildren(...shortcutTasks[mode()].map(([label, value]) => button(label, () => {
       task.value = value;
       void runSearch();
@@ -212,8 +218,8 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       visible(sheet, false);
     })));
     function transfer(actionName, label) {
-      controls.append(button(label, () => {
-        const destination = prompt('الصق المسار الكامل للملف في مكانه الجديد', file.path)?.trim();
+      controls.append(button(label, async () => {
+        const destination = (await requestText('الصق المسار الكامل للملف في مكانه الجديد', file.path))?.trim();
         if (!destination || destination === file.path) return;
         void action(async () => {
           const changed = await local('change', { action: actionName, path: file.path, destination });
@@ -343,14 +349,14 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       await attachFile(new File([blob], name, { type: blob.type || file.mimeType }), chat);
       visible(sheet, false);
     })));
-    controls.append(button('نقل', () => {
-      const name = prompt('اكتب اسم المجلد الذي تريد النقل إليه')?.trim();
+    controls.append(button('نقل', async () => {
+      const name = (await requestText('اكتب اسم المجلد الذي تريد النقل إليه'))?.trim();
       if (!name) return;
       void action(async () => {
         const found = await api().searchDrive(provider(), name, { limit: 30, foldersOnly: true });
         const folders = found.items.filter(candidate => candidate.folder && candidate.id !== file.id);
         if (!folders.length) throw new Error('ما لقيت مجلدًا مطابقًا للاسم.');
-        const choice = Number(prompt(`اختر رقم المجلد:\n${folders.map((folder, i) => `${i + 1}. ${folder.name}`).join('\n')}`));
+        const choice = Number(await requestText(`اختر رقم المجلد\n${folders.map((folder, i) => `${i + 1}. ${folder.name}`).join('\n')}`));
         if (!folders[choice - 1]) return;
         await api().moveDrive(provider(), file.id, folders[choice - 1].id);
         element.remove();
@@ -461,8 +467,26 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     visible(form, expanded);
     control.setAttribute('aria-expanded', String(expanded));
   }
-  $('organizerLink').onclick = () => {
+  function linkLocalRoot(path) {
+    return action(async () => {
+      const { roots: entries } = await local('roots', { path });
+      const selection = entries.find(entry => entry.path.toLowerCase() === path.toLowerCase())?.path || entries.at(-1)?.path;
+      await loadRoots(selection);
+      clearResults();
+      linkForm.reset();
+      toggleForm(linkForm, $('organizerLink'), false);
+      fileStatus.textContent = `تمت إضافة «${roots.value}».`;
+    }, fileStatus);
+  }
+  $('organizerLink').onclick = async () => {
     if (busy || !localAgentOrigin()) return;
+    if (window.sowalifDesktop?.pickDirectory) {
+      try {
+        const path = await window.sowalifDesktop.pickDirectory();
+        if (path && mode() === 'files') await linkLocalRoot(path);
+      } catch { fileStatus.textContent = 'تعذّر فتح نافذة اختيار المجلد.'; }
+      return;
+    }
     const expanded = linkForm.classList.contains('hidden');
     toggleForm(linkForm, $('organizerLink'), expanded);
     toggleForm(createForm, $('organizerCreate'), false);
@@ -473,15 +497,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     if (busy) return;
     const path = $('organizerRootPath').value.trim().replace(/^"(.*)"$/, '$1');
     if (!path) { fileStatus.textContent = 'أدخل مسار المجلد أو القرص.'; return; }
-    void action(async () => {
-      const { roots: entries } = await local('roots', { path });
-      const selection = entries.find(entry => entry.path.toLowerCase() === path.toLowerCase())?.path || entries.at(-1)?.path;
-      await loadRoots(selection);
-      clearResults();
-      linkForm.reset();
-      toggleForm(linkForm, $('organizerLink'), false);
-      fileStatus.textContent = `تمت إضافة «${roots.value}».`;
-    }, fileStatus);
+    void linkLocalRoot(path);
   };
   $('organizerUnlink').onclick = () => {
     const path = roots.value;

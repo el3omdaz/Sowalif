@@ -20,6 +20,7 @@ import { recommendModel } from './model-recommendation.js?v=1';
 import { reasoningLevels } from './reasoning.js?v=1';
 import { initMarket } from './market.js?v=2';
 import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=1';
+import { requestText } from './text-dialog.js?v=1';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -217,7 +218,7 @@ function chatMenu(id, anchor) {
     const chat = await db.getChat(id);
     if (!chat) return;
     if (a === 'rename') {
-      const title = prompt(chat.mode === 'work' ? 'اسم المشروع' : 'اسم المحادثة', chat.title)?.trim();
+      const title = (await requestText(chat.mode === 'work' ? 'اسم المشروع' : 'اسم المحادثة', chat.title))?.trim();
       if (title) await db.saveChat(Object.assign(chat, { title: title.slice(0, 80) }), false);
     } else if (a === 'pin') await db.saveChat(Object.assign(chat, { pinned: !chat.pinned }), false);
     else if (a === 'del') {
@@ -1202,6 +1203,7 @@ function renderCodingSetup() {
   const spec = codingEngineById(config.engine) || CODING_ENGINES.claude;
   const provider = $('#codingProvider');
   $('#codingEngine').value = config.engine;
+  $('#codingOpenLocal').classList.toggle('hidden', Boolean(window.sowalifDesktop));
   provider.replaceChildren(...spec.providers.map(id => new Option(CODING_PROVIDERS[id].label, id)));
   provider.value = config.provider;
   provider.disabled = spec.providers.length < 2;
@@ -1303,10 +1305,13 @@ const agentDirectory = () => S.chat && db.settings.get(`agentDirectory.${S.chat.
 
 async function linkWorkDirectory() {
   if (S.controller || projectSaving) return;
-  const directory = prompt('الصق المسار الكامل لمجلد المشروع من مستكشف ملفات ويندوز', agentDirectory() || '')?.trim().replace(/^"|"$/g, '');
-  if (!directory) return;
   projectSaving = true;
   try {
+    const selection = window.sowalifDesktop?.pickDirectory
+      ? await window.sowalifDesktop.pickDirectory()
+      : await requestText('الصق المسار الكامل لمجلد المشروع من مستكشف ملفات ويندوز', agentDirectory() || '');
+    const directory = selection?.trim().replace(/^"|"$/g, '');
+    if (!directory) return;
     const linked = await linkAgentDirectory(S.chat, directory);
     db.settings.set(`agentDirectory.${S.chat.id}`, linked.directory);
     if (db.settings.get('codingEngine', 'off') === 'off') db.settings.set('codingEngine', 'codex');
@@ -1327,7 +1332,7 @@ $('#agentGit').onclick = async () => {
   try {
     const status = await agentGit(S.chat, 'status');
     if (status.text.trim()) {
-      const message = prompt(`الملفات التي سيشملها Commit:\n${status.text}\nاكتب وصف التعديل للمتابعة:`, 'Update project')?.trim();
+      const message = (await requestText(`الملفات التي سيشملها Commit:\n${status.text}\nاكتب وصف التعديل للمتابعة.`, 'Update project'))?.trim();
       if (!message) return;
       await agentGit(S.chat, 'commit', message);
       toast('تم إنشاء Commit.');
@@ -1354,7 +1359,7 @@ function renderProjectCount() {
   $('#openProject').classList.remove('hidden');
   $('#projectCount').textContent = linked ? `مجلد الجهاز: ${linked.directory.name}`
     : projectFiles().length ? `نسخة سوالف · ${projectFiles().length} ملف` : 'مشروع جديد';
-  $('#projectLinkTop').classList.toggle('hidden', Boolean(linked) || typeof window.showDirectoryPicker !== 'function');
+  $('#projectLinkTop').classList.toggle('hidden', !localAgentOrigin() && (Boolean(linked) || typeof window.showDirectoryPicker !== 'function'));
 }
 
 function projectProposalHTML(proposal) {

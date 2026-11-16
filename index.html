@@ -233,6 +233,10 @@
           <button type="submit" class="btn primary">إرسال</button>
         </form>
       </div>
+      <div id="organizerDesktopCloud" class="hidden">
+        <p class="muted">لربط البريد أو التخزين السحابي من Google وMicrosoft، استخدم قسم الإدارة في نسخة الويب.</p>
+        <a href="https://el3omdaz.github.io/Sowalif/" target="_blank" rel="noopener noreferrer" class="btn ghost">فتح نسخة الويب</a>
+      </div>
       <form id="organizerSearch">
         <label for="organizerTask">وش تبي تسوي؟</label>
         <div class="row"><input type="text" id="organizerTask" maxlength="500" dir="auto"><button type="submit" class="btn primary">بحث</button></div>
@@ -338,7 +342,7 @@
           <summary><span><strong>محرك البرمجة على الكمبيوتر</strong><small>النموذج والمزوّد ومفتاح التشغيل</small></span></summary>
           <div class="settings-body">
             <p id="codingStatus" class="muted" role="status"></p>
-            <a href="http://127.0.0.1:4781/" class="btn ghost" target="_blank" rel="noopener noreferrer">فتح نسخة الكمبيوتر ↗</a>
+            <a id="codingOpenLocal" href="http://127.0.0.1:4781/" class="btn ghost" target="_blank" rel="noopener noreferrer">فتح النسخة المحلية في المتصفح ↗</a>
             <label for="codingProvider">مزوّد محرك البرمجة</label><select id="codingProvider"><option value="openrouter">OpenRouter</option><option value="anthropic">Anthropic API</option><option value="openai">OpenAI API</option><option value="google">Gemini API</option></select>
             <p id="codingKeyHint" class="muted"></p>
             <input id="codingKey" type="password" dir="ltr" autocomplete="off" aria-label="مفتاح محرك البرمجة" placeholder="مفتاح API">
