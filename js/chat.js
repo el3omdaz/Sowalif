@@ -1,5 +1,5 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=22';
+import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=37';
 import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=26';
 import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=22';
 import { preparePersonalContext } from './memory.js?v=22';

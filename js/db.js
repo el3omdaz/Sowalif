@@ -27,7 +27,7 @@ async function tx(store, mode, fn) {
   return new Promise((resolve, reject) => {
     const t = db.transaction(profileId && store === 'chats' && mode === 'readwrite' ? ['chats', 'blobs'] : store, mode);
     const out = fn(t.objectStore(store), t);
-    t.oncomplete = () => resolve(out?.result ?? out);
+    t.oncomplete = () => resolve(out && typeof out === 'object' && 'result' in out ? out.result : out);
     t.onerror = () => reject(t.error);
     t.onabort = () => reject(t.error || new Error('تعذّر الحفظ — ممكن مساحة الجهاز ممتلئة'));
   });
@@ -117,6 +117,12 @@ export async function putBlob(blob) {
 }
 export const getBlob = (id) => tx('blobs', 'readonly', (s) => s.get(id));
 export const deleteBlob = (id) => tx('blobs', 'readwrite', (s) => s.delete(id));
+// Unsaved account-switch drafts stay in this profile's database, never in the
+// cloud outbox or the destination account. Attachment bytes already live here.
+const sessionDraftKey = 'composer-account-switch-draft';
+export const saveSessionDraft = draft => tx('blobs', 'readwrite', s => s.put(draft, sessionDraftKey));
+export const readSessionDraft = () => getBlob(sessionDraftKey);
+export const clearSessionDraft = () => deleteBlob(sessionDraftKey);
 
 const syncKey = id => `cloud-sync:${id}`;
 function queueInTransaction(transaction, id, deleted = false) {

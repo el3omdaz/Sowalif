@@ -1,4 +1,4 @@
-import { settings, saveChat, saveProject, profileId } from './db.js?v=22';
+import { settings, saveChat, saveProject, profileId } from './db.js?v=37';
 import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=36';
 import { preparePersonalContext } from './memory.js?v=22';
 import { readAttachmentDocuments } from './chat.js?v=36';

@@ -40,3 +40,15 @@ test('cloud accounts keep their local provider keys and memory separate from dev
   assert.equal((await other.listChats()).length, 0);
   assert.equal(first.settings.get('kieKey', ''), 'account-one-key');
 });
+
+test('account-switch drafts remain private to their source profile and outside cloud sync', async () => {
+  const before = await first.readCloudState();
+  const value = { chat: { id: 'unsent' }, text: 'private unsent text', attachments: [{ meta: { blob: 'local-only' } }] };
+  await first.saveSessionDraft(value);
+  assert.deepEqual(await second.readSessionDraft(), value);
+  const other = await import('../js/db.js?other-account');
+  assert.equal(await other.readSessionDraft(), undefined);
+  assert.deepEqual(await first.readCloudState(), before);
+  await second.clearSessionDraft();
+  assert.equal(await first.readSessionDraft(), undefined);
+});

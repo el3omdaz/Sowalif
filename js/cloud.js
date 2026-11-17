@@ -1,6 +1,6 @@
 import { createClient } from '../vendor/supabase.js?v=20';
 import { CLOUD } from './cloud-config.js?v=25';
-import * as db from './db.js?v=22';
+import * as db from './db.js?v=37';
 import { readPersonalization } from './memory.js?v=22';
 import { cloudChat, cloudMemory } from './cloud-payload.js?v=21';
 

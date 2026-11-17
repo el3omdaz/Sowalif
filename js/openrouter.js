@@ -1,4 +1,4 @@
-import { settings } from './db.js?v=22';
+import { settings } from './db.js?v=37';
 import { readSSE } from './kie.js?v=22';
 import { registerOpenRouterModels } from './models.js?v=26';
 import { reasoningEffort } from './reasoning.js?v=1';

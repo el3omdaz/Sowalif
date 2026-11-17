@@ -1,5 +1,5 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
-import { settings, putBlob } from './db.js?v=22';
+import { settings, putBlob } from './db.js?v=37';
 import { modelById } from './models.js?v=26';
 import { reasoningEffort } from './reasoning.js?v=1';
 

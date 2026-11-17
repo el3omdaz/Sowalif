@@ -1,5 +1,5 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=22';
+import * as db from './db.js?v=37';
 import { fitViewport } from './viewport.js?v=21';
 import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=26';
 import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=22';
@@ -89,6 +89,7 @@ async function boot() {
   const id = location.hash.slice(1);
   if (id && S.chats.some((c) => c.id === id)) await openChat(id);
   else newChat();
+  await restoreAccountDraft();
   const localCoding = S.mode === 'work' && db.settings.get('codingEngine', 'off') !== 'off';
   const mediaKind = selectedMediaKind();
   if (confirmation) {
@@ -855,6 +856,7 @@ function switchAttachmentDraft(chat) {
 }
 
 async function addFiles(files) {
+  if (cloudAuthBusy) { toast('انتظر اكتمال تسجيل الدخول قبل إضافة المرفقات'); return 0; }
   const chatId = S.chat?.id;
   const model = S.model;
   let added = 0;
@@ -1091,6 +1093,70 @@ async function retry() {
 
 // ---------- محركات البرمجة المحلية ----------
 const cloudIdle = () => !S.controller && !projectSaving && !rec && !voiceJob && !micStarting && !input.value.trim() && !S.attachments.length && !document.activeElement?.matches('#settingsSheet input, #settingsSheet textarea, #projectSheet input, #projectSheet textarea') && $('#projectSheet').classList.contains('hidden');
+// Login controls and a ready composer draft are safe. Background refresh still
+// uses cloudIdle so typing can never be replaced by a remote update.
+const cloudCanChangeAccount = () => !S.controller && !projectSaving && !rec && !voiceJob && !micStarting &&
+  !S.attachments.some(item => item.loading) &&
+  ($('#projectSheet').classList.contains('hidden') || (projectDraftClean() && $('#projectInstructions').value === (S.chat?.project?.instructions || '')));
+let cloudAuthBusy = false;
+const accountBlockedMessage = 'انتظر انتهاء الطلب أو التسجيل أو رفع المرفقات، واحفظ تعديلات المشروع أولاً';
+
+async function saveAccountDraft() {
+  if (!S.chat) return;
+  const serializeAttachments = items => items.filter(item => !item.loading && item.meta).map(({ id, name, kind, meta }) => ({ id, name, kind, meta }));
+  const chat = await db.getChat(S.chat.id);
+  await db.saveSessionDraft({
+    chat: chat ? { id: chat.id } : S.chat,
+    text: input.value, attachments: serializeAttachments(S.attachments),
+    otherAttachments: [...attachmentDrafts].map(([id, items]) => [id, serializeAttachments(items)]),
+    mediaReference: $('#mediaReference').value, videoReference: $('#videoReference').value,
+    reuseMedia: $('#reuseMedia').checked, model: S.model, imageMode: S.imageMode, videoMode: S.videoMode, deep: S.deep, search: S.search,
+  });
+}
+
+async function restoreAccountDraft() {
+  const draft = await db.readSessionDraft();
+  if (!draft?.chat?.id) return;
+  const chat = await db.getChat(draft.chat.id) || (Array.isArray(draft.chat.messages) ? draft.chat : db.newChat(S.defaultModel));
+  switchAttachmentDraft(chat);
+  S.model = draft.model || chat.model || S.defaultModel;
+  S.provider = providerOf(S.model);
+  applyWorkspace(modeOf(chat));
+  const restoreItems = async items => Promise.all((items || []).map(async item => ({ ...item,
+    ...(item.kind === 'image' && item.meta?.blob ? { preview: await db.blobUrl(item.meta.blob).catch(() => '') } : {}),
+  })));
+  for (const [id, items] of draft.otherAttachments || []) attachmentDrafts.set(id, await restoreItems(items));
+  S.attachments = await restoreItems(draft.attachments);
+  for (const key of ['imageMode', 'videoMode', 'deep', 'search']) if (typeof draft[key] === 'boolean') S[key] = draft[key];
+  $('#mediaReference').value = draft.mediaReference || '';
+  $('#videoReference').value = draft.videoReference || '';
+  $('#reuseMedia').checked = draft.reuseMedia !== false;
+  input.value = draft.text || '';
+  syncToggles(); autosize(); renderMessages(); renderChatList(); renderAttachments();
+  if (S.chats.some(item => item.id === chat.id)) history.replaceState(null, '', `#${chat.id}`);
+  await db.clearSessionDraft();
+}
+
+async function reloadAfterAccountChange(changeProfile) {
+  if (!cloudCanChangeAccount()) return toast(accountBlockedMessage);
+  const readOnly = input.readOnly;
+  projectSaving = true;
+  input.readOnly = true;
+  try {
+    await saveAccountDraft();
+    changeProfile();
+    location.reload();
+  } finally { projectSaving = false; input.readOnly = readOnly; }
+}
+
+async function openCloudProfile(user) {
+  await renderCloudAccount(user);
+  if (!cloudCanChangeAccount()) {
+    $('#cloudStatus').textContent = 'تم تسجيل الدخول. بعد إنهاء الطلب أو حفظ تعديلات المشروع اضغط «فتح بيانات حسابي».';
+    return;
+  }
+  await reloadAfterAccountChange(() => localStorage.setItem('sc.cloudProfile', user.id));
+}
 async function refreshCloudView() {
   if (!cloudIdle() || !S.chat) return;
   S.chats = await db.listChats();
@@ -1141,9 +1207,11 @@ async function confirmCloudEmail() {
 
 const cloudAuthButtons = ['cloudSignIn', 'cloudSignUp', 'cloudResend'];
 async function authenticateCloud(signup) {
-  if (!cloudIdle()) return toast('أكمل الطلب أو المسودة قبل تغيير الحساب');
+  if (cloudAuthBusy) return;
+  if (!cloudCanChangeAccount()) return toast(accountBlockedMessage);
   const email = $('#cloudEmail').value.trim(), password = $('#cloudPassword').value;
   if (!email || password.length < 8) return toast('أدخل بريدك وكلمة مرور من 8 أحرف أو أكثر');
+  cloudAuthBusy = true;
   for (const id of cloudAuthButtons) $(`#${id}`).disabled = true;
   $('#cloudStatus').textContent = signup ? 'ينشئ حساب سوالف…' : 'يسجّل الدخول…';
   try {
@@ -1153,19 +1221,21 @@ async function authenticateCloud(signup) {
     if (error) throw error;
     $('#cloudPassword').value = '';
     if (!data.session) { $('#cloudStatus').textContent = 'افتح رسالة التأكيد في بريدك، ثم ارجع وسجّل الدخول هنا. إذا لم تصلك الرسالة فقد يحتاج المشروع إعداد خدمة البريد.'; return; }
-    localStorage.setItem('sc.cloudProfile', data.user.id); location.reload();
+    await openCloudProfile(data.user);
   } catch (error) {
     $('#cloudStatus').textContent = error.code === 'email_not_confirmed'
       ? 'البريد بانتظار التفعيل. اضغط «إعادة إرسال رابط التفعيل» وافتح أحدث رسالة.'
       : (signup ? 'تعذّر إنشاء الحساب: ' : 'تعذّر تسجيل الدخول: ') + error.message;
-  } finally { for (const id of cloudAuthButtons) $(`#${id}`).disabled = false; }
+  } finally { cloudAuthBusy = false; for (const id of cloudAuthButtons) $(`#${id}`).disabled = false; }
 }
 $('#cloudSignIn').onclick = () => authenticateCloud(false);
 $('#cloudSignUp').onclick = () => authenticateCloud(true);
 $('#cloudResend').onclick = async () => {
+  if (cloudAuthBusy) return;
   const field = $('#cloudEmail');
   const email = field.value.trim();
   if (!email || !field.checkValidity()) return field.reportValidity();
+  cloudAuthBusy = true;
   for (const id of cloudAuthButtons) $(`#${id}`).disabled = true;
   const status = $('#cloudStatus');
   status.textContent = 'جاري طلب رابط تفعيل جديد…';
@@ -1176,14 +1246,31 @@ $('#cloudResend').onclick = async () => {
   } catch (error) {
     status.textContent = Number(error.status) === 429 ? 'انتظر قليلًا قبل طلب رابط آخر.' : 'تعذّر إرسال الرابط: ' + error.message;
   } finally {
+    cloudAuthBusy = false;
     for (const id of cloudAuthButtons) $(`#${id}`).disabled = false;
   }
 };
-$('#cloudOpenProfile').onclick = async () => { if (!cloudIdle()) return; const user = await cloudUser(); if (user) { localStorage.setItem('sc.cloudProfile', user.id); location.reload(); } };
+$('#cloudOpenProfile').onclick = async () => {
+  if (cloudAuthBusy) return;
+  if (!cloudCanChangeAccount()) return toast(accountBlockedMessage);
+  cloudAuthBusy = true;
+  try { const user = await cloudUser(); if (user) await openCloudProfile(user); }
+  catch (error) { $('#cloudStatus').textContent = 'تعذّر فتح الحساب: ' + error.message; }
+  finally { cloudAuthBusy = false; }
+};
 $('#cloudSignOut').onclick = async () => {
-  if (!cloudIdle()) return toast('أكمل الطلب أو المسودة قبل تسجيل الخروج');
-  await cloud.auth.signOut({ scope: 'local' }).catch(() => {});
-  localStorage.removeItem('sowalif-auth-v1'); localStorage.removeItem('sc.cloudProfile'); location.reload();
+  if (cloudAuthBusy) return;
+  if (!cloudCanChangeAccount()) return toast(accountBlockedMessage);
+  cloudAuthBusy = true;
+  try {
+    await saveAccountDraft();
+    if (!cloudCanChangeAccount()) return toast(accountBlockedMessage);
+    const { error } = await cloud.auth.signOut({ scope: 'local' });
+    if (error) throw error;
+    if (!cloudCanChangeAccount()) { await renderCloudAccount(); return; }
+    await reloadAfterAccountChange(() => { localStorage.removeItem('sowalif-auth-v1'); localStorage.removeItem('sc.cloudProfile'); });
+  } catch (error) { $('#cloudStatus').textContent = 'تعذّر تسجيل الخروج: ' + error.message; }
+  finally { cloudAuthBusy = false; }
 };
 $('#cloudSync').onclick = () => syncCloud();
 $('#cloudImport').onclick = async (event) => {
@@ -1196,7 +1283,12 @@ $('#cloudImport').onclick = async (event) => {
 };
 $('#cloudKeepLocal').onclick = () => resolveMemoryConflict('local');
 $('#cloudKeepRemote').onclick = () => resolveMemoryConflict('remote');
-window.addEventListener('storage', event => { if (event.key === 'sc.cloudProfile') location.reload(); });
+window.addEventListener('storage', event => {
+  if (event.key !== 'sc.cloudProfile') return;
+  if (!cloudCanChangeAccount()) return toast('تغيّر الحساب في نافذة ثانية. أكمل العمل الحالي ثم افتح بيانات حسابك.', 6000);
+  void reloadAfterAccountChange(() => {})
+    .catch(error => toast('تعذّر حفظ المسودة: ' + error.message, 6000));
+});
 
 function renderCodingSetup() {
   const config = agentCredentials();
@@ -2044,7 +2136,7 @@ $('#voiceCancel').onclick = () => {
 };
 
 mic.onclick = async () => {
-  if (mic.classList.contains('busy') || micStarting || S.controller || diagnosisController || voiceJob) return;
+  if (projectSaving || mic.classList.contains('busy') || micStarting || S.controller || diagnosisController || voiceJob) return;
   if (rec) stopRec();
   else {
     micStarting = true;

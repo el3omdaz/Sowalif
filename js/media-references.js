@@ -1,4 +1,4 @@
-import { settings, getBlob, profileId } from './db.js?v=22';
+import { settings, getBlob, profileId } from './db.js?v=37';
 import { uploadFile } from './kie.js?v=22';
 import { uploadCloudFile, signCloudFile } from './cloud.js?v=27';
 

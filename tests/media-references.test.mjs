@@ -5,7 +5,7 @@ const local = new Map();
 globalThis.localStorage = { getItem: key => local.get(key) ?? null, setItem: (key, value) => local.set(key, value), removeItem: key => local.delete(key) };
 globalThis.indexedDB = new IDBFactory();
 globalThis.location = { hostname: 'example.test', port: '' };
-const { settings, putBlob } = await import('../js/db.js?v=22');
+const { settings, putBlob } = await import('../js/db.js?v=37');
 const { resolveReferences } = await import('../js/media-references.js?v=27');
 const { mediaSpec, createMedia } = await import('../js/piapi.js?v=22');
 

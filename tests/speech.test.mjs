@@ -91,6 +91,100 @@ test('email confirmation removes credentials from the URL and accepts the signup
   assert.match(await a.run('confirmCloudEmail()'), /فتح بيانات حسابي/);
 });
 
+function accountApp(result) {
+  const a = app();
+  const profiles = new Map();
+  let draft, reloads = 0, calls = 0;
+  a.ctx.localStorage = { setItem: (key, value) => profiles.set(key, value), removeItem: key => profiles.delete(key) };
+  a.ctx.location = { reload: () => reloads++ };
+  a.ctx.document.activeElement = { matches: () => true }; // Focus stays in the login fields.
+  a.node('#projectSheet').classList.add('hidden');
+  a.node('#cloudEmail').value = 'test@example.test';
+  a.node('#cloudPassword').value = 'fake-password';
+  a.ctx.db.getChat = async () => undefined;
+  a.ctx.db.saveSessionDraft = async value => { draft = structuredClone(value); };
+  a.ctx.db.readSessionDraft = async () => draft;
+  a.ctx.db.clearSessionDraft = async () => { draft = undefined; };
+  a.run("S.chat = { id: 'device-draft', mode: 'chat', model: 'test', title: 'New chat', messages: [] };");
+  const response = result || { data: { session: {}, user: { id: 'account-two', email: 'test@example.test' } } };
+  const authenticate = async () => { calls++; return typeof response === 'function' ? response() : response; };
+  a.ctx.cloud = { auth: { signInWithPassword: authenticate, signUp: authenticate } };
+  a.ctx.cloudConfirmationUrl = () => 'https://example.test/?confirm=1';
+  return { ...a, profiles, draft: () => draft, reloads: () => reloads, calls: () => calls };
+}
+
+test('login accepts focused credentials and preserves a ready text/attachment draft before switching', async () => {
+  const a = accountApp();
+  a.node('#input').value = 'Unsent private draft';
+  a.run("S.attachments = [{ id: 'a', name: 'notes.txt', kind: 'doc', preview: 'blob:temporary', meta: {kind:'doc',blob:'private-blob'} }]");
+  assert.equal(a.run('cloudIdle()'), false);
+  await a.node('#cloudSignIn').click();
+  assert.equal(a.calls(), 1);
+  assert.equal(a.reloads(), 1);
+  assert.equal(a.profiles.get('sc.cloudProfile'), 'account-two');
+  assert.equal(a.draft().text, 'Unsent private draft');
+  assert.equal(a.draft().attachments[0].meta.blob, 'private-blob');
+  assert.equal(a.draft().attachments[0].preview, undefined);
+  assert.equal(JSON.stringify(a.draft()).includes('fake-password'), false);
+  assert.equal(a.node('#cloudPassword').value, '');
+  assert.equal(a.node('#cloudSignIn').disabled, false);
+});
+
+test('failed login and signup awaiting confirmation keep the active draft without changing profiles', async () => {
+  for (const [signup, response] of [[false, { error: { message: 'Invalid credentials' } }], [true, { data: { session: null } }]]) {
+    const a = accountApp(response);
+    a.node('#input').value = 'Keep this';
+    await a.node(signup ? '#cloudSignUp' : '#cloudSignIn').click();
+    assert.equal(a.calls(), 1);
+    assert.equal(a.reloads(), 0);
+    assert.equal(a.profiles.size, 0);
+    assert.equal(a.node('#input').value, 'Keep this');
+    assert.equal(a.run('cloudAuthBusy'), false);
+  }
+});
+
+test('active requests, recordings, uploads and unsaved project edits still block account switching', async () => {
+  for (const setup of ['S.controller = {}', 'rec = {}', 'voiceJob = {}', 'projectSaving = true', 'micStarting = true', 'S.attachments = [{ loading: true }]']) {
+    const a = accountApp();
+    a.run(setup);
+    await a.node('#cloudSignIn').click();
+    assert.equal(a.calls(), 0, setup);
+    assert.equal(a.reloads(), 0);
+  }
+  const a = accountApp();
+  a.node('#projectSheet').classList.remove('hidden');
+  a.node('#projectCode').value = 'Unsaved edit';
+  await a.node('#cloudSignIn').click();
+  assert.equal(a.calls(), 0);
+});
+
+test('duplicate login is ignored and activity starting during authentication prevents a destructive reload', async () => {
+  let resolve;
+  const a = accountApp(() => new Promise(done => { resolve = done; }));
+  const first = a.node('#cloudSignIn').click();
+  await a.node('#cloudSignIn').click();
+  assert.equal(a.calls(), 1);
+  a.run('S.controller = {}');
+  resolve({ data: { session: {}, user: { id: 'signed-in', email: 'test@example.test' } } });
+  await first;
+  assert.equal(a.reloads(), 0);
+  assert.equal(a.profiles.size, 0);
+  assert.match(a.node('#cloudStatus').textContent, /فتح بيانات حسابي/);
+});
+
+test('returning to the original profile restores its draft without persisting runtime objects', async () => {
+  const a = accountApp();
+  a.node('#input').value = 'Return to this draft';
+  a.run("S.attachments = [{id:'a', name:'notes.txt', kind:'doc',meta:{kind:'doc',text:'private'}}]; syncToggles=()=>{}; renderMessages=()=>{}; renderChatList=()=>{}; renderAttachments=()=>{}; applyWorkspace=mode=>{S.mode=mode};");
+  await a.run('saveAccountDraft()');
+  a.node('#input').value = '';
+  a.run('S.attachments = []');
+  await a.run('restoreAccountDraft()');
+  assert.equal(a.node('#input').value, 'Return to this draft');
+  assert.equal(a.run('S.attachments[0].meta.text'), 'private');
+  assert.equal(a.draft(), undefined);
+});
+
 test('chat model picker can hide and restore a model without changing the current selection', () => {
   const a = app();
   const settings = new Map();

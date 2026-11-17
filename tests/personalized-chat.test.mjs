@@ -47,7 +47,7 @@ test('prompt studio uses vision chat only, even in the image workspace with no m
 });
 
 test('work mode stages file changes and saves only after applying them', async () => {
-  const { saveProject, recallChats } = await import('../js/db.js?v=22');
+  const { saveProject, recallChats } = await import('../js/db.js?v=37');
   const { applyProjectProposal } = await import('../js/project.js?v=36');
   const original = { path: 'index.html', content: '<h1>Before</h1>' };
   const change = { path: 'index.html', content: '<h1>After</h1>' };
@@ -105,7 +105,7 @@ test('custom instructions, cross-chat context and gold rule reach both providers
 });
 
 test('personalization backup excludes API keys and can be exported with chats', async () => {
-  const { exportAll } = await import('../js/db.js?v=22');
+  const { exportAll } = await import('../js/db.js?v=37');
   const text = await (await exportAll()).text();
   const backup = JSON.parse(text);
   assert.equal(backup.version, 2);
@@ -146,7 +146,7 @@ test('OpenRouter chat routes video straight to PiAPI and resumes an existing tas
   assert.equal(reply.mediaTask.done, true);
   assert.deepEqual(calls.map(c => c.method), ['POST', 'GET', 'GET']);
   assert.equal(chat.messages.length, 2);
-  const { exportAll } = await import('../js/db.js?v=22');
+  const { exportAll } = await import('../js/db.js?v=37');
   assert.equal((await (await exportAll()).text()).includes('fake-piapi'), false);
 });
 
@@ -211,6 +211,6 @@ test('media workspaces route short follow-ups with their own last reference and 
   image.messages.push({ role: 'user', text: 'غيمة', reuseMedia: false });
   await respond(image, { model: 'or:anthropic/claude-sonnet-5.5' }, () => {});
   assert.equal(outgoing[2].task_type, 'txt2img');
-  const { recallChats } = await import('../js/db.js?v=22');
+  const { recallChats } = await import('../js/db.js?v=37');
   assert.ok((await recallChats()).every(chat => !chat.id.startsWith('workspace-')));
 });
