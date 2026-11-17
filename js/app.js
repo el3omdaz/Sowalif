@@ -1110,7 +1110,7 @@ async function saveAccountDraft() {
     text: input.value, attachments: serializeAttachments(S.attachments),
     otherAttachments: [...attachmentDrafts].map(([id, items]) => [id, serializeAttachments(items)]),
     mediaReference: $('#mediaReference').value, videoReference: $('#videoReference').value,
-    reuseMedia: $('#reuseMedia').checked, model: S.model, imageMode: S.imageMode, videoMode: S.videoMode, deep: S.deep, search: S.search,
+    reuseMedia: $('#reuseMedia').checked, model: S.model, imageMode: S.imageMode, videoMode: S.videoMode, reasoning: S.reasoning, execute: S.execute, search: S.search,
   });
 }
 
@@ -1118,6 +1118,10 @@ async function restoreAccountDraft() {
   const draft = await db.readSessionDraft();
   if (!draft?.chat?.id) return;
   const chat = await db.getChat(draft.chat.id) || (Array.isArray(draft.chat.messages) ? draft.chat : db.newChat(S.defaultModel));
+  if (chat.mode === 'work' && !linkedFolders.has(chat.id)) {
+    const link = await db.getProjectFolder(chat.id).catch(() => null);
+    if (link) linkedFolders.set(chat.id, link);
+  }
   switchAttachmentDraft(chat);
   S.model = draft.model || chat.model || S.defaultModel;
   S.provider = providerOf(S.model);
@@ -1127,7 +1131,8 @@ async function restoreAccountDraft() {
   })));
   for (const [id, items] of draft.otherAttachments || []) attachmentDrafts.set(id, await restoreItems(items));
   S.attachments = await restoreItems(draft.attachments);
-  for (const key of ['imageMode', 'videoMode', 'deep', 'search']) if (typeof draft[key] === 'boolean') S[key] = draft[key];
+  for (const key of ['imageMode', 'videoMode', 'execute', 'search']) if (typeof draft[key] === 'boolean') S[key] = draft[key];
+  if (typeof draft.reasoning === 'string') S.reasoning = draft.reasoning;
   $('#mediaReference').value = draft.mediaReference || '';
   $('#videoReference').value = draft.videoReference || '';
   $('#reuseMedia').checked = draft.reuseMedia !== false;

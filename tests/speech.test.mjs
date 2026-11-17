@@ -174,14 +174,19 @@ test('duplicate login is ignored and activity starting during authentication pre
 
 test('returning to the original profile restores its draft without persisting runtime objects', async () => {
   const a = accountApp();
+  const link = { directory: { name: 'Project folder' }, baseline: new Map() };
+  a.ctx.db.getProjectFolder = async () => link;
   a.node('#input').value = 'Return to this draft';
-  a.run("S.attachments = [{id:'a', name:'notes.txt', kind:'doc',meta:{kind:'doc',text:'private'}}]; syncToggles=()=>{}; renderMessages=()=>{}; renderChatList=()=>{}; renderAttachments=()=>{}; applyWorkspace=mode=>{S.mode=mode};");
+  a.run("S.chat.mode='work'; S.reasoning='high'; S.execute=true; S.attachments = [{id:'a', name:'notes.txt', kind:'doc',meta:{kind:'doc',text:'private'}}]; syncToggles=()=>{}; renderMessages=()=>{}; renderChatList=()=>{}; renderAttachments=()=>{}; applyWorkspace=mode=>{S.mode=mode};");
   await a.run('saveAccountDraft()');
   a.node('#input').value = '';
-  a.run('S.attachments = []');
+  a.run("S.attachments = []; S.reasoning='normal'; S.execute=false;");
   await a.run('restoreAccountDraft()');
   assert.equal(a.node('#input').value, 'Return to this draft');
   assert.equal(a.run('S.attachments[0].meta.text'), 'private');
+  assert.equal(a.run("linkedFolders.get('device-draft')"), link);
+  assert.equal(a.run('S.reasoning'), 'high');
+  assert.equal(a.run('S.execute'), true);
   assert.equal(a.draft(), undefined);
 });
 
