@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { selectDocumentContext, selectProjectFileContext } from '../js/docs-context.js?v=1';
-import { makeAttachment, readAttachmentDocuments, readPdfPages, respond } from '../js/chat.js?v=29';
-import { projectZip } from '../js/project.js?v=20';
+import { makeAttachment, readAttachmentDocuments, readPdfPages, respond } from '../js/chat.js?v=36';
+import { projectZip } from '../js/project.js?v=36';
 import { zipText } from '../js/zip-text.js?v=28';
 
 const rasterOps = new Map([[85, args => [args?.[1], args?.[2]]]]);

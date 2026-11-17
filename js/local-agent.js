@@ -1,7 +1,7 @@
 import { settings, saveChat, saveProject, profileId } from './db.js?v=22';
-import { mergeProjectFiles } from './project.js?v=20';
+import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=36';
 import { preparePersonalContext } from './memory.js?v=22';
-import { readAttachmentDocuments } from './chat.js?v=29';
+import { readAttachmentDocuments } from './chat.js?v=36';
 import { selectDocumentContext } from './docs-context.js?v=1';
 import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=1';
 
@@ -48,7 +48,7 @@ export async function agentGit(chat, action, message) {
 }
 export const answerAgent = (runId, id, allow) => api(`runs/${encodeURIComponent(runId)}/approval`, { id, allow });
 export function agentArtifactUrl(chat, file) {
-  if (!localAgentOrigin() || typeof file?.path !== 'string' || !/^outputs\/(?!.*(?:\.\.|\\))[^\u0000-\u001f]+\.(pdf|docx|xlsx|pptx|csv|txt|md|json|zip|png|jpe?g|webp)$/i.test(file.path)) return '';
+  if (!localAgentOrigin() || typeof file?.path !== 'string' || !file.path.startsWith('outputs/') || !validProjectPath(file.path)) return '';
   return `/api/agent/artifact?project=${encodeURIComponent(projectId(chat))}&path=${encodeURIComponent(file.path)}`;
 }
 const pause = () => new Promise(resolve => setTimeout(resolve, 800));
@@ -72,7 +72,10 @@ export async function collectAgentRun(chat, reply, emit, signal) {
           const files = mergeProjectFiles([], run.files);
           const before = chat.project?.files || [];
           const paths = [...new Set([...before, ...files].map(f => f.path))];
-          reply.agentChanges = paths.map(path => ({ path, before: before.find(f => f.path === path)?.content, after: files.find(f => f.path === path)?.content })).filter(f => f.before !== f.after);
+          const describe = file => !file ? undefined : isBinaryProjectFile(file) ? '[ملف ثنائي — محفوظ بصيغته الأصلية]' : file.content;
+          const signature = file => file ? projectFileSignature(file) : undefined;
+          reply.agentChanges = paths.filter(path => signature(before.find(f => f.path === path)) !== signature(files.find(f => f.path === path)))
+            .map(path => ({ path, before: describe(before.find(f => f.path === path)), after: describe(files.find(f => f.path === path)) }));
           reply.agentBefore = before;
           const removed = before.filter(f => !files.some(next => next.path === f.path)).map(f => f.path);
           await saveProject(chat, { ...chat.project, files, removed: [...new Set([...(chat.project?.removed || []), ...removed])].filter(path => !files.some(f => f.path === path)), revision: (chat.project?.revision || 0) + 1, agentWorkspaceRevision: run.revision });

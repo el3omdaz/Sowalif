@@ -147,7 +147,7 @@ test('diagnostics stays on selected provider', async () => {
 });
 
 test('recorded speech conversion routes directly to OpenRouter with no kie.ai upload', async () => {
-  const { transcribe } = await import('../js/chat.js?v=29');
+  const { transcribe } = await import('../js/chat.js?v=36');
   globalThis.FileReader = class {
     readAsDataURL(blob) {
       blob.arrayBuffer().then((bytes) => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString('base64')}`; this.onload(); });

@@ -24,7 +24,7 @@ globalThis.indexedDB = { open() {
   return request;
 } };
 const { savePersonalization, saveRule } = await import('../js/memory.js?v=22');
-const { respond } = await import('../js/chat.js?v=29');
+const { respond } = await import('../js/chat.js?v=36');
 
 test('prompt studio uses vision chat only, even in the image workspace with no media key', async () => {
   local.set('sc.openRouterKey', '"fake-or"');
@@ -48,7 +48,7 @@ test('prompt studio uses vision chat only, even in the image workspace with no m
 
 test('work mode stages file changes and saves only after applying them', async () => {
   const { saveProject, recallChats } = await import('../js/db.js?v=22');
-  const { applyProjectProposal } = await import('../js/project.js?v=20');
+  const { applyProjectProposal } = await import('../js/project.js?v=36');
   const original = { path: 'index.html', content: '<h1>Before</h1>' };
   const change = { path: 'index.html', content: '<h1>After</h1>' };
   const chat = { id: 'work-project', mode: 'work', title: 'محادثة جديدة', messages: [{ role: 'user', text: 'عدّل الصفحة وأضف صورة تجريبية بالكود' }] };
@@ -139,7 +139,7 @@ test('OpenRouter chat routes video straight to PiAPI and resumes an existing tas
   assert.equal(reply.mediaTask.id, 'persistent-video');
   assert.match(reply.error, /status unavailable/);
   failPoll = false;
-  const { resumeMedia } = await import('../js/chat.js?v=29');
+  const { resumeMedia } = await import('../js/chat.js?v=36');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/result.mp4');
@@ -172,7 +172,7 @@ test('kie.ai media works under OpenRouter and resumed jobs retain their original
   assert.ok(reply.error);
   local.set('sc.mediaProvider', '"piapi"');
   failed = false;
-  const { resumeMedia } = await import('../js/chat.js?v=29');
+  const { resumeMedia } = await import('../js/chat.js?v=36');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/kie.mp4');

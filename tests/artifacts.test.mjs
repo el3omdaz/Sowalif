@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { artifactFile, listArtifacts, validArtifactPath } from '../server/local-agent/artifacts.mjs';
@@ -17,7 +17,9 @@ test('generated documents are listed as binary downloads, outside source snapsho
   assert.deepEqual(await listArtifacts(root), [{ path: 'outputs/تقرير.xlsx', name: 'تقرير.xlsx', size: bytes.length }]);
   assert.equal((await artifactFile(root, 'outputs/تقرير.xlsx')).size, bytes.length);
   assert.deepEqual(await snapshot(root), [{ path: 'index.html', content: 'source' }]);
-  for (const path of ['../outputs/a.pdf', 'outputs/../a.pdf', 'outputs/.hidden.pdf', 'outputs/a.exe', 'outputs/a\\b.pdf', 'outputs/a.pdf\r\nx-header: bad']) {
+  assert.equal(validArtifactPath('outputs/application.exe'), true);
+  assert.equal(validArtifactPath('outputs/movie.mov'), true);
+  for (const path of ['../outputs/a.pdf', 'outputs/../a.pdf', 'outputs/.hidden.pdf', 'outputs/a\\b.pdf', 'outputs/a.pdf\r\nx-header: bad']) {
     assert.equal(validArtifactPath(path), false);
     await assert.rejects(artifactFile(root, path));
   }
@@ -49,6 +51,16 @@ test('artifact endpoint preserves bytes, Unicode filename and persisted download
   assert.deepEqual(Buffer.from(await file.arrayBuffer()), bytes);
   assert.equal((await fetch(origin + '/api/agent/artifact?project=docs&path=../state.json')).status, 400);
   assert.equal((await fetch(origin + '/api/agent/project?id=docs').then(r => r.json())).artifacts.length, 1);
+  // Arbitrary file types above the old 50MB ceiling download as attachments.
+  const large = await open(join(job.workspace, 'outputs', 'movie.mov'), 'w');
+  const size = 51 * 1024 * 1024;
+  await large.truncate(size); await large.close();
+  assert.equal((await artifactFile(job.workspace, 'outputs/movie.mov')).size, size);
+  const movie = await fetch(origin + '/api/agent/artifact?project=docs&path=outputs%2Fmovie.mov');
+  assert.equal(movie.status, 200);
+  assert.equal(Number(movie.headers.get('content-length')), size);
+  assert.match(movie.headers.get('content-disposition'), /^attachment;/);
+  await movie.body.cancel();
   // A new server instance can recover artifacts from disk without a job in RAM.
   const second = createLocalServer({ dataDir });
   await new Promise(resolve => second.listen(0, '127.0.0.1', resolve));

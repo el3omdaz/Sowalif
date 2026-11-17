@@ -1,11 +1,13 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, readdir, lstat, unlink, realpath } from 'node:fs/promises';
 import { resolve, join, dirname, relative, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validProjectPath, mergeProjectFiles } from '../../js/project.js?v=20';
+import { validProjectPath, mergeProjectFiles, projectFileBytes, projectFileFromBytes } from '../../js/project.js?v=36';
 import { artifactFile, listArtifacts } from './artifacts.mjs';
 import { createFileService } from './files.mjs';
 import { createMarketFeed } from '../market-feed.mjs';
@@ -92,14 +94,13 @@ export async function snapshot(root) {
   async function walk(directory, prefix = '') {
     for (const item of await readdir(directory, { withFileTypes: true })) {
       const name = prefix + item.name;
-      if (item.isSymbolicLink() || item.name.startsWith('.') || ['node_modules', 'vendor', 'dist', 'build', 'coverage', 'outputs'].includes(item.name)) continue;
+      if (item.isSymbolicLink() || ['node_modules', 'vendor', 'dist', 'build', 'coverage', 'outputs'].includes(item.name)) continue;
+      if (!validProjectPath(item.isDirectory() ? `${name}/file.txt` : name)) continue;
       if (item.isDirectory()) await walk(join(directory, item.name), name + '/');
       else if (item.isFile() && validProjectPath(name)) {
         const target = await safeFile(root, name);
-        if ((await lstat(target)).size > 300_000) throw failure(`الملف ${name} أكبر من حد الاستيراد`);
-        files.push({ path: name, content: await readFile(target, 'utf8') });
+        files.push(projectFileFromBytes(name, await readFile(target)));
       }
-      if (files.length > 40) throw failure('المشروع يتجاوز حد 40 ملف مصدر؛ الملفات الكاملة باقية في مساحة الكمبيوتر');
     }
   }
   await walk(root);
@@ -231,10 +232,15 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (url.pathname === '/api/agent/artifact' && req.method === 'GET') {
           const p = await project(url.searchParams.get('project'));
           const path = url.searchParams.get('path');
-          const { target } = await artifactFile(p.workspace, path);
-          res.setHeader('Content-Disposition', `attachment; filename="download.${path.split('.').at(-1)}"; filename*=UTF-8''${encodeURIComponent(path.split('/').at(-1))}`);
+          const { target, size } = await artifactFile(p.workspace, path);
+          const extension = extname(path).slice(1);
+          const fallback = /^[a-z0-9]{1,12}$/i.test(extension) ? `download.${extension}` : 'download';
+          const filename = encodeURIComponent(path.split('/').at(-1)).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+          res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${filename}`);
           res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
-          return await serve(res, target);
+          res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': size, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+          await pipeline(createReadStream(target), res);
+          return;
         }
         if (url.pathname === '/api/agent/project' && req.method === 'GET') {
           const id = url.searchParams.get('id');
@@ -257,7 +263,10 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           return json(res, 200, { files: p.state.files, revision: p.state.revision, artifacts: await listArtifacts(p.workspace) });
         }
         if (url.pathname === '/api/agent/runs' && req.method === 'POST') {
-          const input = await body(req);
+          // Project transfers can contain large binary files encoded as base64.
+          // Do not impose a separate app-size ceiling; available Node memory and
+          // disk space still bound this JSON transport, unlike linked folders.
+          const input = await body(req, Infinity);
           if (active.size || starting) throw failure('يوجد تنفيذ جارٍ؛ انتظر أو أوقفه أولاً', 409);
           const engine = codingEngineById(input.engine);
           if (!engine?.providers.includes(input.provider)) throw failure('اختر مزوّد محرك البرمجة الصحيح');
@@ -283,7 +292,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             const current = await snapshot(p.workspace);
             if (p.state.revision && JSON.stringify(current) !== JSON.stringify(p.state.files)) throw failure('تغيّرت ملفات الكمبيوتر خارج سوالف؛ استرجعها أولاً.', 409);
             for (const file of p.state.files) if (!files.some(f => f.path === file.path)) await unlink(await safeFile(p.workspace, file.path)).catch(e => { if (e.code !== 'ENOENT') throw e; });
-            for (const file of files) await writeFile(await safeFile(p.workspace, file.path, true), file.content);
+            for (const file of files) await writeFile(await safeFile(p.workspace, file.path, true), projectFileBytes(file));
             p.state.files = files;
             await writeFile(p.statePath, JSON.stringify(p.state));
             }
@@ -326,7 +335,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             // Bound memory without discarding the newest job or its workspace.
             for (const [key, old] of runs) if (key !== id && old.state !== 'running' && Date.now() - old.createdAt > 3600_000) runs.delete(key);
           };
-          const context = 'You are working in Sowalif. Work only in /workspace. Do not deploy or publish. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). You can also create real downloadable PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, ZIP and image files whenever the user asks, without requiring a special mode or toggle. Save final deliverables in /workspace/outputs/ with descriptive filenames; put generation scripts outside outputs. Python packages reportlab, docx, openpyxl, pptx, arabic_reshaper and bidi plus Noto Arabic fonts are preinstalled. Use proper RTL and Arabic shaping/fonts for Arabic documents. Verify generated files open correctly; never merely rename plain text to a binary extension. Excel formulas must be real formulas; clearly distinguish calculated/cached values if no calculation engine is available. The app automatically exposes outputs as download links; do not invent public URLs. Reply in the user language.\n\n' + input.prompt;
+          const context = 'You are working in Sowalif. Work only in /workspace. Do not deploy or publish. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). You can also create real downloadable PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, ZIP and image files whenever the user asks, without requiring a special mode or toggle. Save final deliverables in /workspace/outputs/ with descriptive filenames; put generation scripts outside outputs. Python packages reportlab, docx, openpyxl, pptx, arabic_reshaper and bidi plus Noto Arabic fonts are preinstalled. Use proper RTL and Arabic shaping/fonts for Arabic documents. Verify generated files open correctly; never merely rename plain text to a binary extension. Excel formulas must be real formulas; clearly distinguish calculated/cached values if no calculation engine is available. The workspace may include uploaded binary files and archives; preserve their original bytes. Inspect or extract archive contents only when the user asks. Before extracting, reject absolute paths, parent traversal, symlinks and entries outside the chosen folder; do not overwrite existing files without review. For ZIP output use real compression such as Python zipfile.ZIP_DEFLATED, not a stored-only archive. The app automatically exposes outputs as download links; do not invent public URLs. Reply in the user language.\n\n' + input.prompt;
           try {
             run.handle = launch({ workspace: p.workspace, sessions: p.sessions, image: typeof image === 'string' ? image : IMAGE,
               config: { engine: input.engine, provider: input.provider, key: input.key, model, prompt: context, budget: Math.max(.1, Math.min(10, Number(input.budget) || 2)), sessionId: p.state.sessions[sessionKey] }, emit, done });

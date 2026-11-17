@@ -140,3 +140,37 @@ test('the new engine image supports Carbon and Kimi, with legacy fallback for Co
     assert.equal((await (await fetch(`${origin}/api/agent/runs/${id}`)).json()).state, 'completed');
   }
 });
+
+test('project run transfers large text, binary and archive files without the former JSON/file limits', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'sowalif-large-project-'));
+  let job;
+  const server = createLocalServer({ dataDir, ready: async () => true, launch(options) { job = options; return { stop() {} }; } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(dataDir, { recursive: true, force: true }); });
+  const { csrf } = await (await fetch(origin + '/api/agent/status')).json();
+  const bytes = Buffer.from([0x50, 0x4b, 3, 4, 0xff, 0, 0x80, 0x33]);
+  const files = [
+    { path: 'large.txt', content: 'long content\n'.repeat(100_000) },
+    { path: 'photos.zip', content: bytes.toString('base64'), encoding: 'base64' },
+    { path: 'image.png', content: bytes.toString('base64'), encoding: 'base64' },
+    ...Array.from({ length: 45 }, (_, index) => ({ path: `file-${index}.txt`, content: 'kept' })),
+  ];
+  const response = await fetch(origin + '/api/agent/runs', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: origin, 'X-Sowalif-CSRF': csrf },
+    body: JSON.stringify({ projectId: 'large-project', prompt: 'Inspect the project', engine: 'claude', provider: 'openrouter', key: 'fake-api-key', files }),
+  });
+  assert.equal(response.status, 202, await response.clone().text());
+  const { id } = await response.json();
+  assert.deepEqual(await readFile(join(job.workspace, 'photos.zip')), bytes);
+  assert.deepEqual(await readFile(join(job.workspace, 'image.png')), bytes);
+  assert.equal((await readFile(join(job.workspace, 'large.txt'), 'utf8')).length, files[0].content.length);
+  assert.match(job.config.prompt, /zipfile\.ZIP_DEFLATED/);
+  job.emit({ type: 'result' }); await job.done(null);
+  const run = await (await fetch(origin + '/api/agent/runs/' + id)).json();
+  assert.equal(run.state, 'completed');
+  assert.equal(run.files.length, files.length);
+  assert.equal(run.files.find(file => file.path === 'photos.zip').encoding, 'base64');
+  assert.deepEqual(Buffer.from(run.files.find(file => file.path === 'image.png').content, 'base64'), bytes);
+  assert.equal(run.files.find(file => file.path === 'large.txt').content, files[0].content);
+});

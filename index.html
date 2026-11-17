@@ -259,21 +259,25 @@
     <div class="sheet-card project-card" role="dialog" aria-modal="true" aria-labelledby="projectTitle">
       <div class="sheet-head"><h3 id="projectTitle">ملفات المشروع</h3><button class="icon-btn" data-close aria-label="إغلاق">✕</button></div>
       <p id="projectFolderHint" class="muted"></p>
-      <p class="muted">ملفات المصدر المحفوظة تُرسل للمزوّد عند طلب مساعدة في المشروع.</p>
+      <p class="muted">تُحفظ الملفات الأصلية كما هي. تُرسل مقتطفات من النصوص للمحادثة، ويصل محرك الكمبيوتر إلى ملفات المشروع كاملة.</p>
       <div class="project-actions">
         <button id="projectLinkFolder" class="btn primary hidden" type="button">ربط مجلد الجهاز</button>
         <label class="btn ghost">استيراد ملفات<input id="projectImport" type="file" multiple hidden></label>
         <label class="btn ghost">استيراد نسخة من مجلد<input id="projectFolder" type="file" webkitdirectory multiple hidden></label>
         <button id="projectWriteFolder" class="btn ghost hidden" type="button">حفظ التغييرات المعلّقة في المجلد</button>
         <button id="projectRefreshFolder" class="btn ghost hidden" type="button">إعادة قراءة ملفات الجهاز</button>
-        <button id="projectExport" class="btn ghost" type="button">تنزيل ZIP</button>
+        <button id="projectExport" class="btn ghost" type="button">ضغط المشروع وتنزيل ZIP</button>
         <button id="codingRecover" class="btn ghost" type="button">استرجاع ملفات محرك الكمبيوتر</button>
       </div>
       <details class="settings-group project-github">
-        <summary><span><strong>رفع إلى GitHub</strong><small>راجع الملفات وارفعها على فرع جديد</small></span></summary>
+        <summary><span><strong>ربط GitHub ورفع الملفات</strong><small>مراجعة التغييرات، Commit وPush</small></span></summary>
         <div class="settings-body project-github-fields">
           <label for="projectRepository">المستودع</label>
           <input id="projectRepository" type="text" dir="ltr" placeholder="owner/repo" autocomplete="off" spellcheck="false">
+          <label for="projectBaseBranch">الفرع الأساسي</label>
+          <input id="projectBaseBranch" type="text" dir="ltr" placeholder="تلقائي — الفرع الافتراضي" autocomplete="off" spellcheck="false">
+          <label for="projectPushMode">وجهة الرفع</label>
+          <select id="projectPushMode"><option value="new">فرع جديد للمراجعة</option><option value="current">الفرع المحدد مباشرة</option></select>
           <label for="projectGithubToken">رمز الوصول إلى GitHub</label>
           <input id="projectGithubToken" type="password" dir="ltr" autocomplete="off" spellcheck="false">
           <p class="muted">استخدم مستودعًا مهيّأً بملف README أو تعديل سابق. أعطِ الرمز صلاحية Contents: Read and write لهذا المستودع. يُستخدم الرمز مع GitHub مباشرة.</p>
@@ -303,8 +307,10 @@
         <input id="projectPath" type="text" dir="ltr" placeholder="index.html" spellcheck="false" maxlength="180">
         <label for="projectCode">محتوى الملف</label>
         <textarea id="projectCode" dir="ltr" rows="12" spellcheck="false"></textarea>
+        <p id="projectBinaryNotice" class="muted hidden">ملف ثنائي محفوظ بصيغته الأصلية. نزّله كما هو، أو ضمّه إلى ZIP، أو اطلب من محرك الكمبيوتر العمل عليه.</p>
         <div class="project-actions">
           <button id="projectSave" class="btn primary" type="button">حفظ الملف</button>
+          <button id="projectDownload" class="btn ghost" type="button">تنزيل الملف الأصلي</button>
           <button id="projectPreview" class="btn ghost" type="button">معاينة HTML مستقل</button>
           <button id="projectRemove" class="btn ghost" type="button">حذف الملف</button>
         </div>
@@ -497,6 +503,6 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=35"></script>
+  <script type="module" src="js/app.js?v=36"></script>
 </body>
 </html>

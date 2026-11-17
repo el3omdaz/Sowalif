@@ -3,16 +3,16 @@ import * as db from './db.js?v=22';
 import { fitViewport } from './viewport.js?v=21';
 import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=26';
 import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=22';
-import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=29';
+import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=36';
 import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=22';
 import { mediaProvider } from './media.js?v=22';
 import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=22';
 import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=22';
 import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=22';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, projectZip, readProjectFiles } from './project.js?v=20';
-import { prepareProjectPush, pushProject } from './project-github.js?v=20';
-import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=20';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=29';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=36';
+import { prepareProjectPush, pushProject } from './project-github.js?v=36';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=36';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=36';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=27';
 import { planImage } from './image-plan.js?v=1';
 import { initOrganizer } from './organizer.js?v=32';
@@ -1422,8 +1422,15 @@ function clearProjectPreview() {
 }
 
 function loadProjectEditor(file) {
+  const binary = file && isBinaryProjectFile(file);
   $('#projectPath').value = file?.path || '';
-  $('#projectCode').value = file?.content || '';
+  $('#projectPath').readOnly = Boolean(binary);
+  $('#projectCode').value = binary ? '' : file?.content || '';
+  $('#projectCode').classList.toggle('hidden', Boolean(binary));
+  $('#projectBinaryNotice').classList.toggle('hidden', !binary);
+  $('#projectSave').disabled = Boolean(binary);
+  $('#projectPreview').disabled = Boolean(binary);
+  $('#projectDownload').disabled = !file;
   $('#projectRemove').disabled = !file;
   clearProjectPreview();
 }
@@ -1449,6 +1456,7 @@ const linkedFolders = new Map();
 let projectPushPlan = null;
 function projectDraftClean() {
   const file = projectFiles().find(item => item.path === editorPath);
+  if (file && isBinaryProjectFile(file)) return $('#projectPath').value === file.path;
   return $('#projectPath').value === (file?.path || '') && $('#projectCode').value === (file?.content || '');
 }
 function discardProjectDraft() {
@@ -1485,7 +1493,7 @@ async function editProject(action) {
   try {
     await action(status);
   } catch (error) {
-    status.textContent = error.message;
+    status.textContent = error.name === 'QuotaExceededError' ? 'مساحة تخزين المتصفح ممتلئة. اربط مجلد المشروع على الكمبيوتر للعمل على ملفاته مباشرة.' : error.message;
   }
 }
 
@@ -1502,6 +1510,7 @@ $('#projectSaveInstructions').onclick = () => editProject(async status => {
 });
 
 $('#projectSave').onclick = () => editProject(async (status) => {
+  if (selectedProjectFile() && isBinaryProjectFile(selectedProjectFile())) throw new Error('نزّل الملف الثنائي أو عدّله عبر محرك الكمبيوتر.');
   const path = $('#projectPath').value.trim();
   const files = mergeProjectFiles(projectFiles(), [{ path, content: $('#projectCode').value }]);
   const destination = files.find(file => file.path.toLowerCase() === path.toLowerCase()).path;
@@ -1546,13 +1555,29 @@ $('#projectPreview').onclick = () => editProject(async (status) => {
   status.textContent = 'المعاينة تشغّل HTML وCSS وJavaScript المضمّنة داخل الملف.';
 });
 $('#projectExport').onclick = () => editProject(async () => {
-  const url = URL.createObjectURL(projectZip(projectFiles()));
+  projectSaving = true;
+  $('#projectStatus').textContent = 'أضغط ملفات المشروع…';
+  let zip;
+  try { zip = await compressProjectZip(projectFiles()); }
+  finally { projectSaving = false; }
+  const url = URL.createObjectURL(zip);
   const link = document.createElement('a');
   link.href = url;
   link.download = 'sowalif-project.zip';
   document.body.append(link);
   link.click();
   link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  $('#projectStatus').textContent = 'تم تجهيز الملف المضغوط.';
+});
+$('#projectDownload').onclick = () => editProject(async () => {
+  const file = selectedProjectFile();
+  if (!file) return;
+  const url = URL.createObjectURL(new Blob([projectFileBytes(file)], { type: 'application/octet-stream' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = file.path.split('/').at(-1);
+  link.click();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 });
 
@@ -1569,9 +1594,9 @@ $('#projectLinkFolder').onclick = () => {
     }
     const imported = await readProjectDirectory(directory);
     if (S.chat !== chat || $('#projectSheet').classList.contains('hidden')) return;
-    const baseline = new Map(imported.map(file => [file.path, file.content]));
-    const existing = new Map(projectFiles().map(file => [file.path.toLowerCase(), file.content]));
-    const different = imported.some(file => existing.has(file.path.toLowerCase()) && existing.get(file.path.toLowerCase()) !== file.content);
+    const baseline = new Map(imported.map(file => [file.path, projectFileSignature(file)]));
+    const existing = new Map(projectFiles().map(file => [file.path.toLowerCase(), projectFileSignature(file)]));
+    const different = imported.some(file => existing.has(file.path.toLowerCase()) && existing.get(file.path.toLowerCase()) !== projectFileSignature(file));
     if (different && !confirm('بعض الملفات تختلف. تبي تربط المجلد وتحتفظ بتعديلات سوالف للمراجعة؟')) return;
     const files = mergeProjectFiles(imported, projectFiles());
     await saveProjectFiles(files);
@@ -1597,7 +1622,7 @@ $('#projectRefreshFolder').onclick = () => {
     }
     const imported = await readProjectDirectory(link.directory);
     if (S.chat !== chat || $('#projectSheet').classList.contains('hidden')) return;
-    const disk = new Map(imported.map(file => [file.path, file.content]));
+    const disk = new Map(imported.map(file => [file.path, projectFileSignature(file)]));
     const remaining = projectFiles().filter(file => !link.baseline.has(file.path) || disk.has(file.path));
     const files = mergeProjectFiles(remaining, imported);
     await saveProjectFiles(files);
@@ -1616,14 +1641,20 @@ async function projectTransfer(status, action) {
     return;
   }
   projectSaving = true;
-  const fields = ['projectRepository', 'projectGithubToken', 'projectCommitMessage', 'projectPath', 'projectCode'];
+  const fields = ['projectRepository', 'projectGithubToken', 'projectCommitMessage', 'projectBaseBranch'];
   for (const id of fields) $(`#${id}`).readOnly = true;
+  $('#projectCode').readOnly = true;
+  $('#projectPath').readOnly = true;
+  $('#projectPushMode').disabled = true;
   try {
     await action();
   } catch (error) {
     status.textContent = error.message;
   } finally {
     for (const id of fields) $(`#${id}`).readOnly = false;
+    $('#projectCode').readOnly = false;
+    $('#projectPath').readOnly = Boolean(selectedProjectFile() && isBinaryProjectFile(selectedProjectFile()));
+    $('#projectPushMode').disabled = false;
     projectSaving = false;
   }
 }
@@ -1651,7 +1682,7 @@ function resetProjectPush() {
   $('#projectGithubStatus').textContent = '';
 }
 
-for (const id of ['projectRepository', 'projectGithubToken']) $(`#${id}`).addEventListener('input', resetProjectPush);
+for (const id of ['projectRepository', 'projectGithubToken', 'projectBaseBranch', 'projectPushMode']) $(`#${id}`).addEventListener('input', resetProjectPush);
 $('#projectReviewPush').onclick = () => {
   if (projectSaving) return;
   resetProjectPush();
@@ -1664,6 +1695,8 @@ $('#projectReviewPush').onclick = () => {
       token: $('#projectGithubToken').value.trim(),
       files: projectFiles(),
       removed: project?.removed || [],
+      baseBranch: $('#projectBaseBranch').value.trim(),
+      pushMode: $('#projectPushMode').value || 'new',
     });
     if (!plan.changes.length) {
       status.textContent = 'ملفات المشروع مطابقة للنسخة الموجودة في GitHub.';
@@ -1678,6 +1711,7 @@ $('#projectReviewPush').onclick = () => {
     }
     list.classList.remove('hidden');
     $('#projectPush').classList.remove('hidden');
+    $('#projectPush').textContent = plan.pushMode === 'current' ? 'Commit وPush إلى الفرع المحدد' : 'Commit وPush إلى فرع جديد';
     status.textContent = `راجع التغييرات قبل رفعها إلى ${plan.repo} على الفرع ${plan.branch}.`;
   });
 };
@@ -1693,6 +1727,7 @@ $('#projectPush').onclick = () => {
     $('#projectGithubToken').value = '';
     const result = $('#projectGithubResult');
     result.href = url;
+    result.textContent = plan.pushMode === 'current' ? 'عرض Commit في GitHub' : 'عرض الفرع وفتح Pull Request في GitHub';
     result.classList.remove('hidden');
     status.textContent = `تم الرفع إلى ${plan.repo} على الفرع ${plan.branch}.`;
   });

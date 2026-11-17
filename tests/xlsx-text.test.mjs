@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectZip } from '../js/project.js?v=20';
+import { projectZip } from '../js/project.js?v=36';
 import { xlsxText } from '../js/xlsx-text.js?v=1';
 
 function element(localName, attrs = {}, children = [], textContent = '') {
