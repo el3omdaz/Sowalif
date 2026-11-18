@@ -255,11 +255,13 @@
     </div>
   </div>
 
+  <div id="fileDropOverlay" class="file-drop-overlay hidden" aria-hidden="true"></div>
   <div id="projectSheet" class="sheet hidden">
     <div class="sheet-card project-card" role="dialog" aria-modal="true" aria-labelledby="projectTitle">
       <div class="sheet-head"><h3 id="projectTitle">ملفات المشروع</h3><button class="icon-btn" data-close aria-label="إغلاق">✕</button></div>
       <p id="projectFolderHint" class="muted"></p>
       <p class="muted">تُحفظ الملفات الأصلية كما هي. تُرسل مقتطفات من النصوص للمحادثة، ويصل محرك الكمبيوتر إلى ملفات المشروع كاملة.</p>
+      <button id="projectDropZone" class="project-drop-zone" type="button"><strong>اسحب الملفات وأفلتها هنا</strong><span>أو اضغط لاختيارها · يشمل الملفات المضغوطة</span></button>
       <div class="project-actions">
         <button id="projectLinkFolder" class="btn primary hidden" type="button">ربط مجلد الجهاز</button>
         <label class="btn ghost">استيراد ملفات<input id="projectImport" type="file" multiple hidden></label>

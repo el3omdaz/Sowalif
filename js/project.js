@@ -75,17 +75,19 @@ export function mergeProjectFiles(files, changes) {
   return result.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export async function readProjectFiles(items) {
+export async function readProjectFiles(items, { onProgress = () => {} } = {}) {
   const candidates = [...items].map(file => ({
     file,
     path: file.projectPath || (file.webkitRelativePath ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name),
   })).filter(({ path }) => validProjectPath(path));
   if (!candidates.length) throw new Error('ما لقيت ملفات بمسارات مسموحة في الاختيار.');
   const changes = [];
+  onProgress(0, candidates.length);
   // Read sequentially rather than holding every original buffer at once.
   for (const { file, path } of candidates) {
     const bytes = file.arrayBuffer ? new Uint8Array(await file.arrayBuffer()) : new TextEncoder().encode(await file.text());
     changes.push(projectFileFromBytes(path, bytes));
+    onProgress(changes.length, candidates.length);
   }
   return { changes: mergeProjectFiles([], changes), skipped: items.length - candidates.length };
 }

@@ -866,14 +866,10 @@ async function addFiles(files) {
       toast('أرفق صورة أو استخدم خانة الرابط للمرجع.');
       continue;
     }
-    if (file.size > 40 * 1024 * 1024) {
-      toast(`«${file.name}» أكبر من 40MB`);
-      continue;
-    }
     const isImg = file.type.startsWith('image/');
-    const a = { id: db.uid(), name: file.name || 'صورة', kind: isImg ? 'image' : 'doc', loading: true, controller: new AbortController() };
+    const a = { id: db.uid(), name: file.name || 'صورة', kind: isImg ? 'image' : 'doc', loading: true, phase: 'أجهز المرفق…', controller: new AbortController() };
     const signal = a.controller.signal;
-    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) toast('قد يستخدم سوالف نموذج الرؤية لقراءة النص المصوّر داخل PDF.');
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) a.phase = 'أحفظ ملف PDF الأصلي…';
     S.attachments.push(a);
     renderAttachments();
     try {
@@ -881,14 +877,14 @@ async function addFiles(files) {
       signal.throwIfAborted();
       if (blob) a.preview = URL.createObjectURL(blob);
       renderAttachments();
-      a.meta = await makeAttachment(file, blob, model, { signal });
+      a.meta = await makeAttachment(file, blob, model, { signal, onProgress: text => { a.phase = text; renderAttachments(); } });
       signal.throwIfAborted();
       a.loading = false;
       added++;
       if (a.meta.cut && !a.meta.localText) toast(`«${a.name}» طويل — تم أخذ أول جزء منه`);
     } catch (e) {
       S.attachments = S.attachments.filter((x) => x !== a);
-      if (!signal.aborted) toast(e.message, 4000);
+      if (!signal.aborted) toast(e.name === 'QuotaExceededError' ? 'مساحة تخزين المتصفح ممتلئة. حرّر مساحة أو استخدم مجلد الكمبيوتر للملفات الكبيرة.' : e.message, 5000);
       disposeAttachment(a);
     }
     renderAttachments();
@@ -916,7 +912,7 @@ async function attachFile(file, original) {
 
 function renderAttachments() {
   $('#attachRow').innerHTML = S.attachments
-    .map((a) => `<div class="att${a.loading ? ' loading' : ''}">${a.preview ? `<img src="${a.preview}" alt="">` : '📄'}<span>${esc(a.name)}</span><button data-rm="${a.id}" aria-label="إزالة">✕</button></div>`)
+    .map((a) => `<div class="att${a.loading ? ' loading' : ''}">${a.preview ? `<img src="${a.preview}" alt="">` : '📄'}<span>${esc(a.name)}${a.loading ? `<small role="status">${esc(a.phase || 'أجهز المرفق…')}</small>` : a.meta?.deferredPdf ? '<small>جاهز · يُقرأ عند الإرسال</small>' : ''}</span><button data-rm="${a.id}" aria-label="إزالة">✕</button></div>`)
     .join('');
   updateSend();
 }
@@ -951,10 +947,56 @@ document.addEventListener('keydown', (event) => {
   }
 });
 $('#attachBtn').onclick = () => { closeComposerTools(); $('#fileInput').click(); };
-document.addEventListener('dragover', (e) => e.preventDefault());
-document.addEventListener('drop', (e) => {
-  e.preventDefault();
-  if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]);
+let fileDragDepth = 0;
+function isFileDrag(event) {
+  return [...(event.dataTransfer?.types || [])].includes('Files') || Boolean(event.dataTransfer?.files?.length);
+}
+function clearFileDrag() {
+  fileDragDepth = 0;
+  $('#fileDropOverlay').classList.add('hidden');
+  $('#projectDropZone').classList.remove('drag-over');
+}
+function fileDropBlocked() {
+  return S.controller || projectSaving || projectImporting || rec || voiceJob || micStarting || cloudAuthBusy || S.attachments.some(item => item.loading);
+}
+function showFileDrag() {
+  const project = !$('#projectSheet').classList.contains('hidden');
+  $('#fileDropOverlay').textContent = fileDropBlocked() ? 'انتظر انتهاء العملية الحالية قبل إضافة الملفات'
+    : project ? 'أفلت الملفات لإضافتها إلى المشروع' : 'أفلت الملفات لإرفاقها بالمحادثة';
+  $('#fileDropOverlay').classList.remove('hidden');
+  $('#projectDropZone').classList.toggle('drag-over', project && !fileDropBlocked());
+}
+document.addEventListener('dragenter', event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  fileDragDepth++;
+  showFileDrag();
+});
+document.addEventListener('dragover', event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = fileDropBlocked() ? 'none' : 'copy';
+});
+document.addEventListener('dragleave', event => {
+  if (!fileDragDepth) return;
+  if (--fileDragDepth <= 0) clearFileDrag();
+});
+document.addEventListener('dragend', clearFileDrag);
+window.addEventListener('blur', clearFileDrag);
+document.addEventListener('drop', async event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  event.stopPropagation?.();
+  clearFileDrag();
+  if (fileDropBlocked()) return toast('انتظر انتهاء العملية الحالية قبل إضافة الملفات');
+  const items = [...(event.dataTransfer?.items || [])];
+  if (items.some(item => item.kind === 'file' && item.webkitGetAsEntry?.()?.isDirectory)) {
+    return toast('لإضافة مجلد مع مساراته استخدم «استيراد نسخة من مجلد» من ملفات المشروع');
+  }
+  const files = [...(event.dataTransfer?.files || [])];
+  if (!files.length) return;
+  if (!$('#projectSheet').classList.contains('hidden')) await importProjectFiles(files);
+  else await addFiles(files);
 });
 input.addEventListener('paste', (e) => {
   const files = [...(e.clipboardData?.files || [])];
@@ -1625,23 +1667,50 @@ $('#projectRemove').onclick = () => editProject(async (status) => {
   renderProjectEditor();
   status.textContent = linked ? 'تم حذف الملف من المشروع ومجلد الجهاز.' : 'تم حذف الملف من نسخة سوالف.';
 });
-for (const id of ['projectImport', 'projectFolder']) {
-  $(`#${id}`).onchange = (event) => {
-    const items = [...event.target.files];
-    event.target.value = '';
-    if (!items.length || !discardProjectDraft()) return;
-    void editProject(async (status) => {
+let projectImporting = false;
+async function importProjectFiles(items) {
+  if (!items.length) return;
+  if (fileDropBlocked() || S.mode !== 'work') {
+    $('#projectStatus').textContent = 'انتظر انتهاء العملية الحالية وافتح مشروعاً قبل استيراد الملفات';
+    return;
+  }
+  if (!discardProjectDraft()) return;
+  projectImporting = true;
+  $('#projectDropZone').disabled = true;
+  try {
+    await editProject(async (status) => {
+      projectSaving = true;
       const chat = S.chat;
-      const { changes, skipped } = await readProjectFiles(items);
+      status.textContent = 'أقرأ الملفات وأحفظ صيغها الأصلية…';
+      const { changes, skipped } = await readProjectFiles(items, {
+        onProgress: (done, total) => { status.textContent = `أقرأ الملفات… ${done} / ${total}`; },
+      });
+      projectSaving = false;
       if (S.chat !== chat || $('#projectSheet').classList.contains('hidden')) return;
       const existing = new Set(projectFiles().map(file => file.path.toLowerCase()));
-      if (changes.some(file => existing.has(file.path.toLowerCase())) && !confirm('بعض الملفات موجودة. تبي تستبدلها بالملفات المستوردة؟')) return;
+      if (changes.some(file => existing.has(file.path.toLowerCase())) && !confirm('بعض الملفات موجودة. تبي تستبدلها بالملفات المستوردة؟')) {
+        status.textContent = 'تم إلغاء الاستيراد. الملفات السابقة باقية كما هي.';
+        return;
+      }
       const files = mergeProjectFiles(projectFiles(), changes);
+      status.textContent = 'أحفظ الملفات في المشروع…';
       await saveProjectFiles(files);
       editorPath = files.find(file => file.path.toLowerCase() === changes[0].path.toLowerCase()).path;
       renderProjectEditor(editorPath);
       status.textContent = `تم استيراد ${changes.length} ملف.${skipped ? ` تم تجاوز ${skipped} ملف غير مدعوم.` : ''}`;
     });
+  } finally {
+    projectSaving = false;
+    projectImporting = false;
+    $('#projectDropZone').disabled = false;
+  }
+}
+$('#projectDropZone').onclick = () => $('#projectImport').click();
+for (const id of ['projectImport', 'projectFolder']) {
+  $(`#${id}`).onchange = (event) => {
+    const items = [...event.target.files];
+    event.target.value = '';
+    return importProjectFiles(items);
   };
 }
 $('#projectPreview').onclick = () => editProject(async (status) => {

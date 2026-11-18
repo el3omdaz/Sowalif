@@ -116,7 +116,9 @@ export async function respondLocal(chat, emit, signal, { research } = {}) {
       .map(message => ({ role: message.role, text: message.text.slice(-700) }));
     const instructions = chat.project?.instructions;
     const request = [instructions && `Standing user instructions for the project:\n${instructions}`, personal.expanded || 'نفّذ المطلوب على أساس المرفقات والسياق.'].filter(Boolean).join('\n\n');
-    const docs = await readAttachmentDocuments(chat.messages.slice(-7).reverse().filter(message => message.role === 'user').flatMap(message => message.files || []));
+    const docs = await readAttachmentDocuments(chat.messages.slice(-7).reverse().filter(message => message.role === 'user').flatMap(message => message.files || []), {
+      modelId: chat.model, signal, onProgress: text => emit('status', { text }),
+    });
     if (request.length > 19000 - (docs.length ? 2000 : 0) - (research ? 2000 : 0)) throw new Error('اختصر نص المهمة وتعليمات المشروع حتى يبقى مجال لسياق التنفيذ.');
     const sections = [request];
     const contextSpace = 19_900 - request.length;

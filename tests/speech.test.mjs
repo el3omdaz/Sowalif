@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
-import { applyProjectProposal } from '../js/project.js?v=36';
+import { applyProjectProposal, readProjectFiles, mergeProjectFiles, projectFileBytes } from '../js/project.js?v=36';
 import { writeProjectDirectory } from '../js/project-folder.js?v=36';
 import { reasoningLevels } from '../js/reasoning.js?v=1';
 import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from '../js/agent-engines.js?v=1';
@@ -74,6 +74,86 @@ test('Enter sends regardless of browser device classification', () => {
   press({ shiftKey: true }, { sent: false, prevented: false });
   press({ isComposing: true }, { sent: false, prevented: false });
   press({ repeat: true }, { sent: false, prevented: true });
+});
+
+function dropEvent(files, extra = {}) {
+  const result = { prevented: 0, stopped: 0 };
+  result.event = { dataTransfer: { types: files.length ? ['Files'] : ['text/plain'], files, ...extra },
+    preventDefault() { result.prevented++; }, stopPropagation() { result.stopped++; } };
+  return result;
+}
+
+test('dropping a large ZIP over an open project imports exact bytes once and never attaches it to chat', async () => {
+  const a = app();
+  const bytes = new Uint8Array(240_000).map((_, index) => index % 256);
+  const file = new File([bytes], 'assets.zip', { type: 'application/zip' });
+  let saves = 0, chatAdds = 0, saved;
+  a.ctx.readProjectFiles = readProjectFiles;
+  a.ctx.mergeProjectFiles = mergeProjectFiles;
+  a.ctx.recordFiles = files => { saves++; saved = files; };
+  a.ctx.recordChat = () => { chatAdds++; };
+  a.run("S.mode='work'; S.chat={id:'drop-project',project:{files:[]}}; saveProjectFiles=async files=>{S.chat.project.files=files; recordFiles(files)}; renderProjectEditor=()=>{}; addFiles=recordChat;");
+  const drop = dropEvent([file]);
+  await a.documentEvents.drop(drop.event);
+  assert.equal(drop.prevented, 1);
+  assert.equal(drop.stopped, 1);
+  assert.equal(saves, 1);
+  assert.equal(chatAdds, 0);
+  assert.equal(saved[0].path, 'assets.zip');
+  assert.deepEqual(projectFileBytes(saved[0]), bytes);
+  assert.equal(a.run('projectImporting'), false);
+  assert.equal(a.node('#projectDropZone').disabled, false);
+  assert.match(a.node('#projectStatus').textContent, /تم استيراد 1 ملف/);
+});
+
+test('chat file drops remain attachments while text dragging is not intercepted', async () => {
+  const a = app();
+  a.node('#projectSheet').classList.add('hidden');
+  let added;
+  a.ctx.recordChat = files => { added = files; };
+  a.run('addFiles=recordChat;');
+  const file = new File(['draft'], 'notes.txt');
+  const drop = dropEvent([file]);
+  await a.documentEvents.drop(drop.event);
+  assert.equal(added[0], file);
+  const text = dropEvent([]);
+  a.documentEvents.dragover(text.event);
+  await a.documentEvents.drop(text.event);
+  assert.equal(text.prevented, 0);
+  assert.equal(text.stopped, 0);
+});
+
+test('file drops during requests or imports are blocked without changing existing drafts', async () => {
+  for (const setup of ['S.controller={}', 'projectSaving=true', 'projectImporting=true', 'rec={}', 'S.attachments=[{loading:true}]']) {
+    const a = app();
+    a.ctx.recordToast = () => {};
+    a.run('toast=recordToast; ' + setup);
+    a.node('#input').value = 'Keep this draft';
+    await a.documentEvents.drop(dropEvent([new File(['x'], 'file.txt')]).event);
+    assert.equal(a.node('#input').value, 'Keep this draft');
+    assert.equal(a.node('#projectStatus').textContent, '');
+  }
+});
+
+test('project drop cancellation preserves existing bytes and does not save an overwrite', async () => {
+  const a = app();
+  a.ctx.readProjectFiles = readProjectFiles;
+  a.ctx.confirm = () => false;
+  a.ctx.unexpectedSave = () => assert.fail('cancelled drop must not save');
+  a.run("S.mode='work'; S.chat={id:'drop-project',project:{files:[{path:'notes.txt',content:'old'}]}}; saveProjectFiles=unexpectedSave;");
+  await a.documentEvents.drop(dropEvent([new File(['new'], 'notes.txt')]).event);
+  assert.equal(a.run('S.chat.project.files[0].content'), 'old');
+  assert.equal(a.run('projectImporting'), false);
+  assert.match(a.node('#projectStatus').textContent, /تم إلغاء الاستيراد/);
+});
+
+test('dropping a directory explains how to preserve its paths instead of flattening it', async () => {
+  const a = app();
+  let notice;
+  a.ctx.recordToast = text => { notice = text; };
+  a.run('toast=recordToast;');
+  await a.documentEvents.drop(dropEvent([new File([], 'folder')], { items: [{ kind: 'file', webkitGetAsEntry: () => ({ isDirectory: true }) }] }).event);
+  assert.match(notice, /استيراد نسخة من مجلد/);
 });
 
 test('email confirmation removes credentials from the URL and accepts the signup session', async () => {

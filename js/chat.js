@@ -76,8 +76,33 @@ async function imagePart(f, needUrl) {
   return blob ? { kind: 'image', dataUrl: await toDataUrl(blob) } : null;
 }
 
-async function readAttachmentDocument(file) {
+async function readAttachmentDocument(file, { modelId, signal, onProgress } = {}) {
+  signal?.throwIfAborted();
   let text = typeof file.text === 'string' ? file.text : '';
+  if (file.deferredPdf && file.localFile) {
+    const opticalModel = modelId && modelById(modelId).vision !== false ? modelId : 'native';
+    if (file.extractedText && file.extractedModel === opticalModel) {
+      const cached = await getBlob(file.extractedText).then(blob => blob?.text()).catch(() => undefined);
+      signal?.throwIfAborted();
+      if (typeof cached === 'string') return { name: file.name || 'ملف', text: cached };
+    }
+    const original = await getBlob(file.localFile);
+    signal?.throwIfAborted();
+    if (!(original instanceof Blob)) return { name: file.name || 'ملف', text: text + '\n\nالملف الأصلي غير موجود على هذا الجهاز. أعد إرفاق الأصل لقراءته.' };
+    onProgress?.(`أقرأ محتوى «${file.name || 'PDF'}» عند الطلب…`);
+    text = await pdfText(original, opticalModel === 'native' ? null : blob => readImageText(blob, opticalModel, signal), signal,
+      progress => onProgress?.(`«${file.name || 'PDF'}» — ${progress}`));
+    signal?.throwIfAborted();
+    text = text.replace(/\u0000/g, '').trim();
+    if (!text) throw new Error(`ما قدرت أقرأ نص من «${file.name || 'PDF'}». اختر نموذجًا يدعم الصور لقراءة الصفحات المصوّرة.`);
+    const previous = file.extractedText;
+    const extractedText = await saveAttachmentBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), signal);
+    file.extractedText = extractedText;
+    file.extractedModel = opticalModel;
+    file.text = text.length > SYNCED_DOC_CHARS ? text.slice(0, SYNCED_DOC_CHARS) + '\n\n' + SYNCED_TEXT_NOTICE : text;
+    if (previous && previous !== extractedText) void deleteBlob(previous).catch(() => {});
+    return { name: file.name || 'ملف', text };
+  }
   if (file.localText && file.localFile) {
     const fullText = await getBlob(file.localFile).then(blob => blob?.text()).catch(() => undefined);
     if (typeof fullText === 'string') text = fullText;
@@ -85,16 +110,16 @@ async function readAttachmentDocument(file) {
   return { name: file.name || 'ملف', text };
 }
 
-export function readAttachmentDocuments(files) {
-  return Promise.all((files || []).filter(file => file.kind === 'doc').map(readAttachmentDocument));
+export function readAttachmentDocuments(files, options) {
+  return Promise.all((files || []).filter(file => file.kind === 'doc').map(file => readAttachmentDocument(file, options)));
 }
 
 // الرسائل كما يفهمها kie.js: الصور كـ data URL أو رابط عام (Gemini يحتاج روابط)
-async function history(chat, model) {
+async function history(chat, model, options) {
   const needUrl = model.api === 'chat';
   const current = chat.messages.at(-1);
   const documents = await Promise.all(chat.messages.flatMap(m => m.role === 'user'
-    ? (m.files || []).filter(f => f.kind === 'doc').map(async f => ({ ...await readAttachmentDocument(f), current: m === current }))
+    ? (m.files || []).filter(f => f.kind === 'doc').map(async f => ({ ...await readAttachmentDocument(f, { modelId: model.id, ...options }), current: m === current }))
     : []));
   const excerpts = selectDocumentContext(documents, current?.text || '');
   let docIndex = 0;
@@ -260,7 +285,7 @@ export async function respond(chat, opts, emit, signal) {
     if (promptOnly && !chat.messages.some(message => message.files?.some(file => file.kind === 'image'))) throw new Error('أرفق صورة أولاً لاستخراج البرومبت.');
     let system = [systemPrompt(model, search), work && PROJECT_PROMPT, work && chat.project?.instructions && `User's standing instructions for this project:\n${chat.project.instructions}`,
       promptOnly && PROMPT_STUDIO_SYSTEM, personal.prompt].filter(Boolean).join('\n\n');
-    const messages = await history(chat, model);
+    const messages = await history(chat, model, { signal, onProgress: text => emit('status', { text }) });
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     let omittedProjectFiles;
     if (lastUser) {
@@ -414,12 +439,13 @@ export async function transcribe(blob, externalSignal, provider = settings.get('
 const TEXT_EXT = /\.(txt|md|csv|json|[cm]?js|jsx|ts|tsx|py|html|css|xml|svg|ya?ml|srt|log|sql|java|c|cpp|h|cs|php|rb|go|rs|sh|bat|ini|toml|vue|svelte)$/i;
 const SYNCED_DOC_CHARS = 400_000;
 
-export async function readPdfPages(pdf, imageOperators, readPageImage, signal) {
+export async function readPdfPages(pdf, imageOperators, readPageImage, signal, onProgress) {
   const pages = [];
   let hasText = false;
   let failedOcr;
   for (let i = 1; i <= pdf.numPages; i++) {
     signal?.throwIfAborted();
+    onProgress?.(`أستخرج نص الصفحة ${i} من ${pdf.numPages}…`);
     const page = await pdf.getPage(i);
     try {
       const content = await page.getTextContent();
@@ -439,6 +465,7 @@ export async function readPdfPages(pdf, imageOperators, readPageImage, signal) {
           if (native) parts.push('لم تُقرأ الصور داخل الصفحة لأن نموذج قراءة الصور غير متاح.');
         } else {
           try {
+            onProgress?.(`أقرأ صور الصفحة ${i} من ${pdf.numPages} بصريًا…`);
             const transcribed = String(await readPageImage(page) || '').trim();
             signal?.throwIfAborted();
             const canonicalLine = line => line.normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -485,7 +512,7 @@ async function pdfPageImage(page, signal) {
   }
 }
 
-async function pdfText(file, readPageImage, signal) {
+async function pdfText(file, readPageImage, signal, onProgress) {
   const pdfjs = await import('../vendor/pdf.mjs');
   signal?.throwIfAborted();
   pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.mjs', import.meta.url).href;
@@ -500,7 +527,7 @@ async function pdfText(file, readPageImage, signal) {
   const imageOperators = new Map(Object.entries(pdfjs.OPS)
     .filter(([name]) => /^paint(?:Inline)?Image/u.test(name)).map(([name, op]) => [op, simpleImageSize[name]]));
   const reading = documentTask.promise.then(pdf => readPdfPages(
-    pdf, imageOperators, readPageImage ? async page => readPageImage(await pdfPageImage(page, signal)) : undefined, signal,
+    pdf, imageOperators, readPageImage ? async page => readPageImage(await pdfPageImage(page, signal)) : undefined, signal, onProgress,
   ));
   let abort;
   const interrupted = signal && new Promise((_, reject) => {
@@ -556,13 +583,17 @@ async function saveAttachmentBlob(blob, signal) {
 }
 
 // صورة (Blob مصغّر) أو مستند ← وصف المرفق المحفوظ في الرسالة
-export async function makeAttachment(file, imageBlob, modelId, { signal } = {}) {
+export async function makeAttachment(file, imageBlob, modelId, { signal, onProgress } = {}) {
   signal?.throwIfAborted();
   if (imageBlob) return { kind: 'image', blob: await saveAttachmentBlob(imageBlob, signal), name: file.name || 'صورة' };
   const name = file.name || 'ملف';
   let text;
-  if (/\.pdf$/i.test(name) || file.type === 'application/pdf') text = await pdfText(file, modelId ? blob => readImageText(blob, modelId, signal) : null, signal);
-  else if (/\.docx$/i.test(name)) text = await docxText(file);
+  if (/\.pdf$/i.test(name) || file.type === 'application/pdf') {
+    onProgress?.('أحفظ ملف PDF الأصلي…');
+    return { kind: 'doc', name, localFile: await saveAttachmentBlob(file, signal), deferredPdf: true,
+      text: 'ملف PDF أصلي محفوظ على جهاز الإرفاق؛ يُقرأ عند إرسال السؤال. إذا كنت تستخدم جهازًا آخر، أعد إرفاق الأصل.' };
+  }
+  if (/\.docx$/i.test(name)) text = await docxText(file);
   else if (/\.xlsx$/i.test(name) || file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') text = await xlsxText(file, { signal });
   else if (/\.zip$/i.test(name) || file.type === 'application/zip') text = await zipText(file, path => TEXT_EXT.test(path), signal);
   else if (TEXT_EXT.test(name) || file.type.startsWith('text/')) text = await file.text();
