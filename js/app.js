@@ -1409,14 +1409,50 @@ async function refreshCodingStatus() {
     if (status.ready && status.documentTools === false) $('#codingStatus').textContent += ' · حدّث بيئة المحرك لتفعيل أدوات PDF وOCR والأرشيفات.';
   } catch { $('#codingStatus').textContent = 'تعذّر الاتصال بخدمة الكمبيوتر. شغّل Start-Sowalif.cmd.'; }
 }
+// «ربط المحرك» يختبر الخدمة فعلاً على الكمبيوتر، ولا يعيد فتح الإعدادات بلا سبب.
+// موقع GitHub Pages ليس بيئة تشغيل محلية، ولذلك نوجّه المستخدم إلى النسخة المحلية.
+async function connectCodingEngine() {
+  const engine = agentCredentials().engine;
+  if (engine === 'off') return toast('اختر محرك برمجة أولاً من قسم الشغل.', 5500);
+  if (!localAgentOrigin()) {
+    window.open('http://127.0.0.1:4781/', '_blank', 'noopener,noreferrer');
+    return toast('Claude Code يحتاج نسخة سوالف المحلية. شغّل Start-Sowalif.cmd أو Sowalif.exe أولاً. إذا تستخدم EXE افتح المنفذ 4782.', 8500);
+  }
+  if (!agentCredentials().key) {
+    openSettings('agent');
+    return toast('أدخل مفتاح المحرك في هذه النسخة المحلية واحفظه.', 6000);
+  }
+  const button = $('#codingSetup');
+  button.disabled = true;
+  button.textContent = 'جاري فحص الاتصال…';
+  try {
+    const status = await localStatus();
+    if (!status.ready) {
+      toast('خدمة سوالف تعمل، لكن بيئة Docker غير جاهزة. شغّل npm run agent:setup.', 8000);
+    } else if (!(status.engines || []).includes(engine)) {
+      toast(`محرك ${codingEngineName(engine)} غير مجهز. شغّل npm run agent:setup ثم أعد تشغيل سوالف.`, 8000);
+    } else {
+      toast(`✓ ${codingEngineName(engine)} جاهز على الكمبيوتر. اكتب طلبك في قسم الشغل.`, 6500);
+    }
+    await refreshCodingStatus();
+  } catch {
+    toast('تعذّر الوصول إلى خدمة سوالف المحلية. شغّل Start-Sowalif.cmd أو افتح Sowalif.exe.', 8000);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'فحص اتصال المحرك';
+  }
+}
 $('#codingEngine').onchange = (e) => {
   if (S.controller) { e.target.value = db.settings.get('codingEngine', 'off'); return; }
   db.settings.set('codingEngine', e.target.value);
   $('#codingKey').value = '';
   renderCodingSetup(); renderModelName();
-  if (e.target.value !== 'off') openSettings('agent');
+  if (e.target.value === 'off') return;
+  if (!localAgentOrigin()) return toast('للتشغيل افتح سوالف المحلية على الكمبيوتر؛ مفتاح OpenRouter وحده لا يشغّل Claude Code.', 7500);
+  if (!agentCredentials().key) openSettings('agent');
+  else void connectCodingEngine();
 };
-$('#codingSetup').onclick = () => openSettings('agent');
+$('#codingSetup').onclick = () => { void connectCodingEngine(); };
 $('#codingProvider').onchange = (e) => {
   if (S.controller) return;
   db.settings.set('codingProvider', e.target.value); $('#codingKey').value = ''; renderCodingSetup();
