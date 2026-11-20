@@ -13,25 +13,29 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=43">
+  <link rel="stylesheet" href="style.css?v=44">
 </head>
 <body>
   <div id="app" class="app">
     <aside id="side" class="side">
-      <div class="side-head"><div class="wordmark">سوالف <span>مساحة لأفكارك</span></div>
-        <button id="newChat" class="btn primary wide">＋ محادثة جديدة</button>
+      <div class="side-head">
+        <div class="side-heading">
+          <div class="wordmark"><b class="history-brand-icon" aria-hidden="true">س</b><span class="history-brand-name">سوالف <small>مساحة لأفكارك</small></span></div>
+          <button id="historyCollapse" class="icon-btn history-collapse" type="button" aria-label="طي سجل المحادثات" title="طي سجل المحادثات" aria-controls="chatList" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 4v16m5-11-3 3 3 3"/></svg></button>
+        </div>
+        <button id="newChat" class="btn primary wide history-action" type="button" aria-label="محادثة جديدة" title="محادثة جديدة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m-7-7h14"/></svg><span class="history-action-label">محادثة جديدة</span></button>
       </div>
-      <input id="search" class="side-search" type="search" placeholder="ابحث في المحادثات">
-      <nav id="chatList" class="chat-list"></nav>
+      <input id="search" class="side-search" type="search" placeholder="ابحث في المحادثات" aria-label="بحث في سجل المحادثات">
+      <nav id="chatList" class="chat-list" aria-label="سجل المحادثات"></nav>
       <div class="side-foot">
-        <button id="openSettings" class="btn ghost wide">⚙️ الإعدادات</button>
+        <button id="openSettings" class="btn ghost wide history-action" type="button" aria-label="الإعدادات" title="الإعدادات"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l-1.8 1.8a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1 1.7h-2a1.8 1.8 0 0 0-1-1.7 1.8 1.8 0 0 0-2 .4l-1.8-1.8a1.8 1.8 0 0 0 .4-2 1.8 1.8 0 0 0-1.7-1v-2a1.8 1.8 0 0 0 1.7-1 1.8 1.8 0 0 0-.4-2L10 7.2a1.8 1.8 0 0 0 2 .4 1.8 1.8 0 0 0 1-1.7h2a1.8 1.8 0 0 0 1 1.7 1.8 1.8 0 0 0 2-.4L19.8 9a1.8 1.8 0 0 0-.4 2 1.8 1.8 0 0 0 1.7 1v2a1.8 1.8 0 0 0-1.7 1Z" transform="translate(-1 -1) scale(.95)"/></svg><span class="history-action-label">الإعدادات</span></button>
       </div>
     </aside>
     <div id="scrim" class="scrim"></div>
 
     <main class="main">
       <header class="top">
-        <button id="menuBtn" class="icon-btn" aria-label="المحادثات"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h16"/></svg></button>
+        <button id="menuBtn" class="icon-btn" aria-label="إظهار أو إخفاء سجل المحادثات" title="إظهار أو إخفاء سجل المحادثات" aria-controls="side" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h11M4 18h16"/></svg></button>
         <button id="modelBtn" class="model-btn"><span id="modelName">…</span> <span class="chev">▾</span><small id="providerBadge"></small></button>
         <button id="newChatTop" class="icon-btn" aria-label="محادثة جديدة"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M15 4l5 5M10 14l1-5 7-7 5 5-7 7-6 1Z"/></svg></button>
       </header>
@@ -446,6 +450,13 @@
             </section>
             <section>
               <h4>شريط الأقسام</h4>
+              <label for="historyPanelMode">مساحة قائمة المحادثات على الكمبيوتر</label>
+              <select id="historyPanelMode" aria-label="حجم سجل المحادثات">
+                <option value="expanded">كاملة — سجل المحادثات ظاهر</option>
+                <option value="compact">مطوية — أيقونات فقط</option>
+                <option value="hidden">مخفية — أكبر مساحة للمحادثة</option>
+              </select>
+              <p class="muted">تقدر تغيّر الوضع أيضًا من زر القائمة أعلى المحادثة؛ وضع الجوال يبقى قائمة قابلة للفتح.</p>
               <label for="workspaceNavPosition">مكان الشريط</label>
               <select id="workspaceNavPosition" aria-label="مكان شريط أقسام سوالف">
                 <option value="top">فوق المحادثة</option>
@@ -520,7 +531,7 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=43"></script>
-  <script type="module" src="js/nav-layout.js?v=41"></script>
+  <script type="module" src="js/app.js?v=44"></script>
+  <script type="module" src="js/nav-layout.js?v=44"></script>
 </body>
 </html>

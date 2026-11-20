@@ -516,3 +516,211 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--text); outli
 .agent-auto-approve:has(input:checked) { border-color:var(--text); background:var(--accent-soft); }
 .agent-auto-approve:focus-within { outline:2px solid var(--text); outline-offset:2px; }
 @media (max-width:820px) { .agent-auto-approve { max-width:none; justify-content:center; } }
+
+/* v41 — تنقل متجاوب ومضغوط مع خيار وضع شريط الأقسام فوق أو على الجنب. */
+.top { min-height: 58px; padding-block: 5px; }
+.model-btn { min-height: 40px; font-size: 15px; border-radius: 11px; }
+.workspace-tabs {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: auto;
+  max-width: 100%;
+  gap: 4px;
+  padding: 2px 10px 9px;
+  border: 0;
+  flex: none;
+}
+.workspace-tabs > button:not(#workspaceNavCollapse) {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px 11px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-tabs > button:not(#workspaceNavCollapse):hover { background: var(--code); color: var(--text); }
+.workspace-tabs > button[aria-pressed="true"]:not(#workspaceNavCollapse) {
+  background: var(--accent-soft);
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 700;
+}
+.workspace-tabs > button svg { width: 18px; height: 18px; }
+.workspace-tabs > button span { line-height: 1.2; }
+.workspace-tabs > #workspaceNavCollapse { display: none; }
+
+@media (min-width: 821px) {
+  .app.workspace-nav-side > .workspace-tabs {
+    align-self: stretch;
+    justify-content: flex-start;
+    flex-direction: column;
+    flex: 0 0 86px;
+    width: 86px;
+    max-width: 86px;
+    height: 100%;
+    gap: 4px;
+    padding: calc(15px + var(--safe-t)) 6px calc(12px + var(--safe-b));
+    background: var(--side);
+    border-inline-start: 1px solid var(--line);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+  }
+  .app.workspace-nav-side > .workspace-tabs > button:not(#workspaceNavCollapse) {
+    flex-direction: column;
+    flex: none;
+    gap: 4px;
+    width: 100%;
+    min-height: 58px;
+    padding: 8px 3px;
+    border-radius: 12px;
+    font-size: 12px;
+  }
+  .app.workspace-nav-side > .workspace-tabs > button svg { width: 20px; height: 20px; }
+  .app.workspace-nav-side > .workspace-tabs > #workspaceNavCollapse {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+    min-height: 50px;
+    padding: 7px 2px;
+    margin-top: auto;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .app.workspace-nav-side > .workspace-tabs > #workspaceNavCollapse:hover { background: var(--code); }
+  .app.workspace-nav-side.workspace-nav-collapsed > .workspace-tabs {
+    flex-basis: 56px;
+    width: 56px;
+    max-width: 56px;
+    padding-inline: 5px;
+  }
+  .app.workspace-nav-side.workspace-nav-collapsed > .workspace-tabs > button:not(#workspaceNavCollapse) {
+    width: 44px;
+    height: 46px;
+    min-height: 46px;
+    padding: 7px;
+  }
+  .app.workspace-nav-side.workspace-nav-collapsed > .workspace-tabs > button span { display: none; }
+  .app.workspace-nav-side.workspace-nav-collapsed > .workspace-tabs > #workspaceNavCollapse { min-height: 44px; }
+}
+@media (max-width: 820px) {
+  .workspace-tabs {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    width: 100%;
+    gap: 2px;
+    padding: 2px 6px 7px;
+  }
+  .workspace-tabs > button:not(#workspaceNavCollapse) {
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    min-height: 52px;
+    padding: 6px 1px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+  .workspace-tabs > button svg { width: 19px; height: 19px; }
+  .workspace-tabs > #workspaceNavCollapse { display: none; }
+}
+@media (max-width: 360px) {
+  .workspace-tabs > button:not(#workspaceNavCollapse) { font-size: 11px; }
+  .workspace-tabs > button svg { width: 18px; height: 18px; }
+}
+/* الأدوات التابعة لقسم الصور والشغل تتبع نفس المقاس المضغوط. */
+.image-tools { gap: 6px; padding: 0 12px 8px; }
+.image-tools button { min-height: 38px; padding: 7px 12px; font-size: 12px; border-radius: 10px; }
+.project-bar { padding: 6px 14px; gap: 8px; align-items: center; }
+#projectCount { padding-top: 0; }
+.project-actions .btn, #codingEngine { min-height: 40px; padding: 8px 11px; border-radius: 10px; font-size: 12px; }
+@media (max-width: 820px) {
+  .project-bar { align-items: stretch; }
+  .project-actions .btn, #codingEngine { min-height: 44px; }
+}
+
+
+/* v44 — مساحة المحادثة أولاً، وسجل محادثات قابل للطي والإخفاء. */
+:root { --history-width: 226px; --history-rail-width: 62px; }
+@media (min-width: 821px) {
+  .app > .side { width: var(--history-width); padding-inline: 10px; gap: 8px; overflow: hidden; transition: width .18s ease, padding .18s ease; }
+  .app.history-compact > .side { width: var(--history-rail-width); padding-inline: 6px; }
+  .app.history-hidden > .side { width: 0; padding-inline: 0; border: 0; visibility: hidden; }
+  .app #menuBtn { visibility: visible; display: inline-grid; width: 40px; height: 40px; }
+  .app.history-compact .history-action { width: 48px; min-width: 48px; max-width: 48px; height: 48px; min-height: 48px; padding: 0; border-radius: 12px; }
+  .app.history-compact .history-action-label,
+  .app.history-compact .history-brand-name,
+  .app.history-compact .side-search,
+  .app.history-compact .chat-list { display: none; }
+  .app.history-compact .side-heading { display: grid; justify-items: center; }
+  .app.history-compact .wordmark { display: none; }
+  .app.history-compact .history-collapse { margin-inline: 0; }
+  .app.history-compact .side-head { align-items: center; }
+  .app.history-compact .side-foot { align-items: center; }
+}
+.side-head { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.side-heading { display:flex; justify-content:space-between; align-items:center; gap:5px; min-width:0; }
+.side .wordmark { display:flex; align-items:center; gap:8px; padding:0 3px; margin:0; min-width:0; font-size:20px; }
+.side .history-brand-name { display:block; line-height:1.25; }
+.side .history-brand-name small { display:block; font-size:10px; font-weight:400; color:var(--muted); margin-top:3px; }
+.side .history-brand-icon { width:34px; height:34px; display:grid; place-items:center; flex:none; background:var(--accent-soft); border-radius:11px; font-size:21px; }
+.side .history-collapse { flex:none; width:36px; height:36px; min-width:36px; border-radius:10px; color:var(--muted); }
+.side .history-collapse svg { width:19px; height:19px; }
+.side .history-action { display:flex; justify-content:center; gap:9px; min-height:44px; font-size:13px; border-radius:12px; white-space:nowrap; }
+.side .history-action svg { width:19px; height:19px; flex:none; fill:none; stroke:currentColor; stroke-width:1.65; stroke-linecap:round; stroke-linejoin:round; }
+.side .side-foot { display:flex; margin-top:auto; }
+.side .side-foot > button { width:100%; }
+.side .side-search { font-size:13px; min-height:40px; padding:7px 10px; }
+.side .chat-item a { font-size:13px; padding:7px 7px; }
+.side .chat-list { min-height:0; }
+.side .chat-list .chat-item { min-height:38px; }
+.app .top { min-height:54px; padding:4px 14px; gap:8px; }
+.app .top .model-btn { padding:4px 8px; font-size:14px; min-height:38px; }
+.app .top > .icon-btn { width:40px; height:40px; min-width:40px; border-radius:10px; }
+.app .top > .icon-btn svg { width:20px; height:20px; }
+.app .workspace-tabs:not(.ignore) { flex-wrap:nowrap; }
+.app .workspace-tabs > button:not(#workspaceNavCollapse) { min-height:38px; padding:6px 9px; gap:5px; border-radius:10px; font-size:12px; }
+.app .workspace-tabs > button svg { width:17px; height:17px; }
+.app .workspace-tabs > #workspaceNavCollapse { display:none; }
+.app.workspace-nav-side > .workspace-tabs > #workspaceNavCollapse { display:flex; }
+.app .messages { padding:15px clamp(12px,2vw,28px) 8px; }
+.app .msg { max-width: min(1120px,100%); margin-bottom:20px; }
+.app .msg.user .bubble { max-width:90%; }
+.app .composer-wrap { padding:5px clamp(10px,2vw,24px) calc(6px + var(--safe-b)); }
+.app .composer, .app .attach-row, .app .status, .app .composer-context, .app .reference-options { max-width:1120px; }
+.app .composer { min-height:54px; padding:5px 6px; }
+.app .composer > textarea { min-height:40px; }
+.app .composer > .icon-btn, .app .composer > .send { width:42px; height:42px; }
+@media (max-width:820px) {
+  /* الجوال: القائمة تطفو فوق المحادثة ولا تأخذ عرضاً دائماً. */
+  .app > .side { width:min(300px,84vw); }
+  .app .workspace-tabs { display:grid; flex-wrap:nowrap; grid-template-columns:repeat(6,minmax(0,1fr)); width:100%; gap:2px; padding:3px 5px 6px; }
+  .app .workspace-tabs > button:not(#workspaceNavCollapse) { min-height:48px; padding:5px 1px; gap:3px; font-size:11px; }
+  .app .workspace-tabs > button svg { width:18px; height:18px; }
+  .app .messages { padding:12px 10px 5px; }
+  .app .msg { max-width:100%; }
+  .app .composer-wrap { padding-inline:7px; }
+  .app .composer { max-width:100%; }
+  .side .history-collapse { display:none; }
+}
+@media (prefers-reduced-motion:reduce) { .app > .side { transition:none; } }

@@ -233,8 +233,8 @@ function chatMenu(id, anchor) {
   });
 }
 
-const closeSide = () => $('#app').classList.remove('side-open');
-$('#menuBtn').onclick = () => $('#app').classList.add('side-open');
+const closeSide = () => { $('#app').classList.remove('side-open'); window.sowalifHistoryLayout?.sync?.(); };
+$('#menuBtn').onclick = () => { if (window.sowalifHistoryLayout?.toggle) window.sowalifHistoryLayout.toggle(); else $('#app').classList.add('side-open'); };
 $('#scrim').onclick = closeSide;
 
 // ---------- المحادثة ----------
@@ -256,7 +256,9 @@ function applyWorkspace(mode) {
   $('#projectBar').classList.toggle('hidden', mode !== 'work');
   $('#agentActivity').classList.add('hidden');
   $('#imageTools').classList.toggle('hidden', mode !== 'image');
-  $('#newChat').textContent = mode === 'work' ? '＋ مشروع جديد' : '＋ محادثة جديدة';
+  $('#newChat .history-action-label').textContent = mode === 'work' ? 'مشروع جديد' : 'محادثة جديدة';
+  $('#newChat').setAttribute('aria-label', mode === 'work' ? 'مشروع جديد' : 'محادثة جديدة');
+  $('#newChat').title = mode === 'work' ? 'مشروع جديد' : 'محادثة جديدة';
   $('#newChatTop').setAttribute('aria-label', mode === 'work' ? 'مشروع جديد' : 'محادثة جديدة');
   $('#search').placeholder = mode === 'work' ? 'ابحث في المشاريع' : 'ابحث في المحادثات';
   renderProjectCount();

@@ -59,3 +59,74 @@ export function initWorkspaceNavigation() {
 }
 
 if (typeof document !== 'undefined') initWorkspaceNavigation();
+
+
+// v44: مساحة الهيستوري مستقلة عن موضع شريط الأقسام. تبقى تفضيلات العرض على هذا الجهاز.
+const HISTORY_KEY = 'sowalif.historyPanelMode.v1';
+const HISTORY_MODES = new Set(['expanded', 'compact', 'hidden']);
+
+export function initHistoryLayout() {
+  const app = document.querySelector('#app');
+  const sidebar = document.querySelector('#side');
+  const menu = document.querySelector('#menuBtn');
+  const collapse = document.querySelector('#historyCollapse');
+  const select = document.querySelector('#historyPanelMode');
+  if (!app || !sidebar || !menu || !collapse || !select) return;
+
+  const desktop = window.matchMedia('(min-width: 821px)');
+  const initial = readSetting(HISTORY_KEY, 'compact');
+  let mode = HISTORY_MODES.has(initial) ? initial : 'compact';
+  let previous = mode === 'hidden' ? 'compact' : mode;
+
+  function render() {
+    const isDesktop = desktop.matches;
+    app.classList.toggle('history-compact', isDesktop && mode === 'compact');
+    app.classList.toggle('history-hidden', isDesktop && mode === 'hidden');
+    app.classList.toggle('history-expanded', isDesktop && mode === 'expanded');
+    select.value = mode;
+    const visible = !isDesktop || mode !== 'hidden';
+    menu.setAttribute('aria-expanded', String(isDesktop ? visible : app.classList.contains('side-open')));
+    menu.setAttribute('aria-label', visible && isDesktop ? 'إخفاء سجل المحادثات' : 'إظهار سجل المحادثات');
+    menu.title = menu.getAttribute('aria-label');
+    collapse.setAttribute('aria-expanded', String(!isDesktop || mode === 'expanded'));
+    collapse.setAttribute('aria-label', mode === 'compact' && isDesktop ? 'توسيع سجل المحادثات' : 'طي سجل المحادثات');
+    collapse.title = collapse.getAttribute('aria-label');
+    const list = document.querySelector('#chatList');
+    const search = document.querySelector('#search');
+    // منع الوصول بالكيبورد إلى عناصر محجوبة عن النظر.
+    if (list) list.inert = isDesktop && mode !== 'expanded';
+    if (search) search.inert = isDesktop && mode !== 'expanded';
+    sidebar.setAttribute('aria-label', isDesktop && mode === 'compact' ? 'شريط المحادثات المطوي' : 'المحادثات والإعدادات');
+  }
+
+  function setMode(next) {
+    if (!HISTORY_MODES.has(next)) return;
+    mode = next;
+    if (mode !== 'hidden') previous = mode;
+    writeSetting(HISTORY_KEY, mode);
+    render();
+  }
+  function toggle() {
+    if (!desktop.matches) {
+      app.classList.toggle('side-open');
+      render();
+      return;
+    }
+    setMode(mode === 'hidden' ? previous : 'hidden');
+  }
+  collapse.addEventListener('click', () => {
+    if (!desktop.matches) { app.classList.remove('side-open'); render(); return; }
+    setMode(mode === 'expanded' ? 'compact' : 'expanded');
+  });
+  select.addEventListener('change', () => setMode(select.value));
+  if (typeof desktop.addEventListener === 'function') desktop.addEventListener('change', () => {
+    app.classList.remove('side-open');
+    render();
+  });
+  else desktop.addListener(() => { app.classList.remove('side-open'); render(); });
+  document.querySelector('#scrim')?.addEventListener('click', render);
+  window.sowalifHistoryLayout = { toggle, setMode, sync: render, getMode: () => mode };
+  render();
+}
+
+if (typeof document !== 'undefined') initHistoryLayout();
