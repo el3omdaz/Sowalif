@@ -290,6 +290,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           if (typeof input.key !== 'string' || input.key.length < 8 || input.key.length > 512) throw failure('أدخل مفتاح المزوّد');
           if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 20_000) throw failure('اكتب طلباً ضمن 20 ألف حرف');
           if (input.model && (typeof input.model !== 'string' || input.model.length > 150 || /[\r\n\0]/.test(input.model))) throw failure('معرّف نموذج غير صالح');
+          if (input.autoApprove !== undefined && typeof input.autoApprove !== 'boolean') throw failure('إعداد صلاحية التنفيذ غير صالح');
           if (!Array.isArray(input.files)) throw failure('ملفات غير صالحة');
           let files = [];
           starting = true;
@@ -357,7 +358,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           const context = 'You are working in Sowalif. Work only in /workspace. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). You can also create real downloadable PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, ZIP and image files whenever the user asks, without requiring a special mode or toggle. Save final deliverables in /workspace/outputs/ with descriptive filenames; put generation scripts outside outputs. Python packages reportlab, docx, openpyxl, pptx, arabic_reshaper and bidi plus Noto Arabic fonts are preinstalled. Use proper RTL and Arabic shaping/fonts for Arabic documents. Verify generated files open correctly; never merely rename plain text to a binary extension. Excel formulas must be real formulas; clearly distinguish calculated/cached values if no calculation engine is available. The workspace may include uploaded binary files and archives; preserve their original bytes. Inspect or extract archive contents only when relevant to the user request. Before extracting, reject absolute paths, parent traversal, symlinks and entries outside the chosen folder; do not overwrite existing files without review. For ZIP output use real compression such as Python zipfile.ZIP_DEFLATED, not a stored-only archive. The app automatically exposes outputs as download links; do not invent public URLs. Reply in the user language. ' + DEPLOYMENT_GUIDANCE + '\n\n' + input.prompt + inputManifestPrompt(originalInputs);
           try {
             run.handle = launch({ workspace: p.workspace, sessions: p.sessions, image: typeof image === 'string' ? image : IMAGE,
-              config: { engine: input.engine, provider: input.provider, key: input.key, model, prompt: context, budget: Math.max(.1, Math.min(10, Number(input.budget) || 2)), sessionId: p.state.sessions[sessionKey] }, emit, done });
+              config: { engine: input.engine, provider: input.provider, key: input.key, model, prompt: context, budget: Math.max(.1, Math.min(10, Number(input.budget) || 2)), sessionId: p.state.sessions[sessionKey], autoApprove: input.autoApprove === true }, emit, done });
           } catch (e) { await done(e); }
           return json(res, 202, { id });
         }

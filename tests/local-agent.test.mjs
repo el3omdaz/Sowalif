@@ -42,11 +42,13 @@ test('local runner guards origins, isolates projects, preserves results and neve
   assert.equal((await fetch(origin + '/server/local-agent/server.mjs')).status, 404);
   assert.equal((await fetch(origin + '/.local-agent/state.json')).status, 404);
   assert.equal((await post('runs', { ...input, files: [{ path: '../outside.js', content: 'bad' }] })).status, 400);
+  assert.equal((await post('runs', { ...input, autoApprove: 'true' })).status, 400);
   assert.equal(started, 0);
   const response = await post('runs', input);
   assert.equal(response.status, 202);
   const { id } = await response.json();
   assert.equal(started, 1);
+  assert.equal(job.config.autoApprove, false);
   assert.equal((await readFile(join(job.workspace, 'index.html'), 'utf8')), 'before');
   assert.equal((await post('runs', input)).status, 409);
   assert.equal(started, 1);
@@ -76,7 +78,7 @@ test('local runner guards origins, isolates projects, preserves results and neve
   assert.equal(recovered.revision, 2);
   const stateDirectory = (await readdir(dataDir))[0];
   assert.equal((await readFile(join(dataDir, stateDirectory, 'state.json'), 'utf8')).includes(input.key), false);
-  const next = await post('runs', { ...input, files: recovered.files, workspaceRevision: recovered.revision, engine: 'codex', provider: 'openai' });
+  const next = await post('runs', { ...input, files: recovered.files, workspaceRevision: recovered.revision, engine: 'codex', provider: 'openai', autoApprove: true });
   assert.equal(next.status, 202);
   const nextId = (await next.json()).id;
   assert.equal((await post(`runs/${nextId}/stop`, {})).status, 200);
@@ -89,6 +91,7 @@ test('local runner guards origins, isolates projects, preserves results and neve
   } while (Date.now() < deadline);
   assert.equal(stopped.state, 'stopped');
   assert.equal(started, 2);
+  assert.equal(job.config.autoApprove, true);
 });
 
 test('the new engine image supports Carbon and Kimi, with legacy fallback for Codex and Claude', async t => {

@@ -22,6 +22,12 @@ async function confinedPath(root, value) {
   }
 }
 
+// Explicitly enabled for one run only. The Docker sandbox and file path checks remain active.
+// Never persist this in project settings or infer it from the model's output.
+export function taskApproval(approve, autoApprove = false) {
+  return autoApprove === true ? async () => true : approve;
+}
+
 // These are project tools. Commands keep the app's existing approval flow.
 export async function claudeToolPermission(tool, args, approve, workspace = '/workspace') {
   if (fileTools.has(tool)) {

@@ -1,26 +1,26 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=40';
-import { fitViewport } from './viewport.js?v=40';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=40';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=40';
-import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=40';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=40';
-import { mediaProvider } from './media.js?v=40';
-import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=40';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=40';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=40';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=40';
-import { prepareProjectPush, pushProject } from './project-github.js?v=40';
-import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=40';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=40';
-import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=40';
-import { planImage } from './image-plan.js?v=40';
-import { initOrganizer } from './organizer.js?v=40';
-import { recommendModel } from './model-recommendation.js?v=40';
-import { reasoningLevels } from './reasoning.js?v=40';
-import { initMarket } from './market.js?v=40';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=40';
-import { requestText } from './text-dialog.js?v=40';
+import * as db from './db.js?v=39';
+import { fitViewport } from './viewport.js?v=39';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=39';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=39';
+import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=39';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=39';
+import { mediaProvider } from './media.js?v=39';
+import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=39';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=39';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=39';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=39';
+import { prepareProjectPush, pushProject } from './project-github.js?v=39';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=39';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=39';
+import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=39';
+import { planImage } from './image-plan.js?v=39';
+import { initOrganizer } from './organizer.js?v=39';
+import { recommendModel } from './model-recommendation.js?v=39';
+import { reasoningLevels } from './reasoning.js?v=39';
+import { initMarket } from './market.js?v=39';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
+import { requestText } from './text-dialog.js?v=39';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -455,7 +455,7 @@ async function downloadAttachment(file, button) {
     let blob, name = file.originalName || file.name || 'attachment';
     if (file.localFile && !file.localText) blob = await db.getBlob(file.localFile);
     if (!(blob instanceof Blob) && file.originalStoragePath) {
-      const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
+      const { resolveAttachmentOriginal } = await import('./cloud.js?v=39');
       blob = await resolveAttachmentOriginal(file, { onProgress: text => toast(text) });
     }
     if (!(blob instanceof Blob) && file.kind === 'image' && file.blob) blob = await db.getBlob(file.blob);
@@ -1386,8 +1386,6 @@ function renderCodingSetup() {
   const provider = $('#codingProvider');
   $('#codingEngine').value = config.engine;
   $('#codingOpenLocal').classList.toggle('hidden', Boolean(window.sowalifDesktop));
-  $('#codingOpenDesktop').classList.toggle('hidden', Boolean(window.sowalifDesktop));
-  $('#codingSetup').textContent = localAgentOrigin() ? 'فحص اتصال المحرك' : 'فتح نسخة الكمبيوتر';
   provider.replaceChildren(...spec.providers.map(id => new Option(CODING_PROVIDERS[id].label, id)));
   provider.value = config.provider;
   provider.disabled = spec.providers.length < 2;
@@ -1409,50 +1407,14 @@ async function refreshCodingStatus() {
     if (status.ready && status.documentTools === false) $('#codingStatus').textContent += ' · حدّث بيئة المحرك لتفعيل أدوات PDF وOCR والأرشيفات.';
   } catch { $('#codingStatus').textContent = 'تعذّر الاتصال بخدمة الكمبيوتر. شغّل Start-Sowalif.cmd.'; }
 }
-// «ربط المحرك» يختبر الخدمة فعلاً على الكمبيوتر، ولا يعيد فتح الإعدادات بلا سبب.
-// موقع GitHub Pages ليس بيئة تشغيل محلية، ولذلك نوجّه المستخدم إلى النسخة المحلية.
-async function connectCodingEngine() {
-  const engine = agentCredentials().engine;
-  if (engine === 'off') return toast('اختر محرك برمجة أولاً من قسم الشغل.', 5500);
-  if (!localAgentOrigin()) {
-    window.open('http://127.0.0.1:4781/', '_blank', 'noopener,noreferrer');
-    return toast('Claude Code يحتاج نسخة سوالف المحلية. شغّل Start-Sowalif.cmd أو Sowalif.exe أولاً. إذا تستخدم EXE افتح المنفذ 4782.', 8500);
-  }
-  if (!agentCredentials().key) {
-    openSettings('agent');
-    return toast('أدخل مفتاح المحرك في هذه النسخة المحلية واحفظه.', 6000);
-  }
-  const button = $('#codingSetup');
-  button.disabled = true;
-  button.textContent = 'جاري فحص الاتصال…';
-  try {
-    const status = await localStatus();
-    if (!status.ready) {
-      toast('خدمة سوالف تعمل، لكن بيئة Docker غير جاهزة. شغّل npm run agent:setup.', 8000);
-    } else if (!(status.engines || []).includes(engine)) {
-      toast(`محرك ${codingEngineName(engine)} غير مجهز. شغّل npm run agent:setup ثم أعد تشغيل سوالف.`, 8000);
-    } else {
-      toast(`✓ ${codingEngineName(engine)} جاهز على الكمبيوتر. اكتب طلبك في قسم الشغل.`, 6500);
-    }
-    await refreshCodingStatus();
-  } catch {
-    toast('تعذّر الوصول إلى خدمة سوالف المحلية. شغّل Start-Sowalif.cmd أو افتح Sowalif.exe.', 8000);
-  } finally {
-    button.disabled = false;
-    button.textContent = 'فحص اتصال المحرك';
-  }
-}
 $('#codingEngine').onchange = (e) => {
   if (S.controller) { e.target.value = db.settings.get('codingEngine', 'off'); return; }
   db.settings.set('codingEngine', e.target.value);
   $('#codingKey').value = '';
   renderCodingSetup(); renderModelName();
-  if (e.target.value === 'off') return;
-  if (!localAgentOrigin()) return toast('للتشغيل افتح سوالف المحلية على الكمبيوتر؛ مفتاح OpenRouter وحده لا يشغّل Claude Code.', 7500);
-  if (!agentCredentials().key) openSettings('agent');
-  else void connectCodingEngine();
+  if (e.target.value !== 'off') openSettings('agent');
 };
-$('#codingSetup').onclick = () => { void connectCodingEngine(); };
+$('#codingSetup').onclick = () => openSettings('agent');
 $('#codingProvider').onchange = (e) => {
   if (S.controller) return;
   db.settings.set('codingProvider', e.target.value); $('#codingKey').value = ''; renderCodingSetup();
@@ -1470,6 +1432,17 @@ $('#codingModel').onchange = (e) => {
   db.settings.set(spec.modelSetting, e.target.value.trim());
 };
 $('#codingBudget').onchange = (e) => { const value = Math.max(.1, Math.min(10, Number(e.target.value) || 2)); db.settings.set('codingBudget', value); e.target.value = value; };
+// Never persist approval bypass in settings: every task must be opted into separately.
+$('#agentAutoApprove').addEventListener('change', (event) => {
+  if (!event.target.checked) return;
+  if (!localAgentOrigin()) {
+    event.target.checked = false;
+    toast('التفويض التلقائي متاح من نسخة الكمبيوتر المحلية فقط');
+    return;
+  }
+  const okay = window.confirm('تفويض كامل لأوامر هذه المهمة داخل Docker فقط. قد يعدّل المحرك ملفات المشروع أو يحذفها، ويستطيع تنفيذ أوامر تتصل بالإنترنت. لا يشمل التفويض جهاز ويندوز كاملًا أو مهامًا لاحقة. هل توافق؟');
+  if (!okay) event.target.checked = false;
+});
 function paintAgentActivity(run) {
   $('#agentActivity').classList.remove('hidden');
   $('#agentRunState').textContent = `${codingEngineName(run.engine)} · ${{ running: 'جاري التنفيذ', completed: 'اكتمل', stopped: 'متوقف', failed: 'تعذّر الإكمال' }[run.state]}`;

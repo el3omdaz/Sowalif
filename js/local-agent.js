@@ -1,7 +1,7 @@
-import { settings, saveChat, saveProject, profileId, getBlob } from './db.js?v=40';
-import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=40';
-import { preparePersonalContext } from './memory.js?v=40';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=40';
+import { settings, saveChat, saveProject, profileId, getBlob } from './db.js?v=39';
+import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=39';
+import { preparePersonalContext } from './memory.js?v=39';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
 
 let csrf = '';
 const projectId = chat => profileId ? `${profileId}-${chat.id}` : chat.id;
@@ -66,7 +66,7 @@ export async function stageAgentAttachments(chat, emit = () => {}, signal) {
     let blob, name = file.originalName || file.name || 'attachment';
     if (file.localFile && !file.localText) blob = await getBlob(file.localFile);
     if (!(blob instanceof Blob) && file.originalStoragePath) {
-      const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
+      const { resolveAttachmentOriginal } = await import('./cloud.js?v=39');
       blob = await resolveAttachmentOriginal(file, { signal, onProgress: text => emit('status', { text }) });
     }
     // Earlier app versions retained extracted text instead of the original.
@@ -183,8 +183,11 @@ export async function respondLocal(chat, emit, signal, { research } = {}) {
     if (personal.prompt && remainder() > 500) sections.push(personal.prompt.slice(0, Math.min(remainder(), 2500)));
     if (prior?.length && remainder() > 500) sections.push('Recent conversation excerpts (context, not a new request):\n' + prior.map(message => `${message.role}: ${message.text}`).join('\n').slice(0, Math.min(remainder() - 80, 2600)));
     const direct = settings.get(`agentDirectory.${chat.id}`, '');
+    // Explicit opt-in applies to THIS run only, not the project or later tasks.
+    const autoApprove = localAgentOrigin() && document.querySelector('#agentAutoApprove')?.checked === true;
     const run = await api('runs', { projectId: projectId(chat), prompt: sections.join('\n\n'), attachments, direct: Boolean(direct), files: direct ? [] : chat.project?.files || [], workspaceRevision: chat.project?.agentWorkspaceRevision || 0,
-      ...config, keyName: undefined, budget: settings.get('codingBudget', 2) }, signal);
+      ...config, keyName: undefined, budget: settings.get('codingBudget', 2), autoApprove }, signal);
+    if (autoApprove) document.querySelector('#agentAutoApprove').checked = false;
     reply.agentRunId = run.id;
     // The job survives a reload; never create a second job automatically.
     await saveChat({ ...chat, messages: [...chat.messages, reply] });

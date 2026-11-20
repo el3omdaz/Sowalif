@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=41">
+  <link rel="stylesheet" href="style.css?v=43">
 </head>
 <body>
   <div id="app" class="app">
@@ -55,6 +55,10 @@
           <button id="openProject" class="btn ghost" type="button">ملفات المشروع</button>
           <select id="codingEngine" aria-label="محرك البرمجة"><option value="off">اقتراحات فقط</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="antigravity">Google Antigravity</option><option value="opencode">OpenCode</option></select>
           <button id="codingSetup" class="btn ghost" type="button">ربط المحرك</button>
+          <label class="agent-auto-approve" title="تفويض أوامر المحرك لمهمة واحدة فقط داخل Docker، وقد تؤدي الأوامر إلى تغيير ملفات المشروع أو حذفها أو الاتصال بالإنترنت">
+            <input id="agentAutoApprove" type="checkbox" autocomplete="off">
+            <span>السماح تلقائيًا لهذه المهمة</span>
+          </label>
           <button id="agentGit" class="btn ghost hidden" type="button">GitHub</button>
         </div>
       </div>
@@ -516,7 +520,7 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=42"></script>
+  <script type="module" src="js/app.js?v=43"></script>
   <script type="module" src="js/nav-layout.js?v=41"></script>
 </body>
 </html>
