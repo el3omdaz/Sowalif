@@ -1,4 +1,5 @@
-import { readdir, lstat, realpath } from 'node:fs/promises';
+import { readdir, lstat, realpath, open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 export function validArtifactPath(path) {
@@ -18,7 +19,17 @@ export async function artifactFile(workspace, path) {
   if (!target.startsWith(root + sep)) throw new Error('الملف خارج مساحة المشروع');
   const stat = await lstat(target);
   if (!stat.isFile()) throw new Error('الملف غير متاح');
-  return { target, size: stat.size };
+  return { target, size: stat.size, stat };
+}
+
+export async function openArtifact(workspace, path) {
+  const { target, stat } = await artifactFile(workspace, path);
+  const handle = await open(target, process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) throw new Error('تغيّر الملف؛ أعد المحاولة.');
+    return { handle, size: opened.size };
+  } catch (error) { await handle.close(); throw error; }
 }
 export async function listArtifacts(workspace) {
   const files = [];

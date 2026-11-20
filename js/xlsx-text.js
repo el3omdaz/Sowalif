@@ -1,15 +1,11 @@
-import { readZipEntries } from './zip-text.js?v=28';
+import { readZipEntries } from './zip-text.js?v=40';
 
 const relevantPart = /^xl\/(?:workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|worksheets\/[^/]+\.xml)$/u;
 const spreadsheetBase = new URL('https://xlsx.invalid/xl/workbook.xml');
-const CELL_LIMIT = 75_000;
-const CELL_TEXT_LIMIT = 20_000;
-const WORKBOOK_TEXT_LIMIT = 8_000_000;
 
 const elements = (node, tag) => [...node.getElementsByTagNameNS('*', tag)];
 const child = (node, tag) => [...node.children].find(element => element.localName === tag);
 const plain = node => node ? elements(node, 't').filter(element => element.parentElement?.localName !== 'rPh').map(element => element.textContent).join('') : '';
-const bounded = text => text.length > CELL_TEXT_LIMIT ? text.slice(0, CELL_TEXT_LIMIT) + '…' : text;
 
 function xml(parser, source) {
   if (!source || /<!DOCTYPE|<!ENTITY/iu.test(source)) throw new Error('بيانات Excel الداخلية غير متاحة أو غير صالحة.');
@@ -26,11 +22,12 @@ function readCell(cell, strings) {
   if (type === 'inlineStr') value = plain(child(cell, 'is'));
   if (type === 'b') value = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : raw;
   const formula = child(cell, 'f')?.textContent?.trim();
-  return [value && bounded(value), formula && 'الصيغة: =' + bounded(formula)].filter(Boolean).join(' | ');
+  return [value, formula && 'الصيغة: =' + formula].filter(Boolean).join(' | ');
 }
 
-export async function xlsxText(file, { signal, parser = new DOMParser() } = {}) {
-  const { entries } = await readZipEntries(file, path => relevantPart.test(path), signal);
+export async function xlsxText(file, { signal, parser = new DOMParser(), onProgress } = {}) {
+  const { entries, inventory } = await readZipEntries(file, path => relevantPart.test(path), signal);
+  if (inventory.some(part => relevantPart.test(part.name) && !part.readable)) throw new Error('لم تُقرأ أجزاء Excel كاملة في المتصفح. الملف الأصلي محفوظ؛ استخدم أدوات ملفات الكمبيوتر لقراءته كاملًا.');
   const parts = new Map(entries);
   const workbook = xml(parser, parts.get('xl/workbook.xml'));
   const relationships = xml(parser, parts.get('xl/_rels/workbook.xml.rels'));
@@ -49,30 +46,25 @@ export async function xlsxText(file, { signal, parser = new DOMParser() } = {}) 
     : [];
   const out = [];
   let count = 0;
-  let textSize = 0;
-  let truncated = false;
   for (const sheet of elements(workbook, 'sheet')) {
     signal?.throwIfAborted();
     const name = (sheet.getAttribute('name') || 'ورقة').replace(/[\]\r\n]/gu, ' ');
     const id = [...sheet.attributes].find(attribute => attribute.localName === 'id')?.value;
     const source = parts.get(sheets.get(id));
     const lines = ['[ورقة ' + name.slice(0, 200) + ']'];
-    textSize += lines[0].length + 65;
     if (!source) lines.push('تعذّر استخراج محتوى هذه الورقة.');
     else for (const cell of xml(parser, source).getElementsByTagNameNS('*', 'c')) {
-      if (++count > CELL_LIMIT) { truncated = true; break; }
+      signal?.throwIfAborted();
+      if (++count % 1000 === 0) {
+        onProgress?.(`أقرأ Excel… ${count} خلية`);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
       const value = readCell(cell, strings);
       if (!value) continue;
       const line = (cell.getAttribute('r') || 'خلية').slice(0, 20) + ': ' + value;
-      textSize += line.length + 1;
-      if (textSize > WORKBOOK_TEXT_LIMIT) { truncated = true; break; }
       lines.push(line);
     }
     out.push(lines.join('\n'));
-    if (truncated || textSize > WORKBOOK_TEXT_LIMIT) {
-      out.push('تم بلوغ حد قراءة المصنف؛ لم تُقرأ الخلايا المتبقية.');
-      break;
-    }
   }
   if (!out.length) throw new Error('ملف Excel لا يحتوي على أوراق قابلة للقراءة.');
   return out.join('\n\n');

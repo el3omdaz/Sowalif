@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requestText } from '../js/text-dialog.js';
+import { requestText } from '../js/text-dialog.js?v=40';
 
 class Element extends EventTarget {
   constructor(tag) {

@@ -5,10 +5,10 @@ import { mkdtemp, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
-import { applyProjectProposal, readProjectFiles, mergeProjectFiles, projectFileBytes } from '../js/project.js?v=36';
-import { writeProjectDirectory } from '../js/project-folder.js?v=36';
-import { reasoningLevels } from '../js/reasoning.js?v=1';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from '../js/agent-engines.js?v=1';
+import { applyProjectProposal, readProjectFiles, mergeProjectFiles, projectFileBytes } from '../js/project.js?v=40';
+import { writeProjectDirectory } from '../js/project-folder.js?v=40';
+import { reasoningLevels } from '../js/reasoning.js?v=40';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from '../js/agent-engines.js?v=40';
 
 function app({ navigator = {}, coarsePointer = false } = {}) {
   const nodes = new Map();

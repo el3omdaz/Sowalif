@@ -1,17 +1,19 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=37';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=26';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=22';
-import { preparePersonalContext } from './memory.js?v=22';
-import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=22';
-import { resolveReferences } from './media-references.js?v=27';
-import { mediaProvider, kieMediaSpec } from './media.js?v=22';
-import { withMediaCallback } from './media-push.js?v=22';
-import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=36';
-import { PROMPT_STUDIO_SYSTEM, extractImagePrompt } from './prompt-studio.js?v=20';
-import { zipText } from './zip-text.js?v=28';
-import { xlsxText } from './xlsx-text.js?v=1';
-import { DOCUMENT_DATA_NOTICE, SYNCED_TEXT_NOTICE, selectDocumentContext, selectProjectFileContext } from './docs-context.js?v=1';
+import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=40';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=40';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=40';
+import { preparePersonalContext } from './memory.js?v=40';
+import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=40';
+import { resolveReferences } from './media-references.js?v=40';
+import { mediaProvider, kieMediaSpec } from './media.js?v=40';
+import { withMediaCallback } from './media-push.js?v=40';
+import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=40';
+import { PROMPT_STUDIO_SYSTEM, extractImagePrompt } from './prompt-studio.js?v=40';
+import { readZipEntries } from './zip-text.js?v=40';
+import { xlsxText } from './xlsx-text.js?v=40';
+import { DOCUMENT_DATA_NOTICE, SYNCED_TEXT_NOTICE, selectDocumentContext, selectProjectFileContext } from './docs-context.js?v=40';
+import { createDocumentTools } from './document-tools.js?v=40';
+import { selectPdfPreviewPages } from './pdf-preview.js?v=40';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -76,38 +78,134 @@ async function imagePart(f, needUrl) {
   return blob ? { kind: 'image', dataUrl: await toDataUrl(blob) } : null;
 }
 
-async function readAttachmentDocument(file, { modelId, signal, onProgress } = {}) {
+async function attachmentOriginalBlob(file, signal, onProgress) {
+  signal?.throwIfAborted();
+  let blob = file.localFile ? await getBlob(file.localFile) : undefined;
+  if (!(blob instanceof Blob) && file.originalStoragePath) {
+    const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
+    blob = await resolveAttachmentOriginal(file, { signal, onProgress });
+  }
+  if (!(blob instanceof Blob)) throw new Error('الأصل غير موجود على هذا الجهاز. أعد إرفاق الملف.');
+  signal?.throwIfAborted();
+  return blob;
+}
+
+async function pdfPageVisual(original, name, pageNumber, signal, archiveMember) {
+  signal?.throwIfAborted();
+  let blob = original;
+  if (/\.zip$/i.test(name)) {
+    if (!archiveMember || !/\.pdf$/i.test(archiveMember)) throw new Error('اختر مسار ملف PDF داخل الأرشيف في archive_member.');
+    const { entries, inventory } = await readZipEntries(original, path => path === archiveMember, signal,
+      { binary: true, tolerateErrors: true });
+    const entry = entries.find(([path]) => path === archiveMember);
+    if (!entry) {
+      const reason = inventory.find(item => item.name === archiveMember)?.status;
+      throw new Error(reason ? `تعذّرت قراءة هذا الملف داخل الأرشيف (${reason}).` : 'لم يوجد هذا الملف داخل الأرشيف. راجع اسمه ومساره.');
+    }
+    blob = new Blob([entry[1]], { type: 'application/pdf' });
+  } else if (!/\.pdf$/i.test(name)) {
+    throw new Error('العرض البصري للصفحات متاح حاليًا لملفات PDF فقط، سواء مباشرة أو داخل ZIP.');
+  }
+  const pdfjs = await import('../vendor/pdf.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.mjs', import.meta.url).href;
+  const documentTask = pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) });
+  try {
+    const pdf = await documentTask.promise;
+    if (!Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > pdf.numPages) {
+      throw new Error(`رقم الصفحة خارج النطاق. عدد الصفحات: ${pdf.numPages}.`);
+    }
+    const page = await pdf.getPage(pageNumber);
+    try { return { image: await pdfPageImage(page, signal), pagesTotal: pdf.numPages }; }
+    finally { page.cleanup?.(); }
+  } finally { await documentTask.destroy().catch(() => {}); }
+}
+
+async function documentPageImagePart(file, model, pageNumber, signal, archiveMember) {
+  const original = await attachmentOriginalBlob(file, signal);
+  const result = await pdfPageVisual(original, file.name || '', pageNumber, signal, archiveMember);
+  const part = model.api === 'chat'
+    ? { kind: 'image', url: await uploadFile(result.image, `document-page-${pageNumber}.jpg`, signal) }
+    : { kind: 'image', dataUrl: await toDataUrl(result.image) };
+  return { ...result, part };
+}
+
+function attachmentDocument(file, text, extra = {}) {
+  return { name: file.name || 'ملف', text, size: file.size, type: file.type,
+    extraction: file.extractedInfo || file.extraction, ...extra };
+}
+
+async function readAttachmentDocument(file, { modelId, signal, onProgress, retryExtraction = false } = {}) {
   signal?.throwIfAborted();
   let text = typeof file.text === 'string' ? file.text : '';
-  if (file.deferredPdf && file.localFile) {
+  if ((file.deferredPdf || file.deferredDocument) && (file.localFile || file.originalStoragePath)) {
     const opticalModel = modelId && modelById(modelId).vision !== false ? modelId : 'native';
-    if (file.extractedText && file.extractedModel === opticalModel) {
+    // OCR transcriptions belong to the document, not to the selected chat model.
+    // Only a native-text cache with unread images needs an upgrade to vision.
+    // Rebuild ZIP caches from older readers once: their inventory could list
+    // filenames without ever extracting the underlying supported documents.
+    const outdatedZipCache = /\.zip$/i.test(file.name || '') && file.extractedText && file.readerVersion !== 2;
+    const reusable = !retryExtraction && !outdatedZipCache && file.extractedModel && (file.extractedModel !== 'native'
+      || opticalModel === 'native' || file.extractedInfo?.needsVision === false);
+    if (file.extractedText && reusable) {
       const cached = await getBlob(file.extractedText).then(blob => blob?.text()).catch(() => undefined);
       signal?.throwIfAborted();
-      if (typeof cached === 'string') return { name: file.name || 'ملف', text: cached };
+      if (typeof cached === 'string') return attachmentDocument(file, cached);
     }
-    const original = await getBlob(file.localFile);
+    let original = file.localFile ? await getBlob(file.localFile) : undefined;
+    let originalError;
+    if (!(original instanceof Blob) && file.originalStoragePath) {
+      try {
+        const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
+        original = await resolveAttachmentOriginal(file, { signal, onProgress });
+      } catch (error) { signal?.throwIfAborted(); originalError = error; }
+    }
     signal?.throwIfAborted();
-    if (!(original instanceof Blob)) return { name: file.name || 'ملف', text: text + '\n\nالملف الأصلي غير موجود على هذا الجهاز. أعد إرفاق الأصل لقراءته.' };
-    onProgress?.(`أقرأ محتوى «${file.name || 'PDF'}» عند الطلب…`);
-    text = await pdfText(original, opticalModel === 'native' ? null : blob => readImageText(blob, opticalModel, signal), signal,
-      progress => onProgress?.(`«${file.name || 'PDF'}» — ${progress}`));
+    if (!(original instanceof Blob)) return attachmentDocument(file,
+      text + '\n\nالملف الأصلي غير موجود على هذا الجهاز. أعد إرفاق الأصل لقراءته.' + (originalError ? ` تعذّر تنزيل الأصل: ${originalError.message}` : ''),
+      { originalAvailable: false, readError: originalError?.message || 'الأصل غير موجود على هذا الجهاز.' });
+    onProgress?.(`أقرأ محتوى «${file.name || 'ملف'}» عند الطلب…`);
+    let extraction;
+    try {
+      const result = await extractAttachment(original, file.name || 'ملف', opticalModel, signal,
+        progress => onProgress?.(`«${file.name || 'ملف'}» — ${progress}`));
+      text = result.text.replace(/\u0000/g, '').trim();
+      extraction = result.extraction;
+    } catch (error) {
+      signal?.throwIfAborted();
+      return attachmentDocument(file, `الأصل محفوظ كاملًا؛ تعذّرت قراءة محتواه: ${error.message || error}. استخدم محرك الكمبيوتر لفتح هذا التنسيق أو أعد المحاولة.`,
+        { originalAvailable: true, readError: String(error.message || error), extraction: { complete: false, format: documentFormat(file.name, original.type) } });
+    }
     signal?.throwIfAborted();
-    text = text.replace(/\u0000/g, '').trim();
-    if (!text) throw new Error(`ما قدرت أقرأ نص من «${file.name || 'PDF'}». اختر نموذجًا يدعم الصور لقراءة الصفحات المصوّرة.`);
     const previous = file.extractedText;
-    const extractedText = await saveAttachmentBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), signal);
-    file.extractedText = extractedText;
-    file.extractedModel = opticalModel;
+    const keepPrevious = retryExtraction && previous && extraction.complete === false;
+    let extractedText;
+    try {
+      if (!keepPrevious) extractedText = await saveAttachmentBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), signal);
+      else onProgress?.('لم تكتمل إعادة القراءة؛ احتفظت بنسخة النص السابقة والملف الأصلي.');
+    }
+    catch {
+      signal?.throwIfAborted();
+      onProgress?.('قُرئ المحتوى؛ تعذّر حفظ نسخة النص الإضافية. الملف الأصلي محفوظ كاملًا.');
+    }
+    signal?.throwIfAborted();
+    if (extractedText) {
+      file.extractedText = extractedText;
+      file.extractedModel = opticalModel;
+      file.extractedInfo = extraction;
+      file.readerVersion = 2;
+      delete file.cacheUnavailable;
+      if (previous && previous !== extractedText) void deleteBlob(previous).catch(() => {});
+    } else if (!keepPrevious) file.cacheUnavailable = true;
     file.text = text.length > SYNCED_DOC_CHARS ? text.slice(0, SYNCED_DOC_CHARS) + '\n\n' + SYNCED_TEXT_NOTICE : text;
-    if (previous && previous !== extractedText) void deleteBlob(previous).catch(() => {});
-    return { name: file.name || 'ملف', text };
+    file.extraction = extraction;
+    return attachmentDocument(file, text, { originalAvailable: true, extraction });
   }
   if (file.localText && file.localFile) {
     const fullText = await getBlob(file.localFile).then(blob => blob?.text()).catch(() => undefined);
     if (typeof fullText === 'string') text = fullText;
   }
-  return { name: file.name || 'ملف', text };
+  signal?.throwIfAborted();
+  return attachmentDocument(file, text);
 }
 
 export function readAttachmentDocuments(files, options) {
@@ -118,6 +216,7 @@ export function readAttachmentDocuments(files, options) {
 async function history(chat, model, options) {
   const needUrl = model.api === 'chat';
   const current = chat.messages.at(-1);
+  const sourceFiles = chat.messages.flatMap(m => m.role === 'user' ? (m.files || []).filter(f => f.kind === 'doc') : []);
   const documents = await Promise.all(chat.messages.flatMap(m => m.role === 'user'
     ? (m.files || []).filter(f => f.kind === 'doc').map(async f => ({ ...await readAttachmentDocument(f, { modelId: model.id, ...options }), current: m === current }))
     : []));
@@ -143,7 +242,36 @@ async function history(chat, model, options) {
       out.push({ role: 'assistant', text: `${m.text || ''}${note}${m.promptStudio ? '\nRecreation prompt:\n' + m.promptStudio.prompt : ''}` });
     }
   }
-  return out;
+  // Include a visual page for short PDFs, even when they contain selectable text.
+  // Vector tables, blank cells and signatures do not survive text extraction.
+  if (model.vision !== false && current?.role === 'user' && out.length) {
+    const query = current.text || '';
+    const target = out[out.length - 1];
+    const candidates = documents.map((doc, index) => ({ doc, file: sourceFiles[index] })).reverse();
+    let added = 0;
+    for (const { doc, file } of candidates) {
+      if (!/\.pdf$/i.test(file.name || '') || !doc.extraction?.pagesTotal) continue;
+      const pages = selectPdfPreviewPages(doc.extraction.pagesTotal, query, doc.current, 2 - added);
+      if (!pages.length) continue;
+      for (const pageNumber of pages) {
+        try {
+          options.onProgress?.(`أجهّز عرض الصفحة ${pageNumber} بصريًا من «${file.name}»…`);
+          const visual = await documentPageImagePart(file, model, pageNumber, options.signal);
+          target.files.push(visual.part);
+          target.files.push({ kind: 'doc', name: `${file.name} — صورة الصفحة ${pageNumber}`,
+            text: `هذه صورة الصفحة ${pageNumber} من ${visual.pagesTotal} صفحة من الملف الأصلي. افحص التخطيط والجداول بصريًا، ولا تعتبر بقية الصفحات مرئية.` });
+          added++;
+        } catch (error) {
+          options.signal?.throwIfAborted();
+          options.onProgress?.(`تعذّر عرض صفحة PDF بصريًا: ${error.message || error}. النص المستخرج ما زال متاحًا.`);
+          target.files.push({ kind: 'doc', name: `${file.name} — حالة المعاينة`,
+            text: `لم تتوفر صورة الصفحة ${pageNumber} للتحليل البصري. المتاح هو النص المستخرج فقط. لا تدّعِ التحقق من شكل الجدول أو الخانات أو التوقيع.` });
+        }
+      }
+      if (added >= 2) break;
+    }
+  }
+  return { messages: out, documents, sourceFiles };
 }
 
 async function groundSearch(query, signal, guidance, researchModel) {
@@ -285,7 +413,12 @@ export async function respond(chat, opts, emit, signal) {
     if (promptOnly && !chat.messages.some(message => message.files?.some(file => file.kind === 'image'))) throw new Error('أرفق صورة أولاً لاستخراج البرومبت.');
     let system = [systemPrompt(model, search), work && PROJECT_PROMPT, work && chat.project?.instructions && `User's standing instructions for this project:\n${chat.project.instructions}`,
       promptOnly && PROMPT_STUDIO_SYSTEM, personal.prompt].filter(Boolean).join('\n\n');
-    const messages = await history(chat, model, { signal, onProgress: text => emit('status', { text }) });
+    const { messages, documents, sourceFiles } = await history(chat, model, { signal, retryExtraction: !!opts.retryDocuments, onProgress: text => emit('status', { text }) });
+    reply.documentSources = documents.map(({ name, extraction, originalAvailable, readError }) => ({ name, ...extraction, originalAvailable, readError }));
+    const documentTools = createDocumentTools(documents);
+    if (documents.length) system += '\n\n' + (model.tools ? documentTools.instruction
+      : 'المرفقات محفوظة كاملة، لكن هذا النموذج يحصل على النص أو المقتطفات المرفقة فقط ولا يستطيع استدعاء أدوات قراءة الملفات في هذا الرد. لا تدّعِ مراجعة أجزاء لم تصلك، ووضّح الحاجة إلى نموذج يدعم أدوات الملفات لأي مراجعة كاملة تتجاوز المقتطفات.\n'
+        + JSON.stringify(reply.documentSources));
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     let omittedProjectFiles;
     if (lastUser) {
@@ -324,8 +457,24 @@ export async function respond(chat, opts, emit, signal) {
       }
     }
 
-    const tools = !promptOnly && model.tools ? TOOLS.filter(t => t.name === 'web_search' ? search : !work) : [];
-    for (let step = 0; step < 6; step++) {
+    const canSeePdf = model.vision !== false && sourceFiles.some(file => /\.(pdf|zip)$/i.test(file.name || ''));
+    const visualTool = {
+      name: 'view_document_page',
+      description: 'Visually inspect the rendered original PDF page (including tables, signatures and layout). For a PDF inside ZIP, pass archive_member as the exact path in the ZIP inventory. Call this when text extraction cannot establish visual layout. Do not claim to see other pages.',
+      parameters: { type: 'object', properties: {
+        document_id: { type: 'string', description: 'Document ID d1, d2, etc. from list_documents' },
+        page: { type: 'integer', minimum: 1 },
+        archive_member: { type: 'string', description: 'Exact path of PDF member, only when the document is ZIP' },
+      }, required: ['document_id', 'page'], additionalProperties: false },
+    };
+    if (canSeePdf && documents.length) system += '\n\nFor PDF visual questions, use view_document_page to see the original page image. Text extraction alone cannot establish table layout, blank cells, stamps or signatures. ZIP members may be selected by exact archive path. Do not say a page was seen unless its image has been supplied.';
+    const tools = !promptOnly && model.tools ? [
+      ...TOOLS.filter(t => model.provider !== 'openrouter' && (t.name === 'web_search' ? search : !work)), ...documentTools.tools,
+      ...(canSeePdf ? [visualTool] : []),
+    ] : [];
+    const stepLimit = documents.length && documentTools.tools.length ? 24 : 6;
+    let visualToolCalls = 0;
+    for (let step = 0; step < stepLimit; step++) {
       emit('status', { text: step ? '✍️ يكمل الرد…' : '' });
       const out = await runModel(model.id, {
         system,
@@ -349,11 +498,30 @@ export async function respond(chat, opts, emit, signal) {
       const calls = out.calls.filter((c) => tools.some((t) => t.name === c.name));
       if (!calls.length) break;
 
-      messages.push({ role: 'assistant', text: out.text, calls });
+      messages.push({ role: 'assistant', text: out.text, calls, ...(out.reasoningDetails ? { reasoningDetails: out.reasoningDetails } : {}) });
+      const visualMessages = [];
       for (const c of calls) {
         let output;
         try {
-          if (c.name === 'web_search') {
+          signal?.throwIfAborted();
+          if (c.name === 'view_document_page') {
+            if (++visualToolCalls > 6) throw new Error('بلغت الحد البصري لهذا الرد (6 صفحات). اطلب متابعة مراجعة بقية الصفحات.');
+            const id = String(c.args.document_id || '');
+            const match = /^d([1-9]\d*)$/.exec(id);
+            const index = match ? Number(match[1]) - 1 : -1;
+            if (index < 0 || index >= sourceFiles.length) throw new Error('معرّف المستند غير صالح. استخدم list_documents.');
+            const file = sourceFiles[index];
+            if (!Number.isSafeInteger(c.args.page) || c.args.page < 1) throw new Error('رقم الصفحة غير صالح.');
+            if (c.args.archive_member && (typeof c.args.archive_member !== 'string' || c.args.archive_member.length > 500)) throw new Error('مسار الملف الداخلي غير صالح.');
+            emit('status', { text: `أعرض بصريًا الصفحة ${c.args.page} من «${file.name}»…` });
+            const { part, pagesTotal } = await documentPageImagePart(file, model, c.args.page, signal, c.args.archive_member);
+            visualMessages.push({ role: 'user',
+              text: `صورة أصلية للصفحة ${c.args.page} من ${pagesTotal} صفحة في «${file.name}»${c.args.archive_member ? ` (العضو ${c.args.archive_member})` : ''}. حلّل الصورة ولا تفترض رؤية بقية الصفحات.`, files: [part] });
+            output = JSON.stringify({ document_id: id, page: c.args.page, pages_total: pagesTotal, image_supplied_next: true });
+          } else if (documentTools.tools.some(tool => tool.name === c.name)) {
+            emit('status', { text: c.name === 'search_documents' ? 'أبحث داخل الملفات الكاملة…' : 'أقرأ من الملفات الكاملة…' });
+            output = await documentTools.execute(c.name, c.args);
+          } else if (c.name === 'web_search') {
             emit('status', { text: `🔎 يبحث: ${String(c.args.query || '').slice(0, 60)}` });
             output = await researchWeb(String(c.args.query || userMsg.text), signal);
             reply.searches = [...(reply.searches || []), String(c.args.query || '')];
@@ -367,9 +535,15 @@ export async function respond(chat, opts, emit, signal) {
         }
         messages.push({ role: 'tool', id: c.id, name: c.name, output });
       }
+      messages.push(...visualMessages);
       if (reply.text && !reply.text.endsWith('\n')) {
         reply.text += '\n\n';
         emit('delta', { text: '\n\n' });
+      }
+      if (step === stepLimit - 1) {
+        const notice = 'بلغت حد خطوات هذا الرد؛ قد تبقى أجزاء من الملفات لم أراجعها. اطلب مني المتابعة لمواصلة القراءة.';
+        reply.text += '\n\n' + notice;
+        emit('delta', { text: '\n\n' + notice });
       }
     }
     if (promptOnly) {
@@ -439,20 +613,107 @@ export async function transcribe(blob, externalSignal, provider = settings.get('
 const TEXT_EXT = /\.(txt|md|csv|json|[cm]?js|jsx|ts|tsx|py|html|css|xml|svg|ya?ml|srt|log|sql|java|c|cpp|h|cs|php|rb|go|rs|sh|bat|ini|toml|vue|svelte)$/i;
 const SYNCED_DOC_CHARS = 400_000;
 
-export async function readPdfPages(pdf, imageOperators, readPageImage, signal, onProgress) {
+function documentFormat(name, type = '') {
+  if (/\.pdf$/i.test(name) || type === 'application/pdf') return 'pdf';
+  if (/\.docx$/i.test(name) || type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  if (/\.xlsx$/i.test(name) || type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return 'xlsx';
+  if (/\.zip$/i.test(name) || type === 'application/zip' || type === 'application/x-zip-compressed') return 'zip';
+  if (TEXT_EXT.test(name) || type.startsWith('text/')) return 'text';
+  if (/\.(png|jpe?g|gif|webp|bmp|avif|heic|heif)$/i.test(name) || type.startsWith('image/')) return 'image';
+  return 'unsupported';
+}
+
+const imageType = name => ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+  webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif', heic: 'image/heic', heif: 'image/heif' })[name.split('.').at(-1)?.toLowerCase()] || 'image/png';
+
+async function extractAttachment(file, name, opticalModel, signal, onProgress, depth = 0) {
+  signal?.throwIfAborted();
+  const format = documentFormat(name, file.type);
+  const extraction = { format, complete: true, needsVision: false };
+  let text;
+  if (format === 'pdf') {
+    text = await pdfText(file, opticalModel === 'native' ? null : blob => readImageText(blob, opticalModel, signal), signal,
+      onProgress, summary => Object.assign(extraction, summary));
+  } else if (format === 'docx') text = await docxText(file);
+  else if (format === 'xlsx') {
+    text = await xlsxText(file, { signal });
+    if (/لم تُقرأ|تعذّر استخراج|حد قراءة المصنف/u.test(text)) extraction.complete = false;
+  } else if (format === 'text') text = await file.text();
+  else if (format === 'image') {
+    if (opticalModel === 'native') {
+      extraction.complete = false;
+      extraction.needsVision = true;
+      text = 'الصورة الأصلية محفوظة؛ يلزم نموذج يدعم الصور لقراءة النص الظاهر فيها.';
+    } else text = await readImageText(file.type ? file : new Blob([file], { type: imageType(name) }), opticalModel, signal);
+  } else if (format === 'zip') {
+    if (depth >= 3) throw new Error('الأرشيف متداخل بعمق؛ يلزم محرك الكمبيوتر لفتح الطبقات الباقية. الأصل كامل محفوظ.');
+    const { entries, inventory } = await readZipEntries(file, path => documentFormat(path) !== 'unsupported', signal, { binary: true, tolerateErrors: true });
+    const sections = [];
+    const outcomes = new Map();
+    let read = 0;
+    for (const [path, bytes] of entries) {
+      signal?.throwIfAborted();
+      onProgress?.(`أقرأ ملف الأرشيف ${++read} من ${entries.length}: ${path}`);
+      try {
+        const result = await extractAttachment(new Blob([bytes]), path, opticalModel, signal,
+          progress => onProgress?.(`${path} — ${progress}`), depth + 1);
+        extraction.needsVision ||= result.extraction.needsVision;
+        if (!result.extraction.complete) extraction.complete = false;
+        outcomes.set(path, result.extraction.complete ? 'قُرئ محتواه' : 'قُرئ جزئيًا؛ راجع حالة المحتوى أدناه');
+        sections.push(`[${path}]\n${result.text}`);
+      } catch (error) {
+        signal?.throwIfAborted();
+        extraction.complete = false;
+        outcomes.set(path, 'تعذّرت القراءة');
+        sections.push(`[${path}]\nتعذّرت قراءة محتوى الملف: ${error.message || error}. الأصل محفوظ داخل الأرشيف.`);
+      }
+    }
+    const statusNames = { unsupported: 'تنسيق يحتاج محرك الكمبيوتر', encrypted: 'ملف مشفّر', compression: 'ضغط يحتاج محرك الكمبيوتر',
+      budget: 'تجاوز سعة فك الضغط في المتصفح', zip64: 'يحتاج قارئ ZIP64', corrupt: 'تعذّرت قراءة بيانات هذا الملف أو فشل التحقق من سلامته' };
+    const archiveEntries = inventory.map(entry => ({ name: entry.name, size: entry.size,
+      status: outcomes.get(entry.name) || statusNames[entry.status] || 'لم يُقرأ' }));
+    const unread = inventory.filter(entry => entry.status !== 'read');
+    if (unread.length) extraction.complete = false;
+    const entriesRead = [...outcomes.values()].filter(status => status === 'قُرئ محتواه').length;
+    Object.assign(extraction, { entriesTotal: inventory.length, entriesRead,
+      entriesUnreadable: inventory.length - entriesRead, archiveEntries });
+    text = `جرد الأرشيف: ${inventory.length} ملف. الأصل محفوظ كاملًا بكل أنواعه. ${extraction.complete ? 'اكتملت قراءة الملفات المدعومة.' : 'قراءة المحتوى غير مكتملة؛ الجرد يوضح كل ملف وحالته.'}\n`
+      + archiveEntries.map(entry => `${entry.name} (${entry.size} بايت): ${entry.status}`).join('\n')
+      + '\n\n' + sections.join('\n\n');
+  } else {
+    extraction.complete = false;
+    text = 'الملف الأصلي محفوظ كاملًا؛ هذا التنسيق يحتاج محرك الكمبيوتر لفتح محتواه. لا يتوفر استخراج نص لهذا الملف في المتصفح.';
+  }
+  signal?.throwIfAborted();
+  if (!String(text || '').trim()) {
+    extraction.complete = false;
+    text = 'الملف الأصلي محفوظ كاملًا؛ لم تُرجع القراءة الآلية نصًا. قد يحتوي الملف على صور أو محتوى يحتاج أدوات الكمبيوتر.';
+  }
+  return { text, extraction };
+}
+
+export async function readPdfPages(pdf, imageOperators, readPageImage, signal, onProgress, onSummary) {
   const pages = [];
-  let hasText = false;
-  let failedOcr;
+  const summary = { format: 'pdf', pagesTotal: pdf.numPages, pagesRead: 0, pagesWithText: 0,
+    unreadablePages: [], needsVision: false, complete: true };
   for (let i = 1; i <= pdf.numPages; i++) {
     signal?.throwIfAborted();
     onProgress?.(`أستخرج نص الصفحة ${i} من ${pdf.numPages}…`);
-    const page = await pdf.getPage(i);
+    let page;
     try {
-      const content = await page.getTextContent();
-      const native = content.items.filter(it => typeof it.str === 'string')
-        .map(it => it.str + (it.hasEOL ? '\n' : '')).join('').trim();
+      page = await pdf.getPage(i);
+      let native = '';
+      let nativeError;
+      try {
+        const content = await page.getTextContent();
+        native = content.items.filter(it => typeof it.str === 'string')
+          .map(it => it.str + (it.hasEOL ? '\n' : ' ')).join('').trim();
+      } catch (error) {
+        signal?.throwIfAborted();
+        nativeError = error;
+      }
       const parts = native ? [native] : [];
-      hasText ||= !!native;
+      let hasText = !!native;
       const withImage = !native || await page.getOperatorList()
         .then(operators => operators.fnArray.some((op, position) => {
           if (!imageOperators.has(op)) return false;
@@ -462,7 +723,9 @@ export async function readPdfPages(pdf, imageOperators, readPageImage, signal, o
       signal?.throwIfAborted();
       if (withImage) {
         if (!readPageImage) {
-          if (native) parts.push('لم تُقرأ الصور داخل الصفحة لأن نموذج قراءة الصور غير متاح.');
+          summary.needsVision = true;
+          summary.unreadablePages.push(i);
+          parts.push('لم تُقرأ الصور أو النص المصوّر داخل هذه الصفحة؛ يلزم نموذج يدعم الصور.');
         } else {
           try {
             onProgress?.(`أقرأ صور الصفحة ${i} من ${pdf.numPages} بصريًا…`);
@@ -471,22 +734,39 @@ export async function readPdfPages(pdf, imageOperators, readPageImage, signal, o
             const canonicalLine = line => line.normalize('NFKC').replace(/\s+/g, ' ').trim();
             const existing = new Set(native.split('\n').map(canonicalLine));
             const scanned = transcribed.split(/\r?\n/).filter(line => !existing.has(canonicalLine(line))).join('\n').trim();
+            if (!transcribed) {
+              summary.unreadablePages.push(i);
+              parts.push('لم تُرجع القراءة البصرية نصًا؛ راجع الصفحة الأصلية.');
+            }
             if (scanned) {
               hasText = true;
               parts.push(native ? 'نص مستخرج بصريًا من الصفحة:\n' + scanned : scanned);
             }
           } catch (error) {
             signal?.throwIfAborted();
-            failedOcr ||= error;
-            parts.push('تعذّرت القراءة البصرية لهذه الصفحة.');
+            summary.unreadablePages.push(i);
+            parts.push(`تعذّرت القراءة البصرية لهذه الصفحة: ${error.message || error}`);
           }
         }
       }
+      if (nativeError) parts.push('تعذّر استخراج النص الأصلي من الصفحة؛ المتاح هو نتيجة القراءة البصرية إن وُجدت.');
+      summary.pagesRead++;
+      if (hasText) summary.pagesWithText++;
       pages.push(`[صفحة ${i}]\n${parts.join('\n\n') || 'لا يوجد نص مقروء.'}`);
-    } finally { page.cleanup?.(); }
+    } catch (error) {
+      signal?.throwIfAborted();
+      summary.unreadablePages.push(i);
+      pages.push(`[صفحة ${i}]\nتعذّرت قراءة الصفحة: ${error.message || error}. الصفحة محفوظة في الملف الأصلي.`);
+    } finally { try { page?.cleanup?.(); } catch { /* Cleanup must not erase an extracted page. */ } }
   }
-  if (!hasText && failedOcr) throw failedOcr;
-  return pages.join('\n\n');
+  signal?.throwIfAborted();
+  summary.unreadablePages = [...new Set(summary.unreadablePages)];
+  summary.complete = summary.pagesRead === summary.pagesTotal && !summary.unreadablePages.length;
+  onSummary?.(summary);
+  const status = `حالة قراءة PDF: تمت معالجة ${summary.pagesRead} من ${summary.pagesTotal} صفحة؛ وُجد نص في ${summary.pagesWithText} صفحة.`
+    + (summary.unreadablePages.length ? ` القراءة غير مكتملة في الصفحات: ${summary.unreadablePages.join('، ')}. الأصل محفوظ كاملًا.` : '');
+  onProgress?.(status);
+  return status + '\n\n' + pages.join('\n\n');
 }
 
 async function pdfPageImage(page, signal) {
@@ -512,7 +792,7 @@ async function pdfPageImage(page, signal) {
   }
 }
 
-async function pdfText(file, readPageImage, signal, onProgress) {
+async function pdfText(file, readPageImage, signal, onProgress, onSummary) {
   const pdfjs = await import('../vendor/pdf.mjs');
   signal?.throwIfAborted();
   pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.mjs', import.meta.url).href;
@@ -527,7 +807,7 @@ async function pdfText(file, readPageImage, signal, onProgress) {
   const imageOperators = new Map(Object.entries(pdfjs.OPS)
     .filter(([name]) => /^paint(?:Inline)?Image/u.test(name)).map(([name, op]) => [op, simpleImageSize[name]]));
   const reading = documentTask.promise.then(pdf => readPdfPages(
-    pdf, imageOperators, readPageImage ? async page => readPageImage(await pdfPageImage(page, signal)) : undefined, signal, onProgress,
+    pdf, imageOperators, readPageImage ? async page => readPageImage(await pdfPageImage(page, signal)) : undefined, signal, onProgress, onSummary,
   ));
   let abort;
   const interrupted = signal && new Promise((_, reject) => {
@@ -585,29 +865,15 @@ async function saveAttachmentBlob(blob, signal) {
 // صورة (Blob مصغّر) أو مستند ← وصف المرفق المحفوظ في الرسالة
 export async function makeAttachment(file, imageBlob, modelId, { signal, onProgress } = {}) {
   signal?.throwIfAborted();
-  if (imageBlob) return { kind: 'image', blob: await saveAttachmentBlob(imageBlob, signal), name: file.name || 'صورة' };
   const name = file.name || 'ملف';
-  let text;
-  if (/\.pdf$/i.test(name) || file.type === 'application/pdf') {
-    onProgress?.('أحفظ ملف PDF الأصلي…');
-    return { kind: 'doc', name, localFile: await saveAttachmentBlob(file, signal), deferredPdf: true,
-      text: 'ملف PDF أصلي محفوظ على جهاز الإرفاق؛ يُقرأ عند إرسال السؤال. إذا كنت تستخدم جهازًا آخر، أعد إرفاق الأصل.' };
+  const format = documentFormat(name, file.type);
+  onProgress?.(format === 'pdf' ? 'أحفظ ملف PDF الأصلي…' : 'أحفظ الملف الأصلي…');
+  const localFile = await saveAttachmentBlob(file, signal);
+  const original = { name, originalName: name, size: file.size, type: file.type, localFile };
+  if (imageBlob) {
+    try { return { ...original, kind: 'image', blob: imageBlob === file ? localFile : await saveAttachmentBlob(imageBlob, signal) }; }
+    catch (error) { await deleteBlob(localFile).catch(() => {}); throw error; }
   }
-  if (/\.docx$/i.test(name)) text = await docxText(file);
-  else if (/\.xlsx$/i.test(name) || file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') text = await xlsxText(file, { signal });
-  else if (/\.zip$/i.test(name) || file.type === 'application/zip') text = await zipText(file, path => TEXT_EXT.test(path), signal);
-  else if (TEXT_EXT.test(name) || file.type.startsWith('text/')) text = await file.text();
-  else return { kind: 'doc', name, localFile: await saveAttachmentBlob(file, signal), text: 'أُرفق الملف الأصلي محليًا. محتواه غير متاح للنموذج بهذا التنسيق.' };
-  signal?.throwIfAborted();
-  text = text.replace(/\u0000/g, '').trim();
-  if (!text) throw new Error(`ما قدرت أقرأ نص من «${name}» (ممكن يكون PDF مصوّر — أرسله كصور)`);
-  if (text.length <= SYNCED_DOC_CHARS) return { kind: 'doc', name, text };
-  const preview = text.slice(0, SYNCED_DOC_CHARS) + '\n\n' + SYNCED_TEXT_NOTICE;
-  try {
-    const localFile = await saveAttachmentBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), signal);
-    return { kind: 'doc', name, text: preview, localFile, localText: true };
-  } catch {
-    signal?.throwIfAborted();
-    return { kind: 'doc', name, text: preview, cut: true };
-  }
+  return { ...original, kind: 'doc', deferredDocument: true, ...(format === 'pdf' ? { deferredPdf: true } : {}),
+    text: 'الملف الأصلي محفوظ كاملًا؛ يُقرأ عند إرسال السؤال. إن لم يوجد الأصل على جهازك الحالي، أعد إرفاقه.' };
 }

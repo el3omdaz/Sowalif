@@ -10,7 +10,11 @@ const server = http.createServer(async (req, res) => {
   if (!req.url.includes('/messages')) { res.writeHead(404); res.end('{}'); return; }
   const input = JSON.parse(raw);
   const stages = [
-    { type: 'tool_use', id: 'tool_write', name: 'Write', input: { file_path: '/workspace/smoke-value.js', content: 'export const value = 42;\n' } },
+    { type: 'tool_use', id: 'tool_write', name: 'Write', input: { file_path: '/workspace/smoke-value.js', content: 'export const value = 41;\n' } },
+    { type: 'tool_use', id: 'tool_read', name: 'Read', input: { file_path: '/workspace/smoke-value.js' } },
+    { type: 'tool_use', id: 'tool_edit', name: 'Edit', input: { file_path: '/workspace/smoke-value.js', old_string: 'value = 41', new_string: 'value = 42' } },
+    { type: 'tool_use', id: 'tool_glob', name: 'Glob', input: { pattern: '*.js', path: '/workspace' } },
+    { type: 'tool_use', id: 'tool_grep', name: 'Grep', input: { pattern: 'value', path: '/workspace/smoke-value.js' } },
     { type: 'tool_use', id: 'tool_test', name: 'Bash', input: { command: 'node --test check.test.mjs', description: 'Run the smoke assertion' } },
     { type: 'text', text: 'تم تعديل الملف وتشغيل الاختبار.' },
   ];
@@ -34,7 +38,9 @@ try {
     approve: async () => true,
   });
   assert.match(await readFile('/workspace/smoke-value.js', 'utf8'), /42/);
-  assert.ok(step >= 3, 'the official runtime must iterate through write, execution, and final answer');
+  assert.ok(step >= 7, 'the official runtime must iterate through project tools, execution, and final answer');
+  assert.ok(events.filter(event => event.type === 'tool-result').length >= 6);
+  assert.ok(events.filter(event => event.type === 'tool-result').every(event => !event.error), 'all enabled project tools must work');
   assert.ok(events.some(event => event.type === 'tool-result' && event.text.includes('SMOKE_TEST_PASSED')), 'the shell assertion must actually pass');
-  console.log('CLAUDE_RUNTIME_SMOKE_OK: actual Write and Bash tools completed using an offline model stub.');
+  console.log('CLAUDE_RUNTIME_SMOKE_OK: actual Write, Read, Edit, Glob, Grep and Bash tools completed using an offline model stub.');
 } finally { server.close(); }

@@ -1,26 +1,26 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=37';
-import { fitViewport } from './viewport.js?v=21';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=26';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=22';
-import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=36';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=22';
-import { mediaProvider } from './media.js?v=22';
-import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=22';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=22';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=22';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=36';
-import { prepareProjectPush, pushProject } from './project-github.js?v=36';
-import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=36';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=36';
-import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=27';
-import { planImage } from './image-plan.js?v=1';
-import { initOrganizer } from './organizer.js?v=32';
-import { recommendModel } from './model-recommendation.js?v=1';
-import { reasoningLevels } from './reasoning.js?v=1';
-import { initMarket } from './market.js?v=2';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=1';
-import { requestText } from './text-dialog.js?v=1';
+import * as db from './db.js?v=40';
+import { fitViewport } from './viewport.js?v=40';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=40';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=40';
+import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=40';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=40';
+import { mediaProvider } from './media.js?v=40';
+import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=40';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=40';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=40';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=40';
+import { prepareProjectPush, pushProject } from './project-github.js?v=40';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=40';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=40';
+import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=40';
+import { planImage } from './image-plan.js?v=40';
+import { initOrganizer } from './organizer.js?v=40';
+import { recommendModel } from './model-recommendation.js?v=40';
+import { reasoningLevels } from './reasoning.js?v=40';
+import { initMarket } from './market.js?v=40';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=40';
+import { requestText } from './text-dialog.js?v=40';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -440,6 +440,40 @@ async function hydrate(root) {
   }
 }
 
+function attachmentStatus(file) {
+  const info = file.extraction || file.extractedInfo || file;
+  const size = Number.isFinite(file.size) ? ` · ${(file.size / 1024 / 1024).toLocaleString('ar', { maximumFractionDigits: 1 })} MB` : '';
+  if (info?.pagesTotal) return `${info.complete ? 'قُرئت' : 'قراءة غير مكتملة:'} ${info.pagesRead || 0} / ${info.pagesTotal} صفحة${size}`;
+  if (info?.entriesTotal !== undefined) return `${info.entriesRead || 0} / ${info.entriesTotal} ملف مقروء${info.complete ? '' : ' · توجد ملفات تحتاج أدوات الكمبيوتر'}${size}`;
+  if (info?.format) return `قراءة المحتوى ${info.complete ? 'مكتملة' : 'غير مكتملة'}${size}`;
+  return (file.localFile && !file.localText ? 'الأصل محفوظ كاملًا' : file.originalStoragePath ? 'الأصل محفوظ في حسابك' : 'نص مستخرج · أعد إرفاق الأصل عند الحاجة') + size;
+}
+
+async function downloadAttachment(file, button) {
+  button.disabled = true;
+  try {
+    let blob, name = file.originalName || file.name || 'attachment';
+    if (file.localFile && !file.localText) blob = await db.getBlob(file.localFile);
+    if (!(blob instanceof Blob) && file.originalStoragePath) {
+      const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
+      blob = await resolveAttachmentOriginal(file, { onProgress: text => toast(text) });
+    }
+    if (!(blob instanceof Blob) && file.kind === 'image' && file.blob) blob = await db.getBlob(file.blob);
+    if (!(blob instanceof Blob)) {
+      if (!file.text || file.deferredDocument || file.deferredPdf) throw new Error('الأصل غير موجود هنا. أعد إرفاقه أو انتظر مزامنته من جهاز الرفع.');
+      blob = file.localText && file.localFile ? await db.getBlob(file.localFile) : new Blob([file.text], { type: 'text/plain;charset=utf-8' });
+      name += '.extracted.txt';
+    }
+    if (!(blob instanceof Blob)) throw new Error('تعذّر العثور على الملف المحفوظ.');
+    if (!file.localText && Number.isSafeInteger(file.size) && blob.size !== file.size) throw new Error('الملف المحفوظ غير مكتمل. أعد إرفاق الأصل.');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (error) { toast(error.message, 6000); }
+  finally { button.disabled = false; }
+}
+
 function promptStudioHTML(studio) {
   return `<section class="prompt-studio"><div class="prompt-studio-head"><strong>البرومبت الجاهز</strong><span>وصف مقارب للصورة</span></div><pre dir="ltr">${esc(studio.prompt || '')}</pre>
     <div class="row"><button class="btn primary" data-copy-prompt>نسخ البرومبت</button><button class="btn ghost" data-use-prompt>استخدمه للرسم</button></div>
@@ -448,7 +482,7 @@ function promptStudioHTML(studio) {
 }
 function messageHTML(m, i) {
   if (m.role === 'user') {
-    const files = (m.files || []).map((f) => (f.kind === 'image' ? `<img ${imgAttrs(f)} alt="" data-zoom>` : `<span class="doc-chip">📄 ${esc(f.name)}</span>`)).join('');
+    const files = (m.files || []).map((f, index) => (f.kind === 'image' ? `<img ${imgAttrs(f)} alt="" data-zoom><button class="doc-chip" data-download-attachment="${index}">↓ الأصل</button>` : `<button class="doc-chip" data-download-attachment="${index}" title="تنزيل الملف المحفوظ">📄 ${esc(f.name)}<small>${esc(attachmentStatus(f))}</small><span>↓ ${f.localFile && !f.localText || f.originalStoragePath ? 'تنزيل الأصل' : 'تنزيل النص المستخرج'}</span></button>`)).join('');
     return `<div class="msg user" data-i="${i}">${files ? `<div class="files">${files}</div>` : ''}${m.text ? `<div class="bubble" dir="auto">${esc(m.text)}</div><div class="meta"><button data-copy>📋 نسخ</button></div>` : ''}</div>`;
   }
   const imgs = (m.images || []).map(genFigure).join('') + (m.videos || []).map(videoFigure).join('');
@@ -465,12 +499,14 @@ function messageHTML(m, i) {
     ${m.memoryAction ? `<div class="memory-notice">✓ ${esc(m.memoryAction)}</div>` : ''}
     ${m.recallUnavailable ? '<div class="memory-notice">تعذّر استرجاع المحادثات السابقة في هذا الرد.</div>' : ''}
     ${m.contextSources?.length ? `<details class="context-sources"><summary>سياق من ${m.contextSources.length} محادثة سابقة</summary>${m.contextSources.map((c) => `<a href="#${encodeURIComponent(c.id)}">${esc(c.title)}</a>`).join('')}</details>` : ''}
+    ${m.documentSources?.length ? `<details class="document-receipt"><summary>حالة قراءة ${m.documentSources.length} ملف</summary>${m.documentSources.map(file => `<p><strong>${esc(file.name)}</strong> · ${esc(attachmentStatus(file))}${file.readError ? `<br>${esc(file.readError)}` : ''}</p>`).join('')}<small>حفظ الأصل كاملًا يختلف عن اكتمال قراءة محتواه. المقاطع الأولية ليست مراجعة لكل الصفحات.</small></details>` : ''}
     ${m.mediaTask ? `<div class="memory-notice">${m.mediaTask.provider === 'kie' ? 'kie.ai' : 'PiAPI'} · ${esc(m.mediaTask.name)}${m.mediaTask.id ? ` · المهمة: ${esc(m.mediaTask.id)}` : ' · لم يتأكد إنشاء المهمة؛ افحص سجل المزوّد قبل إعادة الطلب.'}</div>` : ''}
     <div class="meta"><span>${esc(m.agentEngine ? codingEngineName(m.agentEngine) : m.mediaTask?.name || modelOf(m.model).name)}${m.searches?.length ? ' · 🔎 بحث' : ''}</span>
       ${m.text ? '<button data-copy>📋 نسخ</button>' : ''}
       ${m.mediaTask?.id && !m.mediaTask.done ? '<button data-resume-media>متابعة المهمة</button>' : ''}
       ${m.agentRunId && !m.agentCompleted ? '<button data-resume-agent>متابعة التنفيذ</button>' : ''}
       ${isLast && !m.mediaTask && !m.agentEngine ? '<button data-retry>🔄 أعد</button>' : ''}
+      ${isLast && !m.agentEngine && m.documentSources?.some(file => file.complete === false) ? '<button data-reread-documents>إعادة قراءة الملفات غير المكتملة</button>' : ''}
       ${isLast && m.error && !m.mediaKind && !m.mediaTask && !m.agentEngine && !['image', 'video'].includes(S.chat?.mode) && !['gemini-3-8-flash', OR_AUDIO_MODEL].includes(m.model) ? '<button data-fast-retry>جرّب Gemini Flash</button>' : ''}
       ${m.error && m.connection ? `<span>مدة الانتظار: ${Math.round(m.connection.totalMs / 1000)} ث · ${m.connection.headersMs == null ? 'بدون بدء استجابة' : 'وصلت استجابة من الخدمة'}</span>` : ''}
     </div></div>`;
@@ -494,6 +530,13 @@ function renderMessages() {
 $('#messages').addEventListener('click', async (e) => {
   const download = e.target.closest('[data-download-video]');
   if (download) return downloadVideo(download);
+  const attachment = e.target.closest('[data-download-attachment]');
+  if (attachment) {
+    const message = S.chat.messages[Number(attachment.closest('[data-i]').dataset.i)];
+    const file = message?.files?.[Number(attachment.dataset.downloadAttachment)];
+    if (file) return downloadAttachment(file, attachment);
+    return;
+  }
   const sourceLink = e.target.closest('.context-sources a');
   if (sourceLink) {
     e.preventDefault();
@@ -561,7 +604,8 @@ $('#messages').addEventListener('click', async (e) => {
     S.model = S.provider === 'openrouter' ? OR_AUDIO_MODEL : 'gemini-3-8-flash';
     renderModelName();
     retry();
-  } else if (e.target.closest('[data-retry]')) retry();
+  } else if (e.target.closest('[data-reread-documents]')) retry(true);
+  else if (e.target.closest('[data-retry]')) retry();
 });
 
 $('#empty').addEventListener('click', (e) => {
@@ -839,8 +883,7 @@ const attachmentDrafts = new Map();
 function disposeAttachment(item) {
   item.controller?.abort();
   if (item.preview) URL.revokeObjectURL(item.preview);
-  const blob = item.meta?.blob || item.meta?.localFile;
-  if (blob) void db.deleteBlob(blob).catch(() => {});
+  for (const blob of new Set([item.meta?.blob, item.meta?.localFile, item.meta?.extractedText].filter(Boolean))) void db.deleteBlob(blob).catch(() => {});
 }
 
 function switchAttachmentDraft(chat) {
@@ -912,7 +955,7 @@ async function attachFile(file, original) {
 
 function renderAttachments() {
   $('#attachRow').innerHTML = S.attachments
-    .map((a) => `<div class="att${a.loading ? ' loading' : ''}">${a.preview ? `<img src="${a.preview}" alt="">` : '📄'}<span>${esc(a.name)}${a.loading ? `<small role="status">${esc(a.phase || 'أجهز المرفق…')}</small>` : a.meta?.deferredPdf ? '<small>جاهز · يُقرأ عند الإرسال</small>' : ''}</span><button data-rm="${a.id}" aria-label="إزالة">✕</button></div>`)
+    .map((a) => `<div class="att${a.loading ? ' loading' : ''}">${a.preview ? `<img src="${a.preview}" alt="">` : '📄'}<span>${esc(a.name)}${a.loading ? `<small role="status">${esc(a.phase || 'أجهز المرفق…')}</small>` : a.meta?.deferredDocument || a.meta?.deferredPdf ? '<small>الأصل كامل · جاهز للإرسال</small>' : ''}</span><button data-rm="${a.id}" aria-label="إزالة">✕</button></div>`)
     .join('');
   updateSend();
 }
@@ -1126,11 +1169,11 @@ async function send() {
   await run({ imageMode, videoMode });
 }
 
-async function retry() {
+async function retry(retryDocuments = false) {
   if (S.controller || projectSaving) return;
   while (S.chat.messages.at(-1)?.role === 'assistant') S.chat.messages.pop();
   if (!S.chat.messages.length) return;
-  await run({ imageMode: false });
+  await run({ imageMode: false, retryDocuments });
 }
 
 // ---------- محركات البرمجة المحلية ----------
@@ -1361,6 +1404,7 @@ async function refreshCodingStatus() {
     $('#codingStatus').textContent = !status.local ? 'افتح نسخة الكمبيوتر لتشغيل المحركات.'
       : status.ready && (engine === 'off' || available.includes(engine)) ? `المحركات الجاهزة · ${available.map(codingEngineName).join('، ')}`
         : 'جهّز المحرك بأمر npm run agent:setup على الكمبيوتر، ثم أعد تشغيل نسخة سوالف.';
+    if (status.ready && status.documentTools === false) $('#codingStatus').textContent += ' · حدّث بيئة المحرك لتفعيل أدوات PDF وOCR والأرشيفات.';
   } catch { $('#codingStatus').textContent = 'تعذّر الاتصال بخدمة الكمبيوتر. شغّل Start-Sowalif.cmd.'; }
 }
 $('#codingEngine').onchange = (e) => {

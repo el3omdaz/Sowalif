@@ -83,6 +83,8 @@ test('OpenCode uses Kimi on OpenRouter and requests one-use approval within the 
   assert.deepEqual(run.approvals, [{ toolName: 'OpenCode', input: { command: 'npm test', description: 'Run tests' } }]);
   assert.equal(run.requests.find(({ path }) => path.startsWith('/permission/')).body.reply, 'once');
   const prompt = run.requests.find(({ path }) => path.endsWith('/message')).body;
+  assert.match(prompt.system, /Deploy or publish only when the user explicitly requests it/);
+  assert.doesNotMatch(prompt.system, /Do not publish, deploy/);
   assert.deepEqual(prompt.model, { providerID: 'openrouter', modelID: 'moonshotai/kimi-k3.1-pro' });
   assert.deepEqual(prompt.parts, [{ type: 'text', text: config.prompt }]);
   assert.equal(run.events.find(({ type }) => type === 'session').id, sessionID);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractImagePrompt } from '../js/prompt-studio.js?v=20';
+import { extractImagePrompt } from '../js/prompt-studio.js?v=40';
 test('prompt extraction accepts only replacements that identify one exact phrase', () => {
   const prompt = 'An adult man wearing a linen coat, in soft studio lighting.';
   const output = extractImagePrompt('وصف مقارب للصورة.\n```sowalif-prompt\n' + JSON.stringify({ prompt, changes: [

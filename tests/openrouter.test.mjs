@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 
 const storage = new Map([['sc.openRouterKey', '"or-test-key"'], ['sc.kieKey', '"kie-test-key"']]);
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
-const { runModel, diagnoseModels } = await import('../js/kie.js?v=22');
-const { checkOpenRouterKey, refreshOpenRouterModels } = await import('../js/openrouter.js?v=22');
-const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=26');
-const { reasoningLevels } = await import('../js/reasoning.js?v=1');
+const { runModel, diagnoseModels } = await import('../js/kie.js?v=40');
+const { checkOpenRouterKey, refreshOpenRouterModels } = await import('../js/openrouter.js?v=40');
+const { modelById, modelsFor, OR_DEFAULT_MODEL } = await import('../js/models.js?v=40');
+const { reasoningLevels } = await import('../js/reasoning.js?v=40');
 const opts = { system: 'Test', messages: [{ role: 'user', text: 'مرحبا' }] };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const sse = (chunks) => new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
@@ -48,6 +48,85 @@ test('source comparison enables provider page reading alongside search', async (
   await runModel(OR_DEFAULT_MODEL, { ...opts, search: true, webFetch: true });
 });
 
+const documentTool = { name: 'document_read', description: 'Read pages of an attached document', parameters: { type: 'object', properties: { file: { type: 'string' }, start_page: { type: 'integer' } }, required: ['file'] } };
+
+test('OpenRouter returns JSON function calls and replays them with results and native search', async () => {
+  const reasoningDetails = [{ type: 'reasoning.encrypted', data: 'opaque-state', index: 0 }];
+  let turn = 0;
+  globalThis.fetch = async (_url, { body }) => {
+    const request = JSON.parse(body);
+    assert.deepEqual(request.tools, [
+      { type: 'function', function: documentTool }, { type: 'openrouter:web_search' }, { type: 'openrouter:web_fetch' },
+    ]);
+    assert.equal(request.tool_choice, 'auto');
+    if (!turn++) return json({ choices: [{ message: { content: null, reasoning_details: reasoningDetails, tool_calls: [
+      { id: 'read_1', type: 'function', function: { name: 'document_read', arguments: '{"file":"report.pdf","start_page":37}' } },
+    ] }, finish_reason: 'tool_calls' }] });
+    assert.deepEqual(request.messages.slice(-2), [
+      { role: 'assistant', content: null, reasoning_details: reasoningDetails, tool_calls: [
+        { id: 'read_1', type: 'function', function: { name: 'document_read', arguments: '{"file":"report.pdf","start_page":37}' } },
+      ] },
+      { role: 'tool', tool_call_id: 'read_1', content: '[page 37] Full evidence' },
+    ]);
+    return json({ choices: [{ message: { content: 'Based on page 37' }, finish_reason: 'stop' }] });
+  };
+  const options = { ...opts, tools: [documentTool], search: true, webFetch: true };
+  const first = await runModel(OR_DEFAULT_MODEL, options);
+  assert.deepEqual(first.calls, [{ id: 'read_1', name: 'document_read', args: { file: 'report.pdf', start_page: 37 } }]);
+  const second = await runModel(OR_DEFAULT_MODEL, { ...options, messages: [
+    ...opts.messages, { role: 'assistant', text: first.text, calls: first.calls, reasoningDetails: first.reasoningDetails },
+    { role: 'tool', id: first.calls[0].id, name: first.calls[0].name, output: '[page 37] Full evidence' },
+  ] });
+  assert.equal(second.text, 'Based on page 37');
+  assert.equal(turn, 2);
+});
+
+test('OpenRouter assembles interleaved streamed function calls and reasoning details', async () => {
+  let displayed = '';
+  globalThis.fetch = async () => sse([
+    { choices: [{ delta: { content: 'أراجع الملف', reasoning_details: [{ type: 'reasoning.encrypted', data: 'opaque-', index: 0 }], tool_calls: [
+      { index: 1, id: 'read_b', type: 'function', function: { name: 'document_read', arguments: '{"file":"b' } },
+      { index: 0, id: 'read_a', type: 'function', function: { name: 'document_read', arguments: '{"file":"a' } },
+    ] }, finish_reason: null }] },
+    { choices: [{ delta: { reasoning_details: [{ data: 'state', index: 0 }], tool_calls: [
+      { index: 0, function: { arguments: '.pdf","start_page":42}' } },
+      { index: 1, function: { arguments: '.pdf","start_page":1}' } },
+    ] }, finish_reason: null }] },
+    { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+  ]);
+  const out = await runModel(OR_DEFAULT_MODEL, { ...opts, tools: [documentTool], onDelta: chunk => displayed += chunk });
+  assert.equal(out.text, displayed);
+  assert.deepEqual(out.calls, [
+    { id: 'read_a', name: 'document_read', args: { file: 'a.pdf', start_page: 42 } },
+    { id: 'read_b', name: 'document_read', args: { file: 'b.pdf', start_page: 1 } },
+  ]);
+  assert.deepEqual(out.reasoningDetails, [{ type: 'reasoning.encrypted', data: 'opaque-state', index: 0 }]);
+});
+
+test('malformed tool arguments never become an executable empty object', async () => {
+  for (const args of ['{"file":', 'null', '[]', 'true']) {
+    globalThis.fetch = async () => json({ choices: [{ message: { content: '', tool_calls: [
+      { id: 'bad', type: 'function', function: { name: 'document_read', arguments: args } },
+    ] }, finish_reason: 'tool_calls' }] });
+    await assert.rejects(runModel(OR_DEFAULT_MODEL, { ...opts, tools: [documentTool] }), /معاملات أداة غير صالحة/);
+  }
+  globalThis.fetch = async () => sse([
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: 'bad', function: { name: 'document_read', arguments: '{"file":' } }] } }] },
+    { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+  ]);
+  await assert.rejects(runModel(OR_DEFAULT_MODEL, { ...opts, tools: [documentTool] }), /معاملات أداة غير صالحة/);
+});
+
+test('incomplete or token-limited tool streams cannot execute even complete argument fragments', async () => {
+  const delta = { tool_calls: [{ index: 0, id: 'partial', type: 'function', function: { name: 'document_read', arguments: '{"file":"report.pdf"}' } }] };
+  for (const finish of [null, 'length']) {
+    globalThis.fetch = async () => sse([{ choices: [{ delta, finish_reason: finish }] }]);
+    await assert.rejects(runModel(OR_DEFAULT_MODEL, { ...opts, tools: [documentTool] }), finish === 'length' ? /الحد المتاح/ : /انقطع بث OpenRouter/);
+  }
+  globalThis.fetch = async () => sse([{ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
+  await assert.rejects(runModel(OR_DEFAULT_MODEL, { ...opts, tools: [documentTool] }), /طلب أداة غير مكتمل/);
+});
+
 test('audio is sent as base64 without upload to kie.ai', async () => {
   let calls = 0;
   globalThis.fetch = async (url, init) => {
@@ -76,15 +155,27 @@ test('catalog loads public models, filters batches and persists supported capabi
     assert.equal(init.headers.Authorization, undefined);
     return json({ data: [
       { id: 'test/new-model', name: 'Test: Fresh model', architecture: { input_modalities: ['text'], output_modalities: ['text'] }, supported_parameters: [] },
+      { id: 'test/tool-model', architecture: { input_modalities: ['text'], output_modalities: ['text'] }, supported_parameters: ['tools'] },
       { id: 'test/new-model:batch', architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
       { id: 'bad"id', architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
     ] });
   };
-  assert.equal(await refreshOpenRouterModels(), 1);
+  assert.equal(await refreshOpenRouterModels(), 2);
   assert.equal(modelById('or:test/new-model').vision, false);
   assert.equal(modelById('or:test/new-model').name, 'Fresh model');
+  assert.equal(modelById('or:test/new-model').tools, false);
+  assert.equal(modelById('or:test/tool-model').tools, true);
+  assert.equal(modelById('or:unknown/model').tools, false);
   assert.ok(modelsFor('openrouter').some((m) => m.id === 'or:test/new-model'));
   assert.ok(storage.has('sc.orCatalog'));
+});
+
+test('models without advertised tools do not receive function schemas', async () => {
+  globalThis.fetch = async (_url, { body }) => {
+    assert.deepEqual(JSON.parse(body).tools, [{ type: 'openrouter:web_search' }]);
+    return json({ choices: [{ message: { content: 'Result' }, finish_reason: 'stop' }] });
+  };
+  await runModel('or:test/new-model', { ...opts, tools: [documentTool], search: true });
 });
 
 test('OpenRouter respects advertised effort values and preserves them in its cache', async () => {
@@ -147,7 +238,7 @@ test('diagnostics stays on selected provider', async () => {
 });
 
 test('recorded speech conversion routes directly to OpenRouter with no kie.ai upload', async () => {
-  const { transcribe } = await import('../js/chat.js?v=36');
+  const { transcribe } = await import('../js/chat.js?v=40');
   globalThis.FileReader = class {
     readAsDataURL(blob) {
       blob.arrayBuffer().then((bytes) => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString('base64')}`; this.onload(); });

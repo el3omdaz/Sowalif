@@ -7,13 +7,16 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, readdir, lstat, unlink, realpath } from 'node:fs/promises';
 import { resolve, join, dirname, relative, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validProjectPath, mergeProjectFiles, projectFileBytes, projectFileFromBytes } from '../../js/project.js?v=36';
-import { artifactFile, listArtifacts } from './artifacts.mjs';
+import { validProjectPath, mergeProjectFiles, projectFileBytes, projectFileFromBytes } from '../../js/project.js?v=39';
+import { openArtifact, listArtifacts } from './artifacts.mjs';
+import { stageInput, readInputMetadata, materializeInputs, inputManifestPrompt } from './inputs.mjs';
+import { DEPLOYMENT_GUIDANCE } from './agent-policy.mjs';
 import { createFileService } from './files.mjs';
 import { createMarketFeed } from '../market-feed.mjs';
-import { CODING_ENGINES, codingEngineById } from '../../js/agent-engines.js?v=1';
+import { CODING_ENGINES, codingEngineById } from '../../js/agent-engines.js?v=39';
 
-export const IMAGE = 'sowalif-coding-agent:2';
+export const IMAGE = 'sowalif-coding-agent:3';
+const PREVIOUS_IMAGE = 'sowalif-coding-agent:2';
 const LEGACY_IMAGE = 'sowalif-coding-agent:1';
 const LEGACY_ENGINES = ['claude', 'codex'];
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -42,7 +45,7 @@ async function command(binary, args) {
   });
 }
 async function installedImage(engine) {
-  for (const image of LEGACY_ENGINES.includes(engine) ? [IMAGE, LEGACY_IMAGE] : [IMAGE]) {
+  for (const image of LEGACY_ENGINES.includes(engine) ? [IMAGE, PREVIOUS_IMAGE, LEGACY_IMAGE] : [IMAGE, PREVIOUS_IMAGE]) {
     try {
       await command('docker', ['image', 'inspect', image, '--format', '{{.Id}}']);
       return image;
@@ -94,7 +97,7 @@ export async function snapshot(root) {
   async function walk(directory, prefix = '') {
     for (const item of await readdir(directory, { withFileTypes: true })) {
       const name = prefix + item.name;
-      if (item.isSymbolicLink() || ['node_modules', 'vendor', 'dist', 'build', 'coverage', 'outputs'].includes(item.name)) continue;
+      if (item.isSymbolicLink() || ['node_modules', 'vendor', 'dist', 'build', 'coverage', 'outputs', '.sowalif-inputs'].includes(item.name)) continue;
       if (!validProjectPath(item.isDirectory() ? `${name}/file.txt` : name)) continue;
       if (item.isDirectory()) await walk(join(directory, item.name), name + '/');
       else if (item.isFile() && validProjectPath(name)) {
@@ -135,7 +138,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
     let state;
     try { state = JSON.parse(await readFile(statePath, 'utf8')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; state = { revision: 0, files: [], sessions: {} }; }
-    return { workspace: state.directory || workspace, sessions, statePath, state };
+    return { base, workspace: state.directory || workspace, sessions, statePath, state };
   };
   const server = http.createServer(async (req, res) => {
     try {
@@ -145,7 +148,18 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
       const url = new URL(req.url, `http://${host}`);
       if (url.pathname.startsWith('/api/')) {
         res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-        if (req.method !== 'GET' && (req.headers.origin !== `http://${host}` || req.headers['x-sowalif-csrf'] !== csrf || !req.headers['content-type']?.startsWith('application/json'))) return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
+        const binaryInput = req.method === 'POST' && url.pathname === '/api/agent/input';
+        const contentType = binaryInput ? /^application\/octet-stream(?:;|$)/i.test(req.headers['content-type'] || '') : req.headers['content-type']?.startsWith('application/json');
+        if (req.method !== 'GET' && (req.headers.origin !== `http://${host}` || req.headers['x-sowalif-csrf'] !== csrf || !contentType)) return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
+        if (binaryInput) {
+          const p = await project(url.searchParams.get('project'));
+          return json(res, 201, await stageInput(p.base, url.searchParams.get('name'), req));
+        }
+        if (req.method === 'GET' && url.pathname === '/api/agent/input') {
+          if ((req.headers.origin && req.headers.origin !== `http://${host}`) || ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) return json(res, 403, { error: 'افتح المرفقات من واجهة سوالف المحلية.' });
+          const p = await project(url.searchParams.get('project'));
+          return json(res, 200, await readInputMetadata(p.base, url.searchParams.get('id')));
+        }
         if (url.pathname.startsWith('/api/market/')) {
           if ((req.headers.origin && req.headers.origin !== `http://${host}`) || ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) return json(res, 403, { error: 'افتح السوق من واجهة سوالف.' });
           const action = url.pathname.slice('/api/market/'.length);
@@ -185,7 +199,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (url.pathname === '/api/agent/status' && req.method === 'GET') {
           const image = await ready('claude');
           const engines = image === LEGACY_IMAGE ? LEGACY_ENGINES : image ? Object.keys(CODING_ENGINES) : [];
-          return json(res, 200, { local: true, ready: Boolean(image), csrf, engines });
+          return json(res, 200, { local: true, ready: Boolean(image), csrf, engines, originalAttachments: true, documentTools: image === IMAGE });
         }
         if (url.pathname === '/api/agent/link' && req.method === 'POST') {
           const { projectId, directory } = await body(req);
@@ -208,15 +222,17 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             const { state } = await project(projectId);
             if (!state.directory || await realpath(state.directory) !== state.directory) throw failure('اربط مجلد المشروع أولاً');
             const git = (...args) => command('git', ['-C', state.directory, '-c', 'core.hooksPath=/dev/null', ...args]);
+            const paths = ['.', ':(top,exclude).sowalif-inputs', ':(top,exclude)outputs'];
             const top = await git('rev-parse', '--show-toplevel');
             if (await realpath(top.trim()) !== state.directory) throw failure('اختر جذر مستودع Git');
-            if (action === 'status') return json(res, 200, { text: await git('status', '--short', '--untracked-files=all') });
+            if (action === 'status') return json(res, 200, { text: await git('status', '--short', '--untracked-files=all', '--', ...paths) });
             if (action === 'commit') {
               if (typeof message !== 'string' || !message.trim() || message.length > 160 || /[\r\n\0]/.test(message)) throw failure('اكتب وصفًا للتعديل');
-              const status = await git('status', '--porcelain', '--untracked-files=all');
+              const status = await git('status', '--porcelain', '--untracked-files=all', '--', ...paths);
               if (!status.trim()) throw failure('لا توجد تغييرات للحفظ');
-              await git('add', '-A', '--', '.');
-              return json(res, 200, { text: await git('commit', '-m', message.trim()) });
+              await git('add', '-A', '--', ...paths);
+              // --only also excludes private files previously staged by another tool.
+              return json(res, 200, { text: await git('commit', '--only', '-m', message.trim(), '--', ...paths) });
             }
             if (action === 'push') {
               const remote = (await git('remote', 'get-url', '--push', 'origin')).trim();
@@ -232,14 +248,15 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (url.pathname === '/api/agent/artifact' && req.method === 'GET') {
           const p = await project(url.searchParams.get('project'));
           const path = url.searchParams.get('path');
-          const { target, size } = await artifactFile(p.workspace, path);
+          const { handle, size } = await openArtifact(p.workspace, path);
           const extension = extname(path).slice(1);
           const fallback = /^[a-z0-9]{1,12}$/i.test(extension) ? `download.${extension}` : 'download';
           const filename = encodeURIComponent(path.split('/').at(-1)).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
           res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${filename}`);
           res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
           res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': size, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-          await pipeline(createReadStream(target), res);
+          try { await pipeline(handle.createReadStream({ autoClose: false }), res); }
+          finally { await handle.close(); }
           return;
         }
         if (url.pathname === '/api/agent/project' && req.method === 'GET') {
@@ -278,6 +295,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           starting = true;
           let p;
           let image;
+          let originalInputs = [];
           const model = input.model || engine.defaultModel;
           try {
             image = await ready(input.engine);
@@ -296,6 +314,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             p.state.files = files;
             await writeFile(p.statePath, JSON.stringify(p.state));
             }
+            originalInputs = await materializeInputs(p.base, p.workspace, input.attachments);
           } finally { starting = false; }
           const id = randomUUID();
           const sessionKey = `${input.engine}:${input.provider}:${model || 'default'}`;
@@ -335,7 +354,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             // Bound memory without discarding the newest job or its workspace.
             for (const [key, old] of runs) if (key !== id && old.state !== 'running' && Date.now() - old.createdAt > 3600_000) runs.delete(key);
           };
-          const context = 'You are working in Sowalif. Work only in /workspace. Do not deploy or publish. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). You can also create real downloadable PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, ZIP and image files whenever the user asks, without requiring a special mode or toggle. Save final deliverables in /workspace/outputs/ with descriptive filenames; put generation scripts outside outputs. Python packages reportlab, docx, openpyxl, pptx, arabic_reshaper and bidi plus Noto Arabic fonts are preinstalled. Use proper RTL and Arabic shaping/fonts for Arabic documents. Verify generated files open correctly; never merely rename plain text to a binary extension. Excel formulas must be real formulas; clearly distinguish calculated/cached values if no calculation engine is available. The workspace may include uploaded binary files and archives; preserve their original bytes. Inspect or extract archive contents only when the user asks. Before extracting, reject absolute paths, parent traversal, symlinks and entries outside the chosen folder; do not overwrite existing files without review. For ZIP output use real compression such as Python zipfile.ZIP_DEFLATED, not a stored-only archive. The app automatically exposes outputs as download links; do not invent public URLs. Reply in the user language.\n\n' + input.prompt;
+          const context = 'You are working in Sowalif. Work only in /workspace. Implement the requested task and run relevant tests, reporting actual results. For web projects provide a runnable preview: use standalone HTML when appropriate, or build the requested framework into dist/index.html with relative asset URLs (for Vite use base ./). You can also create real downloadable PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, ZIP and image files whenever the user asks, without requiring a special mode or toggle. Save final deliverables in /workspace/outputs/ with descriptive filenames; put generation scripts outside outputs. Python packages reportlab, docx, openpyxl, pptx, arabic_reshaper and bidi plus Noto Arabic fonts are preinstalled. Use proper RTL and Arabic shaping/fonts for Arabic documents. Verify generated files open correctly; never merely rename plain text to a binary extension. Excel formulas must be real formulas; clearly distinguish calculated/cached values if no calculation engine is available. The workspace may include uploaded binary files and archives; preserve their original bytes. Inspect or extract archive contents only when relevant to the user request. Before extracting, reject absolute paths, parent traversal, symlinks and entries outside the chosen folder; do not overwrite existing files without review. For ZIP output use real compression such as Python zipfile.ZIP_DEFLATED, not a stored-only archive. The app automatically exposes outputs as download links; do not invent public URLs. Reply in the user language. ' + DEPLOYMENT_GUIDANCE + '\n\n' + input.prompt + inputManifestPrompt(originalInputs);
           try {
             run.handle = launch({ workspace: p.workspace, sessions: p.sessions, image: typeof image === 'string' ? image : IMAGE,
               config: { engine: input.engine, provider: input.provider, key: input.key, model, prompt: context, budget: Math.max(.1, Math.min(10, Number(input.budget) || 2)), sessionId: p.state.sessions[sessionKey] }, emit, done });

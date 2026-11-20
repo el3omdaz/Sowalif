@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { createLocalServer } from '../server/local-agent/server.mjs';
+
+const exec = promisify(execFile);
+test('host Git commits project source and assets without private inputs or downloads, even when already staged', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'sowalif-private-git-'));
+  const directory = join(root, 'project'); await mkdir(directory);
+  const git = async (...args) => (await exec('git', ['-C', directory, ...args], { windowsHide: true })).stdout;
+  await git('init'); await git('config', 'user.name', 'Offline Test'); await git('config', 'user.email', 'offline@example.invalid');
+  await writeFile(join(directory, 'index.html'), 'before');
+  await git('add', '.'); await git('commit', '-m', 'Initial project');
+  const input = Buffer.from([0, 0xff, 22, 14]);
+  await mkdir(join(directory, '.sowalif-inputs', 'opaque-id'), { recursive: true });
+  await mkdir(join(directory, 'outputs'));
+  await writeFile(join(directory, '.sowalif-inputs', 'opaque-id', 'private.zip'), input);
+  await writeFile(join(directory, 'outputs', 'private-report.pdf'), input);
+  await git('add', '-A');
+  await writeFile(join(directory, 'index.html'), 'after');
+  await writeFile(join(directory, 'logo.png'), input);
+  const server = createLocalServer({ dataDir: join(root, 'service'), ready: async () => true });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const { csrf } = await (await fetch(origin + '/api/agent/status')).json();
+  const post = (path, body) => fetch(origin + '/api/agent/' + path, { method: 'POST',
+    headers: { Origin: origin, 'X-Sowalif-CSRF': csrf, 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: 'linked-project', ...body }) });
+  assert.equal((await post('link', { directory })).status, 200);
+  const status = await (await post('git', { action: 'status' })).json();
+  assert.match(status.text, /index.html/); assert.match(status.text, /logo.png/);
+  assert.doesNotMatch(status.text, /private|outputs|sowalif-inputs/);
+  const response = await post('git', { action: 'commit', message: 'Implement app' });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await git('log', '-1', '--format=%s')).trim(), 'Implement app');
+  assert.deepEqual((await git('ls-tree', '-r', '--name-only', 'HEAD')).trim().split(/\r?\n/).sort(), ['index.html', 'logo.png']);
+  assert.equal(await git('show', 'HEAD:index.html'), 'after');
+  assert.match(await git('diff', '--cached', '--name-only'), /private.zip/);
+  assert.deepEqual(await readFile(join(directory, '.sowalif-inputs', 'opaque-id', 'private.zip')), input);
+  assert.deepEqual(await readFile(join(directory, 'outputs', 'private-report.pdf')), input);
+  const noSource = await post('git', { action: 'commit', message: 'Must not save private files' });
+  assert.equal(noSource.status, 400); assert.match((await noSource.json()).error, /لا توجد تغييرات/);
+});

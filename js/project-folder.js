@@ -1,4 +1,4 @@
-import { readProjectFiles, validProjectPath, projectFileBytes, projectFileFromBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=36';
+import { readProjectFiles, validProjectPath, projectFileBytes, projectFileFromBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=40';
 
 export async function readProjectDirectory(root) {
   const items = [];

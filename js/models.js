@@ -1,5 +1,5 @@
 // النماذج المتاحة عبر kie.ai (docs.kie.ai — نوفمبر 2026)
-import { settings } from './db.js?v=37';
+import { settings } from './db.js?v=40';
 // api: anthropic = /claude/v1/messages · responses = صيغة OpenAI Responses · chat = صيغة Chat Completions
 // tools: يقدر يستدعي أدوات البحث وتوليد الصور بنفسه · search: native = بحث Google مدمج، tool = أداتنا، pre = نبحث قبل السؤال
 
@@ -176,7 +176,7 @@ export function registerOpenRouterModels(raw) {
     const input = m.architecture.input_modalities;
     const reasoning = Boolean(m.reasoning || m.supported_parameters?.includes('reasoning'));
     const reasoningEfforts = m.reasoning ? (m.reasoning.supported_efforts === undefined ? [] : m.reasoning.supported_efforts) : starterEfforts.get(m.id);
-    return { id: `or:${m.id}`, remoteId: m.id, provider: 'openrouter', api: 'openrouter', name: String(m.name || m.id).replace(/^[^:]+: /, ''), maker: m.id.split('/')[0], search: 'openrouter', tools: false, reasoning, reasoningEfforts, vision: input.includes('image'), audio: input.includes('audio'), tagline: 'عبر OpenRouter', features: ['محادثة وبحث عبر OpenRouter', ...(input.includes('image') ? ['يفهم الصور المرفقة'] : []), ...(input.includes('audio') ? ['يدعم إدخال الصوت'] : [])] };
+    return { id: `or:${m.id}`, remoteId: m.id, provider: 'openrouter', api: 'openrouter', name: String(m.name || m.id).replace(/^[^:]+: /, ''), maker: m.id.split('/')[0], search: 'openrouter', tools: m.supported_parameters?.includes('tools') === true, reasoning, reasoningEfforts, vision: input.includes('image'), audio: input.includes('audio'), tagline: 'عبر OpenRouter', features: ['محادثة وبحث عبر OpenRouter', ...(input.includes('image') ? ['يفهم الصور المرفقة'] : []), ...(input.includes('audio') ? ['يدعم إدخال الصوت'] : [])] };
   });
   if (!fresh.length) return false;
   const seen = new Set(fresh.map((m) => m.id));

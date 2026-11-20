@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectZip } from '../js/project.js?v=36';
-import { xlsxText } from '../js/xlsx-text.js?v=1';
+import { projectZip } from '../js/project.js?v=40';
+import { xlsxText } from '../js/xlsx-text.js?v=40';
 
 function element(localName, attrs = {}, children = [], textContent = '') {
   const node = {

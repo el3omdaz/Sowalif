@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { cloudChat, cloudMemory } from '../js/cloud-payload.js?v=21';
+import { cloudChat, cloudMemory } from '../js/cloud-payload.js?v=40';
+import { createAttachmentStorage } from '../js/cloud-attachments.js?v=40';
 
 function fixture({ local = [], remote = [], versions = {}, dirty = {}, beforeUpdate } = {}) {
   const user = { id: '11111111-1111-4111-8111-111111111111' };
@@ -44,11 +45,11 @@ function fixture({ local = [], remote = [], versions = {}, dirty = {}, beforeUpd
   }
   const client = { auth: { getSession: async () => ({ data: { session: { user } } }) }, from: () => new Query() };
   const context = vm.createContext({ db, CLOUD: { url: 'https://test.invalid', publishableKey: 'public-only' }, createClient: () => client,
-    cloudChat, cloudMemory, readPersonalization: () => structuredClone(memory), structuredClone, Blob, AbortSignal,
+    cloudChat, cloudMemory, createAttachmentStorage, readPersonalization: () => structuredClone(memory), structuredClone, Blob, AbortSignal,
     setTimeout: () => 1, clearTimeout() {}, setInterval() {}, document: { visibilityState: 'visible', addEventListener() {} }, window: { addEventListener() {} },
     localStorage: { setItem(key, value) { const property = { customInstructions: 'instructions', personalNotes: 'notes', memoryEnabled: 'enabled', sharedRules: 'rules' }[key.split('.').at(-1)]; if (property) memory[property] = JSON.parse(value); } },
   });
-  const source = readFileSync(new URL('../js/cloud.js', import.meta.url), 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
+  const source = readFileSync(new URL('../js/cloud.js?v=40', import.meta.url), 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
   vm.runInContext(source + '\nthis.api = { initCloud, syncCloud, resolveMemoryConflict, memoryConflict };', context);
   return { chats, rows, memory, db, settings, api: context.api, init: () => context.api.initCloud({ refresh: () => { refreshed++; } }), get refreshed() { return refreshed; } };
 }

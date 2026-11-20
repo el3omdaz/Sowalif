@@ -1,5 +1,5 @@
 FROM node:24-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git python3 python3-venv ca-certificates curl ripgrep fonts-noto-core && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 python3-venv ca-certificates curl ripgrep fonts-noto-core poppler-utils tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng p7zip-full unar file && rm -rf /var/lib/apt/lists/*
 RUN npm install --global --no-audit --no-fund opencode-ai@1.19.5 && opencode --version && npm cache clean --force
 RUN mkdir /opt/antigravity \
     && curl --fail --silent --show-error --location https://antigravity.google/cli/install.sh --output /tmp/install-antigravity.sh \
@@ -13,7 +13,7 @@ ENV PATH="/opt/documents/bin:$PATH"
 WORKDIR /opt/sowalif-agent
 COPY package*.json ./
 RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
-COPY worker.mjs codex.mjs antigravity.mjs opencode.mjs smoke.mjs codex-smoke.mjs ./
+COPY worker.mjs codex.mjs antigravity.mjs opencode.mjs agent-policy.mjs smoke.mjs codex-smoke.mjs ./
 COPY documents-smoke.py ./
 RUN mkdir /workspace /sessions && chown node:node /workspace /sessions
 USER node

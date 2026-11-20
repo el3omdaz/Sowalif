@@ -1,7 +1,7 @@
-import { connectedAccounts, CONNECTED_SCOPES } from './connected-accounts.js?v=30';
-import { connectGoogle, connectMicrosoft, microsoftRedirectUri, prepareGoogleOAuth } from './account-oauth.js?v=30';
-import { organizerIntent } from './organizer-intent.js?v=1';
-import { requestText } from './text-dialog.js?v=1';
+import { connectedAccounts, CONNECTED_SCOPES } from './connected-accounts.js?v=40';
+import { connectGoogle, connectMicrosoft, microsoftRedirectUri, prepareGoogleOAuth } from './account-oauth.js?v=40';
+import { organizerIntent } from './organizer-intent.js?v=40';
+import { requestText } from './text-dialog.js?v=40';
 
 const shortcutTasks = {
   files: [['تصفح الملفات', 'اعرض الملفات'], ['أكبر الملفات', 'أكبر الملفات'], ['المكررات', 'الملفات المتكررة']],

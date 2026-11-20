@@ -1,4 +1,4 @@
-import { validProjectPath, projectFileBytes, isBinaryProjectFile } from './project.js?v=36';
+import { validProjectPath, projectFileBytes, isBinaryProjectFile } from './project.js?v=40';
 
 const shaPattern = /^[a-f0-9]{40}$/i;
 const refPath = branch => branch.split('/').map(encodeURIComponent).join('/');

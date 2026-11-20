@@ -1,14 +1,17 @@
 import { createClient } from '../vendor/supabase.js?v=20';
-import { CLOUD } from './cloud-config.js?v=25';
-import * as db from './db.js?v=37';
-import { readPersonalization } from './memory.js?v=22';
-import { cloudChat, cloudMemory } from './cloud-payload.js?v=21';
+import { CLOUD } from './cloud-config.js?v=40';
+import * as db from './db.js?v=40';
+import { readPersonalization } from './memory.js?v=40';
+import { cloudChat, cloudMemory } from './cloud-payload.js?v=40';
+import { createAttachmentStorage } from './cloud-attachments.js?v=40';
 
 export const cloudConfirmationUrl = () => new URL('?confirm=1', CLOUD.siteUrl).href;
 
 export const cloud = createClient(CLOUD.url, CLOUD.publishableKey, { auth: { storageKey: 'sowalif-auth-v1', detectSessionInUrl: false }, global: {
   fetch: (url, options = {}) => fetch(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) }),
 } });
+const originalStorage = createAttachmentStorage({ cloud, db, config: CLOUD });
+export const resolveAttachmentOriginal = (file, options) => originalStorage.resolveAttachmentOriginal(file, options);
 let state = db.settings.get('cloudSyncState', { versions: {}, dirty: {} });
 state.versions ||= {}; state.dirty ||= {};
 let busy = false;
@@ -66,6 +69,7 @@ async function serializeChat(chat) {
   // Mutate only a private copy; uploading must not change a draft being edited in another tab.
   const copy = structuredClone(chat);
   for (const message of copy.messages || []) for (const file of [...(message.files || []), ...(message.images || [])]) {
+    if (file.localFile && !file.localText && !file.originalStoragePath) Object.assign(file, await originalStorage.uploadOriginal(file));
     if (!file.blob || file.storagePath) continue;
     const blob = await db.getBlob(file.blob);
     if (blob instanceof Blob) Object.assign(file, await uploadCloudFile(file, blob));
@@ -153,7 +157,7 @@ export async function syncCloud() {
       await db.recordCloudVersion(id, row.revision, undefined, id === '@memory' ? JSON.stringify(cloudMemory(row.payload)) : undefined);
       await loadState(); persist(); refreshed = true;
     }
-    onStatus(state.memoryConflict ? 'يوجد تعارض في التعليمات؛ اختر النسخة المطلوبة أدناه.' : conflict ? 'حُفظت النسخ المتعارضة دون فقدان التعديلات. جاري استكمال المزامنة.' : Object.keys(state.dirty).length ? 'بعض التغييرات بانتظار المزامنة.' : '✓ تمت المزامنة · الصور خاصة والمفاتيح تبقى على جهازك');
+    onStatus(state.memoryConflict ? 'يوجد تعارض في التعليمات؛ اختر النسخة المطلوبة أدناه.' : conflict ? 'حُفظت النسخ المتعارضة دون فقدان التعديلات. جاري استكمال المزامنة.' : Object.keys(state.dirty).length ? 'بعض التغييرات بانتظار المزامنة.' : '✓ تمت المزامنة · الملفات خاصة والمفاتيح تبقى على جهازك');
     if (refreshed) await onRefresh();
   } catch (error) { onStatus('المزامنة متوقفة؛ بيانات الجهاز محفوظة. ' + (error.message || 'تحقق من الاتصال')); }
   finally { busy = false; }

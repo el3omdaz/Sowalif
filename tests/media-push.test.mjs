@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createMediaPushService } from '../server/media-push.js';
+import { createMediaPushService } from '../server/media-push.js?v=40';
 
 test('provider completion sends one notification for the registered conversation', async (t) => {
   const origin = 'https://sowalif.example';

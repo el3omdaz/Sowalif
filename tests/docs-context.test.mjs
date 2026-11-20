@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectDocumentContext, selectProjectFileContext } from '../js/docs-context.js?v=1';
-import { makeAttachment, readAttachmentDocuments, readPdfPages, respond } from '../js/chat.js?v=36';
-import { projectZip } from '../js/project.js?v=36';
-import { zipText } from '../js/zip-text.js?v=28';
+import { selectDocumentContext, selectProjectFileContext } from '../js/docs-context.js?v=40';
+import { makeAttachment, readAttachmentDocuments, readPdfPages, respond } from '../js/chat.js?v=40';
+import { projectZip } from '../js/project.js?v=40';
+import { zipText } from '../js/zip-text.js?v=40';
 
 const rasterOps = new Map([[85, args => [args?.[1], args?.[2]]]]);
 const textPage = (body, imageSize) => ({
@@ -39,6 +39,22 @@ test('cancelling optical reading stops the PDF before the next page', async () =
     return 'partial transcription';
   }, controller.signal), { name: 'AbortError' });
   assert.deepEqual(observedPages, [1]);
+});
+
+test('failed native and OCR PDF pages keep page positions and mark the extraction incomplete', async () => {
+  let summary;
+  const text = await readPdfPages({ numPages: 3, async getPage(index) {
+    if (index === 2) throw new Error('damaged page');
+    return textPage(index === 1 ? 'first page retained' : '', [300, 300]);
+  } }, rasterOps, async page => { throw new Error('temporary OCR failure'); }, undefined, undefined, value => summary = value);
+  assert.equal(summary.pagesTotal, 3);
+  assert.equal(summary.pagesRead, 2);
+  assert.equal(summary.complete, false);
+  assert.deepEqual(summary.unreadablePages, [1, 2, 3]);
+  assert.match(text, /\[صفحة 1\]\nfirst page retained/);
+  assert.match(text, /\[صفحة 2\][\s\S]*damaged page/);
+  assert.match(text, /\[صفحة 3\][\s\S]*temporary OCR failure/);
+  assert.match(text, /القراءة غير مكتملة/);
 });
 
 test('bounded attachment context retains late PDF page markers and ZIP paths', () => {
@@ -86,7 +102,8 @@ test('a follow-up can select text beyond the inline preview from a previously at
   } };
   const fileText = 'Background reference text.\n'.repeat(16_000) + '\n\n[صفحة 100]\nThe indemnity figure is KWD 12,500.';
   const upload = await makeAttachment(new File([fileText], 'contract.txt', { type: 'text/plain' }));
-  assert.equal(upload.localText, true);
+  assert.equal(upload.deferredDocument, true);
+  assert.equal(upload.localText, undefined);
   assert.doesNotMatch(upload.text, /12,500/);
   const [file] = await readAttachmentDocuments([upload, { kind: 'image' }]);
   assert.match(file.text, /12,500/);

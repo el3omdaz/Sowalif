@@ -1,7 +1,7 @@
-import { settings } from './db.js?v=37';
-import { readSSE } from './kie.js?v=22';
-import { registerOpenRouterModels } from './models.js?v=26';
-import { reasoningEffort } from './reasoning.js?v=1';
+import { settings } from './db.js?v=40';
+import { readSSE } from './kie.js?v=40';
+import { registerOpenRouterModels } from './models.js?v=40';
+import { reasoningEffort } from './reasoning.js?v=40';
 
 const BASE = 'https://openrouter.ai/api/v1';
 export const openRouterKey = () => {
@@ -61,7 +61,11 @@ export async function refreshOpenRouterModels(signal) {
 function messagesFor(messages, model) {
   return messages.map((m) => {
     if (m.role === 'tool') return { role: 'tool', tool_call_id: m.id, content: m.output };
-    if (m.role === 'assistant') return { role: 'assistant', content: m.text || '' };
+    if (m.role === 'assistant') return {
+      role: 'assistant', content: m.text || (m.calls?.length ? null : ''),
+      ...(m.calls?.length ? { tool_calls: m.calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args || {}) } })) } : {}),
+      ...(m.reasoningDetails?.length ? { reasoning_details: m.reasoningDetails } : {}),
+    };
     const parts = [];
     for (const f of m.files || []) {
       if (f.kind === 'image') {
@@ -78,32 +82,72 @@ function messagesFor(messages, model) {
   });
 }
 
-export async function runOpenRouter(model, { system, messages, search, webFetch, deep, reasoningLevel, maxOutputTokens, signal, onDelta, onThinking, onTransport }) {
+function functionCalls(calls = []) {
+  return calls.filter(call => call?.type === 'function' || (!call?.type && call?.function)).map(call => {
+    const fn = call.function;
+    if (!call.id || typeof call.id !== 'string' || !fn?.name || typeof fn.name !== 'string') throw new Error('وصل طلب أداة غير مكتمل من OpenRouter. أعد المحاولة.');
+    let args;
+    try { args = JSON.parse(fn.arguments || '{}'); } catch { throw new Error('وصلت معاملات أداة غير صالحة من OpenRouter. أعد المحاولة.'); }
+    if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('وصلت معاملات أداة غير صالحة من OpenRouter. أعد المحاولة.');
+    return { id: call.id, name: fn.name, args };
+  });
+}
+
+function checkFinish(reason, calls, streamed = false) {
+  if (streamed && !reason) throw new Error('انقطع بث OpenRouter قبل اكتماله. النص الذي وصل محفوظ؛ أعد المحاولة.');
+  if (reason === 'length') throw new Error('بلغ رد OpenRouter الحد المتاح قبل اكتماله. النص الذي وصل محفوظ.');
+  if (reason && reason !== 'stop' && reason !== 'tool_calls') throw new Error(`لم يكتمل رد OpenRouter (${reason}). النص الذي وصل محفوظ.`);
+  if (reason === 'tool_calls' && !calls.length) throw new Error('وصل طلب أداة غير مكتمل من OpenRouter. أعد المحاولة.');
+}
+
+export async function runOpenRouter(model, { system, messages, tools, search, webFetch, deep, reasoningLevel, maxOutputTokens, signal, onDelta, onThinking, onTransport }) {
   const body = { model: model.remoteId, messages: [{ role: 'system', content: system }, ...messagesFor(messages, model)], stream: true };
   const effort = reasoningEffort(model, reasoningLevel, deep);
   if (effort) body.reasoning = { effort };
   if (maxOutputTokens) body.max_tokens = maxOutputTokens;
-  if (search) body.tools = [{ type: 'openrouter:web_search' }];
-  if (search && webFetch) body.tools.push({ type: 'openrouter:web_fetch' });
+  const availableTools = model.tools ? (tools || []).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })) : [];
+  if (search) availableTools.push({ type: 'openrouter:web_search' });
+  if (search && webFetch) availableTools.push({ type: 'openrouter:web_fetch' });
+  if (availableTools.length) { body.tools = availableTools; body.tool_choice = 'auto'; }
   const r = await request('/chat/completions', { body, signal, onTransport });
   if (r.json) {
     const choice = r.json.choices?.[0];
     const text = choice?.message?.content || '';
-    if (text) onDelta(text);
-    if (choice?.finish_reason === 'length') throw new Error('بلغ رد OpenRouter الحد المتاح قبل اكتماله.');
-    return { text, calls: [], credits: 0 };
+    if (text) onDelta?.(text);
+    const calls = functionCalls(choice?.message?.tool_calls);
+    checkFinish(choice?.finish_reason, calls);
+    return { text, calls, credits: 0, ...(choice?.message?.reasoning_details?.length ? { reasoningDetails: choice.message.reasoning_details } : {}) };
   }
   let text = '';
   let finishReason = null;
+  const pendingCalls = new Map();
+  const reasoningDetails = new Map();
   await readSSE(r.stream, (ev) => {
     const choice = ev.choices?.[0];
     if (choice?.finish_reason) finishReason = choice.finish_reason;
     const delta = choice?.delta;
     if (typeof delta?.reasoning === 'string') onThinking?.(delta.reasoning);
-    if (typeof delta?.content === 'string') { text += delta.content; onDelta(delta.content); }
+    if (typeof delta?.content === 'string') { text += delta.content; onDelta?.(delta.content); }
+    for (const part of delta?.tool_calls || []) {
+      if (!Number.isInteger(part.index) || part.index < 0) throw new Error('وصل طلب أداة غير مكتمل من OpenRouter. أعد المحاولة.');
+      const call = pendingCalls.get(part.index) || { id: '', type: 'function', function: { name: '', arguments: '' } };
+      if (part.id) call.id = part.id;
+      if (part.type) call.type = part.type;
+      if (part.function?.name) call.function.name += part.function.name;
+      if (typeof part.function?.arguments === 'string') call.function.arguments += part.function.arguments;
+      pendingCalls.set(part.index, call);
+    }
+    for (const part of delta?.reasoning_details || []) {
+      const index = Number.isInteger(part.index) ? part.index : 0;
+      const previous = reasoningDetails.get(index) || {};
+      const next = { ...previous, ...part };
+      for (const key of ['text', 'data', 'signature']) if (typeof previous[key] === 'string' && typeof part[key] === 'string') next[key] = previous[key] + part[key];
+      reasoningDetails.set(index, next);
+    }
   }, { errorFor, networkError });
-  if (!finishReason) throw new Error('انقطع بث OpenRouter قبل اكتماله. النص الذي وصل محفوظ؛ أعد المحاولة.');
-  if (finishReason === 'length') throw new Error('بلغ رد OpenRouter الحد المتاح قبل اكتماله. النص الذي وصل محفوظ.');
-  if (finishReason !== 'stop') throw new Error(`لم يكتمل رد OpenRouter (${finishReason}). النص الذي وصل محفوظ.`);
-  return { text, calls: [], credits: 0 };
+  // Never execute arguments from an interrupted or token-limited response.
+  checkFinish(finishReason, [...pendingCalls.values()], true);
+  const calls = functionCalls([...pendingCalls].sort(([a], [b]) => a - b).map(([, call]) => call));
+  checkFinish(finishReason, calls, true);
+  return { text, calls, credits: 0, ...(reasoningDetails.size ? { reasoningDetails: [...reasoningDetails].sort(([a], [b]) => a - b).map(([, detail]) => detail) } : {}) };
 }

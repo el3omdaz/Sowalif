@@ -111,6 +111,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .files img { width: 120px; height: 120px; object-fit: cover; border-radius: 12px; cursor: zoom-in; }
 .doc-chip { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 13px; }
+.doc-chip small { display: block; color: var(--muted); margin-block: 5px; }
+.doc-chip span { display: block; font-size: 12px; }
+.document-receipt { padding: 12px; margin-block: 12px; border: 1px solid var(--line); border-radius: 14px; font-size: 14px; }
+.document-receipt summary { cursor: pointer; min-height: 32px; }
+.document-receipt small { color: var(--muted); }
 .gen { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin: 8px 0; }
 .gen figure { margin: 0; position: relative; }
 .gen img { width: 100%; border-radius: 14px; display: block; cursor: zoom-in; background: var(--code); }
