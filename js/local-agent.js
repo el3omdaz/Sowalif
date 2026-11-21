@@ -7,6 +7,15 @@ let csrf = '';
 const projectId = chat => profileId ? `${profileId}-${chat.id}` : chat.id;
 export const localAgentOrigin = () => ['127.0.0.1', 'localhost'].includes(location.hostname) &&
   (location.port === '4781' || (location.port === '4782' && Boolean(globalThis.sowalifDesktop)));
+const approvalSetting = chat => typeof chat?.id === 'string' && chat.id ? `agentAutoApprove.${profileId || 'device'}.${chat.id}` : null;
+export function projectAutoApprove(chat) {
+  const key = approvalSetting(chat);
+  return Boolean(key && localAgentOrigin() && settings.get(key, false) === true);
+}
+export function setProjectAutoApprove(chat, enabled) {
+  const key = approvalSetting(chat);
+  return Boolean(key && localAgentOrigin() && settings.set(key, enabled === true));
+}
 export const agentEngine = () => {
   const saved = settings.get('codingEngine', 'off');
   return codingEngineById(saved) ? saved : 'off';
@@ -183,11 +192,9 @@ export async function respondLocal(chat, emit, signal, { research } = {}) {
     if (personal.prompt && remainder() > 500) sections.push(personal.prompt.slice(0, Math.min(remainder(), 2500)));
     if (prior?.length && remainder() > 500) sections.push('Recent conversation excerpts (context, not a new request):\n' + prior.map(message => `${message.role}: ${message.text}`).join('\n').slice(0, Math.min(remainder() - 80, 2600)));
     const direct = settings.get(`agentDirectory.${chat.id}`, '');
-    // Explicit opt-in applies to THIS run only, not the project or later tasks.
-    const autoApprove = localAgentOrigin() && document.querySelector('#agentAutoApprove')?.checked === true;
+    const autoApprove = projectAutoApprove(chat);
     const run = await api('runs', { projectId: projectId(chat), prompt: sections.join('\n\n'), attachments, direct: Boolean(direct), files: direct ? [] : chat.project?.files || [], workspaceRevision: chat.project?.agentWorkspaceRevision || 0,
       ...config, keyName: undefined, budget: settings.get('codingBudget', 2), autoApprove }, signal);
-    if (autoApprove) document.querySelector('#agentAutoApprove').checked = false;
     reply.agentRunId = run.id;
     // The job survives a reload; never create a second job automatically.
     await saveChat({ ...chat, messages: [...chat.messages, reply] });

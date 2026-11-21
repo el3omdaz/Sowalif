@@ -12,7 +12,7 @@ import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } fro
 import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=39';
 import { prepareProjectPush, pushProject } from './project-github.js?v=39';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=39';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=39';
+import { localStatus, localAgentOrigin, projectAutoApprove, setProjectAutoApprove, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=46';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=39';
 import { planImage } from './image-plan.js?v=39';
 import { initOrganizer } from './organizer.js?v=39';
@@ -774,6 +774,7 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
+  $('#agentAutoApprove').checked = projectAutoApprove(S.chat);
   const extracting = S.mode === 'image' && S.promptMode;
   const image = !extracting && (S.mode === 'image' || S.imageMode);
   const video = S.mode === 'video' || S.videoMode;
@@ -1470,16 +1471,17 @@ $('#codingModel').onchange = (e) => {
   db.settings.set(spec.modelSetting, e.target.value.trim());
 };
 $('#codingBudget').onchange = (e) => { const value = Math.max(.1, Math.min(10, Number(e.target.value) || 2)); db.settings.set('codingBudget', value); e.target.value = value; };
-// Never persist approval bypass in settings: every task must be opted into separately.
+// The choice stays on this device for this account and project.
 $('#agentAutoApprove').addEventListener('change', (event) => {
-  if (!event.target.checked) return;
   if (!localAgentOrigin()) {
     event.target.checked = false;
     toast('التفويض التلقائي متاح من نسخة الكمبيوتر المحلية فقط');
     return;
   }
-  const okay = window.confirm('تفويض كامل لأوامر هذه المهمة داخل Docker فقط. قد يعدّل المحرك ملفات المشروع أو يحذفها، ويستطيع تنفيذ أوامر تتصل بالإنترنت. لا يشمل التفويض جهاز ويندوز كاملًا أو مهامًا لاحقة. هل توافق؟');
-  if (!okay) event.target.checked = false;
+  if (!setProjectAutoApprove(S.chat, event.target.checked)) {
+    event.target.checked = projectAutoApprove(S.chat);
+    toast('تعذّر حفظ اختيار الصلاحيات لهذا المشروع. جرّب مرة ثانية.');
+  }
 });
 function paintAgentActivity(run) {
   $('#agentActivity').classList.remove('hidden');

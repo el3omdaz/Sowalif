@@ -59,9 +59,9 @@
           <button id="openProject" class="btn ghost" type="button">ملفات المشروع</button>
           <select id="codingEngine" aria-label="محرك البرمجة"><option value="off">اقتراحات فقط</option><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="antigravity">Google Antigravity</option><option value="opencode">OpenCode</option></select>
           <button id="codingSetup" class="btn ghost" type="button">ربط المحرك</button>
-          <label class="agent-auto-approve" title="تفويض أوامر المحرك لمهمة واحدة فقط داخل Docker، وقد تؤدي الأوامر إلى تغيير ملفات المشروع أو حذفها أو الاتصال بالإنترنت">
+          <label class="agent-auto-approve" title="يحفظ السماح التلقائي لهذا المشروع على هذا الجهاز حتى تلغي التك. يسمح بأوامر المحرك داخل Docker، بما فيها تعديل ملفات المشروع وحذفها والاتصال بالإنترنت">
             <input id="agentAutoApprove" type="checkbox" autocomplete="off">
-            <span>السماح تلقائيًا لهذه المهمة</span>
+            <span>السماح تلقائيًا لهذا المشروع</span>
           </label>
           <button id="agentGit" class="btn ghost hidden" type="button">GitHub</button>
         </div>
@@ -531,7 +531,7 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=45"></script>
+  <script type="module" src="js/app.js?v=46"></script>
   <script type="module" src="js/nav-layout.js?v=44"></script>
 </body>
 </html>

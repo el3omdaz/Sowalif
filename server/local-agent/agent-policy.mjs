@@ -22,8 +22,8 @@ async function confinedPath(root, value) {
   }
 }
 
-// Explicitly enabled for one run only. The Docker sandbox and file path checks remain active.
-// Never persist this in project settings or infer it from the model's output.
+// Each run receives the user's local project preference explicitly.
+// Docker isolation and file path checks remain active; model output cannot enable it.
 export function taskApproval(approve, autoApprove = false) {
   return autoApprove === true ? async () => true : approve;
 }

@@ -46,6 +46,8 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
     agentCredentials: () => ({ engine: 'off', provider: 'openrouter', key: '', model: '' }),
     CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName,
     localAgentOrigin: () => false,
+    projectAutoApprove: () => false,
+    setProjectAutoApprove: () => false,
     fitViewport: () => {},
     readPersonalization: () => ({ instructions: '', notes: '', enabled: true, rules: [] }),
     marked: { setOptions() {} },
@@ -58,6 +60,45 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
   vm.runInContext(source, ctx);
   return { ctx, node, timers, documentEvents, speech: () => speech, run: (s) => vm.runInContext(s, ctx) };
 }
+
+test('project permission toggles immediately and restores its own state when changing projects', () => {
+  const a = app();
+  const saved = new Map();
+  a.ctx.localAgentOrigin = () => true;
+  a.ctx.window.confirm = () => assert.fail('The checkbox must not open a confirmation');
+  a.ctx.projectAutoApprove = chat => saved.get(chat?.id) === true;
+  a.ctx.setProjectAutoApprove = (chat, enabled) => { saved.set(chat.id, enabled); return true; };
+  const toggle = a.node('#agentAutoApprove');
+  const change = checked => { toggle.checked = checked; toggle.listeners.change({ target: toggle }); };
+  a.run("S.chat={id:'project-a'}; renderModelName=()=>{}; syncToggles();");
+  assert.equal(toggle.checked, false);
+  change(true);
+  assert.equal(toggle.checked, true);
+  assert.equal(saved.get('project-a'), true);
+  a.run('syncToggles();');
+  assert.equal(toggle.checked, true);
+  a.run("S.chat={id:'project-b'}; syncToggles();");
+  assert.equal(toggle.checked, false);
+  a.run("S.chat={id:'project-a'}; renderModelName=()=>{}; syncToggles();");
+  assert.equal(toggle.checked, true);
+  change(false);
+  a.run('syncToggles();');
+  assert.equal(toggle.checked, false);
+  assert.equal(saved.get('project-a'), false);
+});
+
+test('a failed permission save restores the previous checkbox value and explains the failure', () => {
+  const a = app();
+  a.ctx.localAgentOrigin = () => true;
+  a.ctx.projectAutoApprove = () => true;
+  a.ctx.setProjectAutoApprove = () => false;
+  a.run("S.chat={id:'project-a'}; renderModelName=()=>{}; syncToggles();");
+  const toggle = a.node('#agentAutoApprove');
+  toggle.checked = false;
+  toggle.listeners.change({ target: toggle });
+  assert.equal(toggle.checked, true);
+  assert.match(a.node('#toast').textContent, /تعذّر حفظ اختيار الصلاحيات/);
+});
 
 test('Enter sends regardless of browser device classification', () => {
   const a = app({ navigator: { userAgentData: { mobile: true } }, coarsePointer: true });
