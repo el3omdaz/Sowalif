@@ -12,17 +12,29 @@ import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } fro
 import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=39';
 import { prepareProjectPush, pushProject } from './project-github.js?v=39';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=39';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=39';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=47';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=39';
 import { planImage } from './image-plan.js?v=39';
 import { initOrganizer } from './organizer.js?v=39';
 import { recommendModel } from './model-recommendation.js?v=39';
 import { reasoningLevels } from './reasoning.js?v=39';
-import { initMarket } from './market.js?v=39';
+import { initMarket } from './market.js?v=47';
 import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
 import { requestText } from './text-dialog.js?v=39';
 
 const $ = (s) => document.querySelector(s);
+// Optional controls may be absent when the HTML and JS come from different cached versions.
+// The account transition must not crash just because a visual checkbox is unavailable.
+function setChecked(selector, value) {
+  const input = $(selector);
+  if (!input) {
+    console.warn(`[Sowalif] Checkbox ${selector} missing; reload the updated interface.`);
+    return false;
+  }
+  input.checked = Boolean(value);
+  return true;
+}
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 async function notifyCompletion(chat, reply) {
@@ -264,7 +276,7 @@ function applyWorkspace(mode) {
   renderProjectCount();
   $('#mediaReference').value = '';
   $('#videoReference').value = '';
-  $('#reuseMedia').checked = true;
+  setChecked('#reuseMedia', true);
   syncToggles();
 }
 
@@ -566,7 +578,7 @@ $('#messages').addEventListener('click', async (e) => {
   } else if (e.target.closest('[data-use-prompt]')) {
     if (S.controller || input.value.trim() || S.attachments.length) return toast('أرسل المسودة الحالية أو امسحها أولاً');
     S.mode = 'image'; S.chat.mode = 'image'; S.chat.promptStudioMode = false;
-    applyWorkspace('image'); $('#reuseMedia').checked = false;
+    applyWorkspace('image'); setChecked('#reuseMedia', false);
     input.value = m.promptStudio.prompt; autosize(); input.focus(); return;
   } else if (e.target.closest('[data-prompt-change], [data-reset-prompt]')) {
     if (S.controller) return;
@@ -1149,12 +1161,12 @@ async function send() {
   const videoReferenceUrl = S.mode === 'video' ? $('#videoReference').value.trim() : '';
   if (mediaReferenceUrl && !/^https?:\/\//i.test(mediaReferenceUrl)) return toast('استخدم رابط صورة يبدأ بـ https://');
   if (videoReferenceUrl && !/^https?:\/\//i.test(videoReferenceUrl)) return toast('استخدم رابط فيديو يبدأ بـ https://');
-  const reuseMedia = isMediaWorkspace() && $('#reuseMedia').checked;
+  const reuseMedia = isMediaWorkspace() && $('#reuseMedia')?.checked === true;
   S.chat.messages.push({ role: 'user', text, files, ...(localExecution ? { localExecution: true } : {}), ...(extracting ? { promptStudio: true } : {}), ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), ...(videoReferenceUrl ? { videoReferenceUrl } : {}), reuseMedia, at: Date.now() });
   if (S.execute) { S.execute = false; syncToggles(); }
   $('#mediaReference').value = '';
   $('#videoReference').value = '';
-  $('#reuseMedia').checked = true;
+  setChecked('#reuseMedia', true);
   history.replaceState(null, '', `#${S.chat.id}`);
   input.value = '';
   for (const attachment of S.attachments) if (attachment.preview) URL.revokeObjectURL(attachment.preview);
@@ -1197,7 +1209,7 @@ async function saveAccountDraft() {
     text: input.value, attachments: serializeAttachments(S.attachments),
     otherAttachments: [...attachmentDrafts].map(([id, items]) => [id, serializeAttachments(items)]),
     mediaReference: $('#mediaReference').value, videoReference: $('#videoReference').value,
-    reuseMedia: $('#reuseMedia').checked, model: S.model, imageMode: S.imageMode, videoMode: S.videoMode, reasoning: S.reasoning, execute: S.execute, search: S.search,
+    reuseMedia: $('#reuseMedia')?.checked !== false, model: S.model, imageMode: S.imageMode, videoMode: S.videoMode, reasoning: S.reasoning, execute: S.execute, search: S.search,
   });
 }
 
@@ -1222,7 +1234,7 @@ async function restoreAccountDraft() {
   if (typeof draft.reasoning === 'string') S.reasoning = draft.reasoning;
   $('#mediaReference').value = draft.mediaReference || '';
   $('#videoReference').value = draft.videoReference || '';
-  $('#reuseMedia').checked = draft.reuseMedia !== false;
+  setChecked('#reuseMedia', draft.reuseMedia !== false);
   input.value = draft.text || '';
   syncToggles(); autosize(); renderMessages(); renderChatList(); renderAttachments();
   if (S.chats.some(item => item.id === chat.id)) history.replaceState(null, '', `#${chat.id}`);
@@ -2343,7 +2355,7 @@ function loadPersonalSettings() {
   if (!personalizationDirty) {
     $('#customInstructions').value = config.instructions;
     $('#personalNotes').value = config.notes;
-    $('#memoryEnabled').checked = config.enabled;
+    setChecked('#memoryEnabled', config.enabled);
   }
   applyTypography();
   renderMemoryRules();
@@ -2353,7 +2365,7 @@ for (const id of ['customInstructions', 'personalNotes', 'memoryEnabled']) {
 }
 $('#savePersonalization').onclick = () => {
   try {
-    savePersonalization({ instructions: $('#customInstructions').value, notes: $('#personalNotes').value, enabled: $('#memoryEnabled').checked });
+    savePersonalization({ instructions: $('#customInstructions').value, notes: $('#personalNotes').value, enabled: $('#memoryEnabled')?.checked !== false });
     personalizationDirty = false;
     $('#personalizationMsg').textContent = '✓ محفوظة على هذا الجهاز، وتطبّق من الرسالة القادمة مع كل النماذج.';
   } catch (e) { $('#personalizationMsg').textContent = e.message; }
@@ -2362,13 +2374,13 @@ function resetRuleEditor() {
   editingRuleId = null;
   $('#memoryTrigger').value = '';
   $('#memoryAction').value = '';
-  $('#memorySearch').checked = true;
+  setChecked('#memorySearch', true);
   $('#saveMemoryRule').textContent = 'حفظ الاختصار';
   $('#cancelMemoryEdit').classList.add('hidden');
 }
 $('#saveMemoryRule').onclick = () => {
   try {
-    saveRule({ ...(editingRuleId ? { id: editingRuleId } : {}), trigger: $('#memoryTrigger').value, action: $('#memoryAction').value, search: $('#memorySearch').checked });
+    saveRule({ ...(editingRuleId ? { id: editingRuleId } : {}), trigger: $('#memoryTrigger').value, action: $('#memoryAction').value, search: $('#memorySearch')?.checked === true });
     resetRuleEditor();
     renderMemoryRules();
     $('#memoryRuleMsg').textContent = '✓ حُفظ الاختصار لكل المحادثات والنماذج. يعمل عند إرسال الكلمة وحدها والذاكرة مفعّلة.';
@@ -2384,7 +2396,7 @@ $('#memoryRules').addEventListener('click', (e) => {
     editingRuleId = rule.id;
     $('#memoryTrigger').value = rule.trigger;
     $('#memoryAction').value = rule.action;
-    $('#memorySearch').checked = rule.search;
+    setChecked('#memorySearch', rule.search);
     $('#saveMemoryRule').textContent = 'حفظ التعديل';
     $('#cancelMemoryEdit').classList.remove('hidden');
     $('#memoryAction').focus();
@@ -2427,7 +2439,7 @@ function openSettings(group) {
     for (const section of sheet.querySelectorAll('[data-settings]')) section.open = section.dataset.settings === group;
     sheet.querySelector('.sheet-card').scrollTop = 0;
   }
-  $('#completionNotifications').checked = db.settings.get('completionNotifications', false) && globalThis.Notification?.permission === 'granted';
+  setChecked('#completionNotifications', db.settings.get('completionNotifications', false) && globalThis.Notification?.permission === 'granted');
   $('#mediaProvider').value = db.settings.get('mediaProvider', 'auto');
   renderModelName();
   $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';
