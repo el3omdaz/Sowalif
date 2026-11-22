@@ -61,17 +61,22 @@ with TemporaryDirectory() as folder:
     # Scanned pages contain pixels only; render and OCR every page.
     scanned = canvas.Canvas(str(root / 'scanned.pdf'), pagesize=(600, 400))
     font = ImageFont.truetype('/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf', 48)
-    for word in ['FIRSTPAGE123', 'LASTPAGE456']:
+    labels = ['FIRSTPAGE123', 'LASTPAGE456']
+    for word in labels:
         image = Image.new('RGB', (1200, 800), 'white')
         ImageDraw.Draw(image).text((80, 200), word, fill='black', font=font)
         scanned.drawInlineImage(image, 0, 0, width=600, height=400)
         scanned.showPage()
     scanned.save()
+    assert not run('pdftotext', root / 'scanned.pdf', '-').strip(), 'Scanned fixture must not contain native PDF text'
     run('pdftoppm', '-r', '150', '-png', root / 'scanned.pdf', root / 'scan')
     pages = sorted(root.glob('scan-*.png'))
-    assert len(pages) == 2
-    text = '\n'.join(run('tesseract', page, 'stdout', '-l', 'eng', '--psm', '6') for page in pages)
-    assert 'FIRSTPAGE123' in text and 'LASTPAGE456' in text
+    assert len(pages) == len(labels)
+    for page, expected in zip(pages, labels, strict=True):
+        text = run('tesseract', page, 'stdout', '-l', 'eng', '--psm', '6')
+        # OCR may segment the synthetic token as "FIRSTPAGE1 23". Require
+        # every character on its own page, allowing only whitespace variation.
+        assert re.sub(r'\s+', '', text) == expected, f'{page.name}: expected {expected!r}, got {text!r}'
     languages = run('tesseract', '--list-langs')
     assert 'ara' in languages.splitlines() and 'eng' in languages.splitlines()
 

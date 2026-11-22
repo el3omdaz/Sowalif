@@ -1,7 +1,7 @@
-import { settings, saveChat, saveProject, profileId, getBlob } from './db.js?v=39';
-import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=39';
-import { preparePersonalContext } from './memory.js?v=39';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
+import { settings, saveChat, saveProject, profileId, getBlob } from './db.js?v=40';
+import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=40';
+import { preparePersonalContext } from './memory.js?v=40';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=40';
 
 let csrf = '';
 const projectId = chat => profileId ? `${profileId}-${chat.id}` : chat.id;
@@ -36,7 +36,7 @@ async function api(path, data, signal) {
     ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal,
   });
   const out = await response.json();
-  if (!response.ok) throw new Error(out.error || 'تعذّر الاتصال بمحرك الكمبيوتر');
+  if (!response.ok) throw Object.assign(new Error(out.error || 'تعذّر الاتصال بمحرك الكمبيوتر'), { status: response.status });
   return out;
 }
 export async function localStatus() {
@@ -58,7 +58,103 @@ export function agentArtifactUrl(chat, file) {
   if (!localAgentOrigin() || typeof file?.path !== 'string' || !file.path.startsWith('outputs/') || !validProjectPath(file.path)) return '';
   return `/api/agent/artifact?project=${encodeURIComponent(projectId(chat))}&path=${encodeURIComponent(file.path)}`;
 }
-const pause = () => new Promise(resolve => setTimeout(resolve, 800));
+const STOP_WAIT_MS = 12_000;
+const submittingProjects = new Set();
+const pause = signal => new Promise((resolve, reject) => {
+  signal?.throwIfAborted();
+  const done = () => { signal?.removeEventListener('abort', abort); resolve(); };
+  const timer = setTimeout(done, 800);
+  const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(signal.reason); };
+  signal?.addEventListener('abort', abort, { once: true });
+});
+
+function sameFiles(left = [], right = []) {
+  if (left.length !== right.length) return false;
+  const files = new Map(left.map(file => [file.path, projectFileSignature(file)]));
+  return right.every(file => files.has(file.path) && files.get(file.path) === projectFileSignature(file));
+}
+const reconciliationError = message => Object.assign(new Error(message), { reconciliation: true });
+
+async function applyRunProject(chat, reply, run) {
+  const workspaceRevision = chat.project?.agentWorkspaceRevision || 0;
+  if (!Number.isSafeInteger(run.revision) || run.revision <= workspaceRevision) return;
+  const before = chat.project?.files || [];
+  const hasFiles = Array.isArray(run.files);
+  if (hasFiles && !sameFiles(before, run.files)) {
+    const baseline = reply.agentBaseRevision ?? run.projectRevision;
+    if ((Number.isSafeInteger(baseline) && (chat.project?.revision || 0) !== baseline)
+        || (Array.isArray(run.before) && !sameFiles(before, run.before))
+        || (!Number.isSafeInteger(baseline) && !Array.isArray(run.before) && !sameFiles(before, run.files))) {
+      throw reconciliationError('تغيّرت ملفات سوالف أثناء التنفيذ. حفظت نتيجة الكمبيوتر دون استبدال تعديلاتك الأحدث؛ راجع النسختين قبل المتابعة.');
+    }
+  }
+  const files = hasFiles ? mergeProjectFiles([], run.files) : before;
+  const removed = hasFiles ? before.filter(file => !files.some(next => next.path === file.path)).map(file => file.path) : [];
+  try {
+    await saveProject(chat, { ...chat.project, files,
+      removed: [...new Set([...(chat.project?.removed || []), ...removed])].filter(path => !files.some(file => file.path === path)),
+      revision: (chat.project?.revision || 0) + 1, agentWorkspaceRevision: run.revision });
+  } catch (error) { throw reconciliationError(error.message); }
+  if (hasFiles) {
+    const paths = [...new Set([...before, ...files].map(file => file.path))];
+    const describe = file => !file ? undefined : isBinaryProjectFile(file) ? '[ملف ثنائي — محفوظ بصيغته الأصلية]' : file.content;
+    reply.agentChanges = paths.filter(path => {
+      const old = before.find(file => file.path === path), next = files.find(file => file.path === path);
+      return (old ? projectFileSignature(old) : undefined) !== (next ? projectFileSignature(next) : undefined);
+    }).map(path => ({ path, before: describe(before.find(file => file.path === path)), after: describe(files.find(file => file.path === path)) }));
+    reply.agentBefore = before;
+    reply.agentAppliedRevision = chat.project.revision;
+  }
+}
+
+async function updateAgentRun(chat, reply, run, emit) {
+  emit('agent', run);
+  const text = run.text || '';
+  const delta = text.startsWith(reply.text || '') ? text.slice((reply.text || '').length) : text;
+  reply.text = text;
+  if (delta) emit('delta', { text: delta });
+  if (run.state === 'running') return false;
+  reply.agentCompleted = true;
+  reply.agentStopping = false;
+  reply.agentArtifacts = run.artifacts || [];
+  reply.agentError = run.error;
+  delete reply.error;
+  if (run.state === 'stopped') reply.stopped = true;
+  else delete reply.stopped;
+  try {
+    await applyRunProject(chat, reply, run);
+    delete reply.agentNeedsReconcile;
+  } catch (error) { reply.agentNeedsReconcile = true; throw error; }
+  if (run.error && run.state !== 'stopped') reply.error = run.error;
+  if (!reply.text) reply.text = run.state === 'stopped' ? 'توقف التنفيذ وحُفظت الملفات. اكتب «كمل» للمتابعة.'
+    : run.error ? '' : 'اكتمل التنفيذ. راجع الملفات وسجل الاختبارات.';
+  emit('status', { text: '' });
+  return true;
+}
+
+async function stopAndCollect(chat, reply, emit) {
+  reply.stopped = true;
+  reply.agentStopping = true;
+  emit('status', { text: 'أوقف التنفيذ وأحفظ الملفات قبل المتابعة…' });
+  const deadline = AbortSignal.timeout(STOP_WAIT_MS);
+  try {
+    await api(`runs/${encodeURIComponent(reply.agentRunId)}/stop`, {}, deadline).catch(error => {
+      deadline.throwIfAborted();
+      if (error.status === 404) throw error;
+      // The stop may have arrived even if its response was lost. Check the run.
+    });
+    for (;;) {
+      const run = await api(`runs/${encodeURIComponent(reply.agentRunId)}`, undefined, deadline);
+      if (await updateAgentRun(chat, reply, run, emit)) return reply;
+      emit('status', { text: 'لا يزال المحرك ينهي الإيقاف ويحفظ الملفات…' });
+      await pause(deadline);
+    }
+  } catch (error) {
+    reply.error = error.reconciliation ? error.message
+      : 'لم ينتهِ تأكيد الإيقاف بعد. التنفيذ والملفات محفوظان على الكمبيوتر؛ اكتب «كمل» وسأتابع نفس المهمة تلقائيًا.';
+    return reply;
+  }
+}
 
 // Send originals as binary streams, independently of the model prompt. The
 // engine receives real files, including all PDF pages and archive members.
@@ -75,7 +171,7 @@ export async function stageAgentAttachments(chat, emit = () => {}, signal) {
     let blob, name = file.originalName || file.name || 'attachment';
     if (file.localFile && !file.localText) blob = await getBlob(file.localFile);
     if (!(blob instanceof Blob) && file.originalStoragePath) {
-      const { resolveAttachmentOriginal } = await import('./cloud.js?v=39');
+      const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
       blob = await resolveAttachmentOriginal(file, { signal, onProgress: text => emit('status', { text }) });
     }
     // Earlier app versions retained extracted text instead of the original.
@@ -116,56 +212,110 @@ export async function collectAgentRun(chat, reply, emit, signal) {
   try {
     while (!signal?.aborted) {
       const run = await api(`runs/${encodeURIComponent(reply.agentRunId)}`, undefined, signal);
-      emit('agent', run);
-      const delta = run.text.slice(reply.text.length);
-      reply.text = run.text;
-      if (delta) emit('delta', { text: delta });
-      if (run.state !== 'running') {
-        reply.agentCompleted = true;
-        reply.agentArtifacts = run.artifacts || [];
-        reply.agentError = run.error;
-        if (run.error) reply.error = run.error;
-        if (run.state === 'stopped') reply.stopped = true;
-        if (run.files) {
-          const files = mergeProjectFiles([], run.files);
-          const before = chat.project?.files || [];
-          const paths = [...new Set([...before, ...files].map(f => f.path))];
-          const describe = file => !file ? undefined : isBinaryProjectFile(file) ? '[ملف ثنائي — محفوظ بصيغته الأصلية]' : file.content;
-          const signature = file => file ? projectFileSignature(file) : undefined;
-          reply.agentChanges = paths.filter(path => signature(before.find(f => f.path === path)) !== signature(files.find(f => f.path === path)))
-            .map(path => ({ path, before: describe(before.find(f => f.path === path)), after: describe(files.find(f => f.path === path)) }));
-          reply.agentBefore = before;
-          const removed = before.filter(f => !files.some(next => next.path === f.path)).map(f => f.path);
-          await saveProject(chat, { ...chat.project, files, removed: [...new Set([...(chat.project?.removed || []), ...removed])].filter(path => !files.some(f => f.path === path)), revision: (chat.project?.revision || 0) + 1, agentWorkspaceRevision: run.revision });
-          reply.agentAppliedRevision = chat.project.revision;
-        }
-        if (!reply.text) reply.text = run.error ? '' : 'اكتمل التنفيذ. راجع الملفات وسجل الاختبارات.';
-        emit('status', { text: '' });
-        return reply;
-      }
-      emit('status', { text: run.approvals.length ? 'بانتظار موافقتك على أمر داخل المشروع…' : `يعمل ${codingEngineName(reply.agentEngine)} على الكمبيوتر…` });
-      await pause();
+      if (await updateAgentRun(chat, reply, run, emit)) return reply;
+      emit('status', { text: run.approvals?.length ? 'بانتظار موافقتك على أمر داخل المشروع…' : `يعمل ${codingEngineName(reply.agentEngine)} على الكمبيوتر…` });
+      await pause(signal);
     }
-    await api(`runs/${encodeURIComponent(reply.agentRunId)}/stop`, {}).catch(() => {});
-    reply.stopped = true;
-    reply.error = 'أُرسل طلب الإيقاف. اضغط «متابعة التنفيذ» لجلب الملفات والنتيجة المحفوظة.';
-    return reply;
+    return await stopAndCollect(chat, reply, emit);
   } catch (error) {
-    if (signal?.aborted) {
-      await api(`runs/${encodeURIComponent(reply.agentRunId)}/stop`, {}).catch(() => {});
-      reply.stopped = true;
-    }
-    reply.error = 'تعذّر جلب النتيجة. التنفيذ محفوظ على الكمبيوتر؛ تابع نفس المهمة. ' + (signal?.aborted ? '' : error.message);
+    if (signal?.aborted) return await stopAndCollect(chat, reply, emit);
+    reply.error = error.reconciliation ? error.message : 'انقطع الاتصال بالمهمة. التنفيذ محفوظ؛ اكتب «كمل» لأتابع نفس المهمة تلقائيًا. ' + error.message;
     return reply;
   }
 }
+
+async function reconcileBeforeRun(chat, reply, emit, signal) {
+  signal?.throwIfAborted();
+  const state = await api(`project?id=${encodeURIComponent(projectId(chat))}`, undefined, signal);
+  const previous = [...chat.messages].reverse().find(message => message.agentRunId || message.agentSubmissionPending);
+  const workspaceRevision = chat.project?.agentWorkspaceRevision || 0;
+  const unresolved = previous && (!previous.agentCompleted || previous.agentNeedsReconcile);
+  const runId = state.activeRun || (state.revision !== undefined && state.revision !== workspaceRevision ? state.lastRun : undefined)
+    || (unresolved && previous.agentRunId);
+  if (runId) {
+    let run;
+    try { run = await api(`runs/${encodeURIComponent(runId)}`, undefined, signal); }
+    catch (error) { if (error.status !== 404) throw error; }
+    if (run) {
+      const saved = [...chat.messages].reverse().find(message => message.agentRunId === runId)
+        || (previous?.agentSubmissionPending && run.createdAt >= previous.agentSubmittedAt
+          && (!Number.isSafeInteger(run.projectRevision) || run.projectRevision === previous.agentBaseRevision) ? previous : null);
+      const prior = saved || { role: 'assistant', text: '', agentRunId: runId, agentEngine: run.engine,
+        agentBaseRevision: run.projectRevision };
+      prior.agentRunId = runId;
+      delete prior.agentSubmissionPending;
+      if (run.state === 'running') {
+        if (prior.stopped || prior.agentStopping) {
+          await stopAndCollect(chat, prior, emit);
+          await saveChat(chat);
+          if (!prior.agentCompleted || prior.agentNeedsReconcile) throw reconciliationError(prior.error || 'لا يزال المحرك يحفظ نتيجة الإيقاف. حاول المتابعة بعد قليل.');
+          return false;
+        }
+        // A lost poll or POST response is not permission to start a second job.
+        Object.assign(reply, { agentRunId: runId, agentEngine: run.engine || state.activeEngine,
+          agentBaseRevision: prior.agentBaseRevision ?? run.projectRevision });
+        emit('status', { text: 'أتابع نفس المهمة المحفوظة على الكمبيوتر…' });
+        await collectAgentRun(chat, reply, emit, signal);
+        return true;
+      }
+      if (Array.isArray(state.files) && Array.isArray(run.files) && !sameFiles(state.files, run.files)) {
+        throw reconciliationError('تغيّرت ملفات الكمبيوتر بعد التنفيذ. احتفظت بنسختي الملفات دون استبدال؛ راجع التعديلات قبل المتابعة.');
+      }
+      await updateAgentRun(chat, prior, run, emit);
+      await saveChat(chat);
+      return false;
+    }
+  }
+  if (state.revision === undefined || state.revision === workspaceRevision) return false;
+  // After a service restart the in-memory run may be gone, but its workspace
+  // and revision remain on disk. Recover only against a known unchanged base.
+  const baseline = unresolved && previous.agentBaseRevision;
+  const unchanged = Number.isSafeInteger(baseline) && (chat.project?.revision || 0) === baseline;
+  const identical = Array.isArray(state.files) && sameFiles(chat.project?.files || [], state.files);
+  if (!state.directory && !unchanged && !identical) {
+    throw reconciliationError('نسخة الكمبيوتر وملفات سوالف مختلفتان، ولا يوجد أساس محفوظ لدمجهما بأمان. احتفظت بالنسختين؛ راجعهما قبل بدء تنفيذ جديد.');
+  }
+  const recovered = { ...state, state: 'completed', text: previous?.text || '',
+    projectRevision: unchanged ? baseline : chat.project?.revision || 0,
+    before: identical ? chat.project?.files || [] : undefined };
+  const prior = previous || { text: '' };
+  await updateAgentRun(chat, prior, recovered, emit);
+  if (state.revision < workspaceRevision && (state.directory || identical)) {
+    await saveProject(chat, { ...chat.project, revision: (chat.project?.revision || 0) + 1, agentWorkspaceRevision: state.revision });
+  }
+  await saveChat(chat);
+  return false;
+}
+
+async function recoverSubmission(chat, reply, emit, signal) {
+  const probeSignal = AbortSignal.timeout(STOP_WAIT_MS);
+  const state = await api(`project?id=${encodeURIComponent(projectId(chat))}`, undefined, probeSignal);
+  const id = state.activeRun || state.lastRun;
+  if (!id) return false;
+  const run = await api(`runs/${encodeURIComponent(id)}`, undefined, probeSignal);
+  if (run.createdAt < reply.agentSubmittedAt || (Number.isSafeInteger(run.projectRevision) && run.projectRevision !== reply.agentBaseRevision)) return false;
+  reply.agentRunId = id;
+  reply.agentEngine = run.engine || reply.agentEngine;
+  delete reply.agentSubmissionPending;
+  if (signal?.aborted) await stopAndCollect(chat, reply, emit);
+  else await collectAgentRun(chat, reply, emit, signal);
+  return true;
+}
+
 export async function respondLocal(chat, emit, signal, { research } = {}) {
   const reply = { role: 'assistant', model: chat.model, agentEngine: agentEngine(), text: '', at: Date.now() };
   const user = chat.messages.at(-1);
+  const id = projectId(chat);
+  let ownsSubmission = false;
   try {
+    if (submittingProjects.has(id)) throw new Error('أتابع الطلب الحالي لهذا المشروع؛ انتظر اكتماله قبل إرسال طلب آخر.');
+    submittingProjects.add(id); ownsSubmission = true;
     const status = await localStatus();
     if (!status.ready) throw new Error('بيئة المحرك غير جاهزة؛ شغّل npm run agent:setup على الكمبيوتر');
+    if (await reconcileBeforeRun(chat, reply, emit, signal)) return reply;
+    signal?.throwIfAborted();
     const config = agentCredentials();
+    reply.agentEngine = config.engine;
     if (!status.engines?.includes(config.engine)) throw new Error(`جهّز ${codingEngineName(config.engine)} باستخدام npm run agent:setup وأعد تشغيل نسخة الكمبيوتر.`);
     if (!config.key) throw new Error('أضف مفتاح محرك البرمجة في الإعدادات');
     const personal = await preparePersonalContext(chat, user.text || '');
@@ -193,14 +343,39 @@ export async function respondLocal(chat, emit, signal, { research } = {}) {
     if (prior?.length && remainder() > 500) sections.push('Recent conversation excerpts (context, not a new request):\n' + prior.map(message => `${message.role}: ${message.text}`).join('\n').slice(0, Math.min(remainder() - 80, 2600)));
     const direct = settings.get(`agentDirectory.${chat.id}`, '');
     const autoApprove = projectAutoApprove(chat);
-    const run = await api('runs', { projectId: projectId(chat), prompt: sections.join('\n\n'), attachments, direct: Boolean(direct), files: direct ? [] : chat.project?.files || [], workspaceRevision: chat.project?.agentWorkspaceRevision || 0,
-      ...config, keyName: undefined, budget: settings.get('codingBudget', 2), autoApprove }, signal);
+    reply.agentBaseRevision = chat.project?.revision || 0;
+    reply.agentBaseWorkspaceRevision = chat.project?.agentWorkspaceRevision || 0;
+    reply.agentSubmittedAt = Date.now();
+    reply.agentSubmissionPending = true;
+    await saveChat({ ...chat, messages: [...chat.messages, reply] });
+    let run;
+    try {
+      run = await api('runs', { projectId: projectId(chat), prompt: sections.join('\n\n'), attachments, direct: Boolean(direct), files: direct ? [] : chat.project?.files || [],
+        workspaceRevision: reply.agentBaseWorkspaceRevision, projectRevision: reply.agentBaseRevision,
+        ...config, keyName: undefined, budget: settings.get('codingBudget', 2), autoApprove }, signal);
+    } catch (error) {
+      if (!error.status) {
+        try { if (await recoverSubmission(chat, reply, emit, signal)) return reply; }
+        catch (probeError) { if (probeError.reconciliation) throw probeError; }
+      } else delete reply.agentSubmissionPending;
+      throw error;
+    }
     reply.agentRunId = run.id;
+    delete reply.agentSubmissionPending;
     // The job survives a reload; never create a second job automatically.
     await saveChat({ ...chat, messages: [...chat.messages, reply] });
     return await collectAgentRun(chat, reply, emit, signal);
-  } catch (error) { reply.error = error.message + (!reply.agentRunId ? ' إذا انقطع الاتصال أثناء الإرسال، افحص «استرجاع ملفات الكمبيوتر» قبل إعادة الطلب.' : ''); return reply; }
+  } catch (error) {
+    if (signal?.aborted) {
+      reply.stopped = true;
+      if (reply.agentSubmissionPending) reply.agentStopping = true;
+    }
+    if (signal?.aborted && !reply.agentRunId && !reply.agentSubmissionPending) { reply.stopped = true; reply.text = 'تم إيقاف الطلب قبل بدء التنفيذ.'; }
+    else reply.error = error.message + (reply.agentSubmissionPending ? ' سأتحقق من المهمة المحفوظة تلقائيًا عند المتابعة.' : '');
+    return reply;
+  }
   finally {
+    if (ownsSubmission) submittingProjects.delete(id);
     chat.messages.push(reply);
     if (chat.title === 'محادثة جديدة') chat.title = (user.text || user.files?.[0]?.name || 'تنفيذ جديد').slice(0, 50);
     await saveChat(chat);
