@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mergeProjectFiles, projectFileSignature, isBinaryProjectFile, validProjectPath } from '../js/project.js?v=40';
+import { mergeProjectFiles, projectFileSignature, isBinaryProjectFile, validProjectPath } from '../js/project.js?v=48';
 import { createLocalServer } from '../server/local-agent/server.mjs';
 
 // Exercise the browser client against a strict in-memory implementation of the

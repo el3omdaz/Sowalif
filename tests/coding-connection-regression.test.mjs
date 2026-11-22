@@ -18,8 +18,8 @@ test('new engine selection checks local state, and only asks for key if absent',
 test('v43 permissions and v44 sidebar preserved, cache version bumped', () => {
   assert.match(app, /\$\('#agentAutoApprove'\)\.addEventListener\('change'/);
   assert.match(html, /id="historyCollapse"/);
-  assert.match(html, /js\/nav-layout\.js\?v=44/);
-  assert.match(html, /js\/app\.js\?v=46/);
-  assert.match(sw, /shell-v46/);
-  assert.match(sw, /js\/app\.js\?v=46/);
+  assert.match(html, /js\/nav-layout\.js\?v=48/);
+  assert.match(html, /js\/app\.js\?v=48/);
+  assert.match(sw, /shell-v48/);
+  assert.match(sw, /js\/app\.js\?v=48/);
 });

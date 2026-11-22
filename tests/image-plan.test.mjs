@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planImage, CHAT_MAX_SIDE, MEDIA_MAX_SIDE } from '../js/image-plan.js?v=40';
+import { planImage, CHAT_MAX_SIDE, MEDIA_MAX_SIDE } from '../js/image-plan.js?v=48';
 
 test('لقطة شاشة آيفون PNG في المحادثة تصير JPEG بحد 1600 وخلفية بيضاء', () => {
   const p = planImage({ type: 'image/png', width: 1290, height: 2796 });

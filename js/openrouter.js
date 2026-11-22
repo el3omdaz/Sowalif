@@ -1,7 +1,7 @@
-import { settings } from './db.js?v=40';
-import { readSSE } from './kie.js?v=40';
-import { registerOpenRouterModels } from './models.js?v=40';
-import { reasoningEffort } from './reasoning.js?v=40';
+import { settings } from './db.js?v=48';
+import { readSSE } from './kie.js?v=48';
+import { registerOpenRouterModels } from './models.js?v=48';
+import { reasoningEffort } from './reasoning.js?v=48';
 
 const BASE = 'https://openrouter.ai/api/v1';
 export const openRouterKey = () => {

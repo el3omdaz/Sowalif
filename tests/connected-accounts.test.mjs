@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { connectedAccounts } from '../js/connected-accounts.js?v=40';
-import { connectGoogle } from '../js/account-oauth.js?v=40';
+import { connectedAccounts } from '../js/connected-accounts.js?v=48';
+import { connectGoogle } from '../js/account-oauth.js?v=48';
 
 const old = Date.parse('2020-01-01T00:00:00Z');
 const utf8 = value => Buffer.from(value).toString('base64url');

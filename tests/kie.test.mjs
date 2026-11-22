@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.localStorage = { getItem: (k) => k === 'sc.kieKey' ? '"test-key"' : null };
-const { runModel, diagnoseModels } = await import('../js/kie.js?v=40');
+const { runModel, diagnoseModels } = await import('../js/kie.js?v=48');
 const opts = { system: 'Test', messages: [{ role: 'user', text: 'مرحبا' }] };
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 const sse = (text) => {

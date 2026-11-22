@@ -1,4 +1,4 @@
-import { CONNECTED_SCOPES } from './connected-accounts.js?v=40';
+import { CONNECTED_SCOPES } from './connected-accounts.js?v=48';
 
 const MICROSOFT = 'https://login.microsoftonline.com/common/oauth2/v2.0';
 const encodeBase64Url = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');

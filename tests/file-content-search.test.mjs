@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFileService } from '../server/local-agent/files.mjs';
-import { projectZip } from '../js/project.js?v=40';
+import { projectZip } from '../js/project.js?v=48';
 import { fileNameMatches, markupText, rtfText } from '../server/local-agent/content-search.mjs';
 
 async function fixture(t, options) {

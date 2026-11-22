@@ -51,9 +51,9 @@ test('Claude Code permission control does not require element after async respon
 });
 
 test('HTML and cached source versions are in sync', () => {
-  assert.match(html, /js\/app\.js\?v=47/);
-  assert.match(sw, /shell-v47/);
-  assert.match(sw, /js\/app\.js\?v=47/);
-  assert.match(sw, /js\/local-agent\.js\?v=47/);
-  assert.match(sw, /js\/market\.js\?v=47/);
+  assert.match(html, /js\/app\.js\?v=48/);
+  assert.match(sw, /shell-v48/);
+  assert.match(sw, /js\/app\.js\?v=48/);
+  assert.match(sw, /js\/local-agent\.js\?v=48/);
+  assert.match(sw, /js\/market\.js\?v=48/);
 });

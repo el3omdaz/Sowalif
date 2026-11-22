@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readZipEntries } from '../js/zip-text.js?v=40';
-import { projectZip } from '../js/project.js?v=40';
-import { selectPdfPreviewPages } from '../js/pdf-preview.js?v=40';
+import { readZipEntries } from '../js/zip-text.js?v=48';
+import { projectZip } from '../js/project.js?v=48';
+import { selectPdfPreviewPages } from '../js/pdf-preview.js?v=48';
 
 test('binary ZIP extraction respects supported-member filter before allocating size budget', async () => {
   const archive = projectZip([

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitViewport } from '../js/viewport.js?v=40';
+import { fitViewport } from '../js/viewport.js?v=48';
 
 function fixture({ touch = true, visual = true } = {}) {
   const win = Object.assign(new EventTarget(), {

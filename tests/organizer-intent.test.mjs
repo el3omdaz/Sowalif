@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { organizerIntent } from '../js/organizer-intent.js?v=47';
+import { organizerIntent } from '../js/organizer-intent.js?v=48';
 
 test('file commands retain the search phrase and recognize size and duplicate reports', () => {
   assert.deepEqual(organizerIntent('ابحثلي عن ملف اسمه «أعمال 2026.PDF»؟', 'files'), { action: 'find', query: 'أعمال 2026.PDF' });

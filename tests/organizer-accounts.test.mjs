@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initOrganizer } from '../js/organizer.js?v=47';
+import { initOrganizer } from '../js/organizer.js?v=48';
 
 test('Google and Microsoft accounts route mail and drive requests independently', async t => {
   const nodes = new Map();

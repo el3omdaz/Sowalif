@@ -1,26 +1,26 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=39';
-import { fitViewport } from './viewport.js?v=39';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=39';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=39';
-import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=39';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=39';
-import { mediaProvider } from './media.js?v=39';
-import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=39';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=39';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=39';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=39';
-import { prepareProjectPush, pushProject } from './project-github.js?v=39';
-import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=39';
-import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=47';
-import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=39';
-import { planImage } from './image-plan.js?v=39';
-import { initOrganizer } from './organizer.js?v=39';
-import { recommendModel } from './model-recommendation.js?v=39';
-import { reasoningLevels } from './reasoning.js?v=39';
-import { initMarket } from './market.js?v=47';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
-import { requestText } from './text-dialog.js?v=39';
+import * as db from './db.js?v=48';
+import { fitViewport } from './viewport.js?v=48';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=48';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=48';
+import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=48';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=48';
+import { mediaProvider } from './media.js?v=48';
+import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=48';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=48';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=48';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=48';
+import { prepareProjectPush, pushProject } from './project-github.js?v=48';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=48';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=48';
+import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=48';
+import { planImage } from './image-plan.js?v=48';
+import { initOrganizer } from './organizer.js?v=48';
+import { recommendModel } from './model-recommendation.js?v=48';
+import { reasoningLevels } from './reasoning.js?v=48';
+import { initMarket } from './market.js?v=48';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=48';
+import { requestText } from './text-dialog.js?v=48';
 
 const $ = (s) => document.querySelector(s);
 // Optional controls may be absent when the HTML and JS come from different cached versions.
@@ -469,7 +469,7 @@ async function downloadAttachment(file, button) {
     let blob, name = file.originalName || file.name || 'attachment';
     if (file.localFile && !file.localText) blob = await db.getBlob(file.localFile);
     if (!(blob instanceof Blob) && file.originalStoragePath) {
-      const { resolveAttachmentOriginal } = await import('./cloud.js?v=39');
+      const { resolveAttachmentOriginal } = await import('./cloud.js?v=48');
       blob = await resolveAttachmentOriginal(file, { onProgress: text => toast(text) });
     }
     if (!(blob instanceof Blob) && file.kind === 'image' && file.blob) blob = await db.getBlob(file.blob);

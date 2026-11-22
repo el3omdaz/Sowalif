@@ -1,4 +1,4 @@
-import { settings } from './db.js?v=40';
+import { settings } from './db.js?v=48';
 
 let pushSetup;
 const api = '/api/media-push/';

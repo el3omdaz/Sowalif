@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { recommendModel } from '../js/model-recommendation.js?v=40';
+import { recommendModel } from '../js/model-recommendation.js?v=48';
 
 const openrouter = [
   { id: 'or:anthropic/claude-fable-5.2', name: 'Claude Fable 5.2', vision: true },

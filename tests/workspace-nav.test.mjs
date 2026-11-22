@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initWorkspaceNavigation } from '../js/nav-layout.js';
+import { initWorkspaceNavigation } from '../js/nav-layout.js?v=48';
 
 class MockElement {
   constructor(name = '') {

@@ -1,7 +1,7 @@
-import { settings, saveChat, saveProject, profileId, getBlob } from './db.js?v=39';
-import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=39';
-import { preparePersonalContext } from './memory.js?v=39';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
+import { settings, saveChat, saveProject, profileId, getBlob } from './db.js?v=48';
+import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=48';
+import { preparePersonalContext } from './memory.js?v=48';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=48';
 
 let csrf = '';
 const projectId = chat => profileId ? `${profileId}-${chat.id}` : chat.id;
@@ -66,7 +66,7 @@ export async function stageAgentAttachments(chat, emit = () => {}, signal) {
     let blob, name = file.originalName || file.name || 'attachment';
     if (file.localFile && !file.localText) blob = await getBlob(file.localFile);
     if (!(blob instanceof Blob) && file.originalStoragePath) {
-      const { resolveAttachmentOriginal } = await import('./cloud.js?v=39');
+      const { resolveAttachmentOriginal } = await import('./cloud.js?v=48');
       blob = await resolveAttachmentOriginal(file, { signal, onProgress: text => emit('status', { text }) });
     }
     // Earlier app versions retained extracted text instead of the original.

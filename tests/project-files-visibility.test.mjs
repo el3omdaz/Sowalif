@@ -64,7 +64,7 @@ test('work header retains button, handler and v46 cache busting', () => {
   assert.match(html, /id="openProject"[^>]*>ملفات المشروع<\/button>/);
   assert.match(app, /\$\('#openProject'\)\.onclick = \(\) => \{/);
   assert.match(app, /\$\('#projectBar'\)\.classList\.toggle\('hidden', mode !== 'work'\)/);
-  assert.match(html, /js\/app\.js\?v=46/);
-  assert.match(sw, /shell-v46/);
-  assert.match(sw, /js\/app\.js\?v=46/);
+  assert.match(html, /js\/app\.js\?v=48/);
+  assert.match(sw, /shell-v48/);
+  assert.match(sw, /js\/app\.js\?v=48/);
 });
