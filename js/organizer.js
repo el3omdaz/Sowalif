@@ -1,6 +1,6 @@
 import { connectedAccounts, CONNECTED_SCOPES } from './connected-accounts.js?v=40';
 import { connectGoogle, connectMicrosoft, microsoftRedirectUri, prepareGoogleOAuth } from './account-oauth.js?v=40';
-import { organizerIntent } from './organizer-intent.js?v=40';
+import { organizerIntent } from './organizer-intent.js?v=47';
 import { requestText } from './text-dialog.js?v=40';
 
 const shortcutTasks = {
@@ -18,7 +18,7 @@ function formatSize(size) {
   return `${(size / 1024 ** unit).toFixed(1)} ${['B', 'KB', 'MB', 'GB', 'TB'][unit]}`;
 }
 
-export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, attachDocument, attachFile }) {
+export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, attachDocument, attachFile, planFileSearch }) {
   const $ = id => document.getElementById(id);
   const sheet = $('organizerSheet');
   const source = $('organizerSource');
@@ -31,6 +31,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   const linkForm = $('organizerLinkForm');
   const createForm = $('organizerCreateForm');
   const more = $('organizerMore');
+  const aiSearch = $('organizerAiSearch');
   const accounts = { google: new Map(), microsoft: new Map() };
   const selection = { gmail: '', gdrive: '', outlook: '', onedrive: '' };
   const accountSources = { google: ['gmail', 'gdrive'], microsoft: ['outlook', 'onedrive'] };
@@ -41,6 +42,9 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   let lastSearch = null;
   let localDirectory = '';
   let rootsAvailable = false;
+  let localTotals = {};
+  let searchExplanation = '';
+  aiSearch.checked = settings.get('organizerAiSearch', false) === true;
 
   const mode = () => source.value === 'files' ? 'files' : ['gmail', 'outlook'].includes(source.value) ? 'mail' : 'drive';
   const provider = () => ['gmail', 'gdrive'].includes(source.value) ? 'google' : 'microsoft';
@@ -80,6 +84,8 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     roots.disabled = busy || !selected;
     $('organizerLink').disabled = busy || !localAgentOrigin();
     $('organizerUnlink').disabled = $('organizerCreate').disabled = busy || !selected || roots.value === '*';
+    aiSearch.disabled = busy || !localAgentOrigin();
+    $('organizerSearchScope').disabled = busy;
   }
 
   async function action(fn, feedback = status) {
@@ -131,6 +137,8 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     visible($('organizerBulkMail'), false);
     nextPage = null;
     lastSearch = null;
+    localTotals = {};
+    searchExplanation = '';
     visible(more, false);
   }
 
@@ -163,13 +171,15 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     clearResults();
     localDirectory = '';
     task.value = '';
-    task.placeholder = mode() === 'files' ? 'مثال: ابحث عن ملف الميزانية' : 'اكتب كلمة للبحث أو اختر مهمة';
+    task.placeholder = mode() === 'files' ? 'اسم ملف أو كلمة داخله؛ مثال: ابحث عن كلمة مطار داخل ملف وورد' : 'اكتب كلمة للبحث أو اختر مهمة';
     const browsingCloud = mode() !== 'files';
     const useBrowser = browsingCloud && Boolean(window.sowalifDesktop);
     visible($('organizerLocal'), !browsingCloud);
     visible($('organizerCloud'), browsingCloud && !useBrowser);
     visible($('organizerDesktopCloud'), useBrowser);
     visible($('organizerSearch'), !useBrowser);
+    visible($('organizerSearchScopeRow'), !browsingCloud);
+    visible($('organizerAiSearchRow'), !browsingCloud);
     $('organizerMessage').reset();
     visible($('organizerMessage'), false);
     if (useBrowser) { status.textContent = ''; return; }
@@ -212,6 +222,13 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       }));
       target.append(element);
       return;
+    }
+    if (file.match?.type === 'content') {
+      const match = document.createElement('p');
+      match.className = 'organizer-mail-body';
+      match.dir = 'auto';
+      match.textContent = `تطابق داخل المحتوى${file.match.format ? ` · ${file.match.format.toUpperCase()}` : ''}\n${file.match.snippet || ''}`;
+      element.insertBefore(match, controls);
     }
     controls.append(button('قراءة النص', () => void action(async () => {
       const output = await local('read', { root: roots.value, path: file.path });
@@ -261,6 +278,10 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   }
 
   function renderLocal(result) {
+    for (const key of ['scanned', 'skipped', 'contentScanned', 'contentSkipped', 'contentUnsupported', 'contentErrors']) {
+      localTotals[key] = (localTotals[key] || 0) + (Number(result[key]) || 0);
+    }
+    localTotals.matches = (localTotals.matches || 0) + (result.files?.length || 0) + (result.groups || []).reduce((sum, group) => sum + group.files.length, 0);
     for (const file of result.files || []) renderLocalFile(file, results);
     for (const group of result.groups || []) {
       const section = document.createElement('section');
@@ -271,11 +292,18 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       results.append(section);
     }
     status.textContent = [
-      results.childElementCount ? `تم فحص ${result.scanned} ملف.` : 'ما لقيت نتائج في النطاق الذي تم فحصه.',
-      result.skipped ? `تعذّر قراءة ${result.skipped} عنصر.` : '',
-      result.contentSkipped ? `تم تجاوز محتوى ${result.contentSkipped} ملف.` : '',
-      result.partial ? 'النتائج جزئية. حدّد مجلدًا أصغر للحصول على نتيجة أدق.' : '',
-      result.more ? 'تم عرض أول النتائج ضمن حد العرض.' : '',
+      searchExplanation && `فهم الطلب: ${searchExplanation}`,
+      localTotals.matches ? `عُثر على ${localTotals.matches} نتيجة بعد فحص ${localTotals.scanned} ملف.` :
+        result.partial || result.nextCursor || localTotals.skipped || localTotals.contentSkipped || localTotals.contentErrors || localTotals.contentUnsupported
+          ? 'ما ظهرت نتائج حتى الآن؛ البحث لم يشمل كل المحتوى.' : 'ما لقيت نتائج في النطاق الذي اكتمل فحصه.',
+      localTotals.contentScanned ? `تم البحث داخل ${localTotals.contentScanned} ملف.` : '',
+      localTotals.skipped ? `تعذّر الوصول إلى ${localTotals.skipped} عنصر.` : '',
+      localTotals.contentSkipped ? `لم يكتمل فحص محتوى ${localTotals.contentSkipped} ملف.` : '',
+      localTotals.contentUnsupported ? `${localTotals.contentUnsupported} ملف بصيغة لا تتوفر لها قراءة نصية.` : '',
+      localTotals.contentErrors ? `تعذّرت قراءة محتوى ${localTotals.contentErrors} ملف.` : '',
+      result.nextCursor ? 'اضغط «متابعة البحث» لفحص بقية النطاق.' : result.partial ? 'النتائج جزئية. حدّد مجلدًا أصغر وأعد البحث.' : '',
+      result.more && !result.nextCursor ? 'تم عرض أول النتائج ضمن حد العرض.' : '',
+      ...(result.issues || []).slice(0, 3).map(issue => `${issue.path}: ${issue.reason}`),
     ].filter(Boolean).join(' ');
   }
 
@@ -393,13 +421,33 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     await action(async () => {
       const kind = mode();
       const input = task.value.trim();
-      const intent = append ? lastSearch : organizerIntent(input, kind) ||
-        (input && (kind === 'files' ? { action: 'find', query: input } : { action: 'search', query: input }));
+      const scope = $('organizerSearchScope')?.value || 'both';
+      let intent = append ? lastSearch : null;
+      if (!append && kind === 'files' && aiSearch.checked) {
+        if (!input) throw new Error('اكتب وصف الملف أو الشيء الذي تريد البحث عنه.');
+        if (!localAgentOrigin()) throw new Error('افتح نسخة سوالف المحلية للبحث داخل ملفات الكمبيوتر.');
+        if (!roots.value) throw new Error('أضف مجلدًا أو قرصًا أولًا.');
+        if (typeof planFileSearch !== 'function') throw new Error('خدمة فهم البحث غير متاحة. حدّث الصفحة أو أوقف خيار البحث بالذكاء الاصطناعي.');
+        status.textContent = 'أفهم وصفك وأجهّز البحث في النطاق المحدد…';
+        const plan = await planFileSearch({ text: input, searchIn: scope, signal: AbortSignal.timeout(60_000) });
+        if (!plan || !['find', 'largest', 'duplicates', 'browse'].includes(plan.action)) throw new Error('تعذّر تحديد بحث واضح من الوصف. وضّح طلبك وحاول مرة ثانية.');
+        // The model chooses search terms only. The selected local root and all
+        // file access remain controlled by the UI and the local file service.
+        intent = Object.fromEntries(['action', 'query', 'queries', 'searchIn', 'fileQuery', 'fileTypes', 'limit'].filter(key => plan[key] !== undefined).map(key => [key, plan[key]]));
+        if (intent.action === 'find' && !intent.query && !intent.queries?.length) throw new Error('تعذّر تحديد كلمة للبحث. وضّح وصف الملف وحاول مرة ثانية.');
+        if (intent.action === 'find') intent.searchContent = (intent.searchIn || scope) !== 'name';
+        searchExplanation = typeof plan.explanation === 'string' ? plan.explanation.slice(0, 500) : '';
+        status.textContent = `${searchExplanation ? `فهم الطلب: ${searchExplanation} ` : ''}جاري البحث الفعلي في النطاق المحدد…`;
+      } else if (!append) {
+        intent = organizerIntent(input, kind) || (input && (kind === 'files' ? { action: 'find', query: input } : { action: 'search', query: input }));
+      }
       if (!intent) throw new Error('اكتب اسمًا للبحث أو اختر إحدى المهام الظاهرة.');
       if (kind === 'files') {
         if (!roots.value) throw new Error('أضف مجلدًا أو قرصًا أولًا.');
         if (roots.value === '*' && intent.action === 'browse') throw new Error('اختر مجلدًا أو قرصًا واحدًا للتصفح.');
-        const result = await local('scan', { ...intent, root: roots.value, directory: intent.action === 'browse' && localDirectory || undefined });
+        const search = intent.action === 'find' && !intent.searchIn ? { ...intent, searchIn: scope, searchContent: scope !== 'name' } : intent;
+        const result = await local('scan', { ...search, root: roots.value, directory: intent.action === 'browse' && localDirectory || undefined,
+          ...(append && nextPage ? { cursor: nextPage } : {}) });
         if (intent.action === 'browse' && localDirectory) {
           results.append(button('العودة إلى جذر المجلد', () => {
             localDirectory = '';
@@ -407,6 +455,10 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
           }));
         }
         renderLocal(result);
+        lastSearch = search;
+        nextPage = result.nextCursor || null;
+        more.textContent = 'متابعة البحث';
+        visible(more, Boolean(nextPage));
         return;
       }
       if (!activeToken()) throw new Error('اربط الحساب أولًا.');
@@ -417,6 +469,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       for (const entry of result.items) (kind === 'mail' ? renderMail : renderDrive)(entry);
       lastSearch = intent;
       nextPage = result.cursor;
+      more.textContent = 'نتائج أكثر';
       visible(more, Boolean(nextPage));
       const count = results.childElementCount;
       if (intent.review) {
@@ -454,6 +507,12 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     status.textContent = '';
   };
   $('organizerSearch').onsubmit = event => { event.preventDefault(); void runSearch(); };
+  aiSearch.onchange = () => {
+    if (settings.set('organizerAiSearch', aiSearch.checked) === false) {
+      aiSearch.checked = settings.get('organizerAiSearch', false) === true;
+      status.textContent = 'تعذّر حفظ اختيار البحث بالذكاء الاصطناعي.';
+    }
+  };
   more.onclick = () => { if (nextPage) void runSearch(true); };
   for (const [id, operation] of [['organizerArchiveSelected', 'archive'], ['organizerTrashSelected', 'trash']]) {
     $(id).onclick = () => {

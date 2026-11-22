@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="style.css?v=44">
+  <link rel="stylesheet" href="style.css?v=47">
 </head>
 <body>
   <div id="app" class="app">
@@ -252,6 +252,8 @@
       <form id="organizerSearch">
         <label for="organizerTask">وش تبي تسوي؟</label>
         <div class="row"><input type="text" id="organizerTask" maxlength="500" dir="auto"><button type="submit" class="btn primary">بحث</button></div>
+        <label id="organizerSearchScopeRow" for="organizerSearchScope">البحث في<select id="organizerSearchScope"><option value="both">أسماء الملفات ومحتواها</option><option value="name">أسماء الملفات فقط</option><option value="content">محتوى الملفات فقط</option></select></label>
+        <div id="organizerAiSearchRow"><label class="check-row"><input id="organizerAiSearch" type="checkbox"><span>بحث بالذكاء الاصطناعي</span></label><p class="muted">يفهم وصفك باستخدام نموذج المحادثة، ثم يبحث في المجلد أو القرص المحدد.</p></div>
         <div id="organizerShortcuts" class="organizer-shortcuts"></div>
       </form>
       <p id="organizerStatus" class="muted" role="status"></p>
@@ -531,7 +533,7 @@
 
   <script src="vendor/marked.js"></script>
   <script src="vendor/purify.js"></script>
-  <script type="module" src="js/app.js?v=46"></script>
+  <script type="module" src="js/app.js?v=47"></script>
   <script type="module" src="js/nav-layout.js?v=44"></script>
 </body>
 </html>

@@ -15,12 +15,13 @@ import { readProjectDirectory, writeProjectDirectory } from './project-folder.js
 import { localStatus, localAgentOrigin, projectAutoApprove, setProjectAutoApprove, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=46';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=39';
 import { planImage } from './image-plan.js?v=39';
-import { initOrganizer } from './organizer.js?v=39';
+import { initOrganizer } from './organizer.js?v=47';
 import { recommendModel } from './model-recommendation.js?v=39';
 import { reasoningLevels } from './reasoning.js?v=39';
 import { initMarket } from './market.js?v=39';
 import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
 import { requestText } from './text-dialog.js?v=39';
+import { planFileSearch as planLocalFileSearch } from './file-search-ai.js?v=47';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -74,7 +75,13 @@ function toast(text, ms = 2600) {
 // ---------- البداية ----------
 async function boot() {
   const fromMarket = new URL(location.href).searchParams.has('market');
-  initOrganizer({ localAgentOrigin, settings: db.settings, getAttachmentChat: attachmentChat, attachDocument, attachFile });
+  initOrganizer({ localAgentOrigin, settings: db.settings, getAttachmentChat: attachmentChat, attachDocument, attachFile,
+    planFileSearch: ({ text, searchIn, signal }) => {
+      const model = S.model || S.defaultModel;
+      if (!db.settings.get(keySetting(providerOf(model)), '')) throw new Error('أضف مفتاح مزوّد نموذج المحادثة من الإعدادات لتفعيل البحث بالذكاء الاصطناعي.');
+      return planLocalFileSearch({ text, searchIn, model, signal });
+    },
+  });
   initMarket({ local: localAgentOrigin(), analyze: analyzeMarket });
   const confirmation = await confirmCloudEmail();
   renderCodingSetup();

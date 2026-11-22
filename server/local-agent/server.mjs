@@ -400,7 +400,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
     } catch (error) { if (!res.headersSent) json(res, error.statusCode || (typeof error.code === 'number' ? error.code : error.code === 'ENOENT' ? 404 : 400), { error: error.message }); else res.end(); }
   });
   server.on('listening', () => market.start());
-  server.on('close', () => { market.close(); for (const run of runs.values()) run.handle?.stop(); });
+  server.on('close', () => { market.close(); void files.close().catch(() => {}); for (const run of runs.values()) run.handle?.stop(); });
   return server;
 }
 async function serve(res, path) {

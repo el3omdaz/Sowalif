@@ -25,8 +25,56 @@ function stripPrefix(text, ...prefixes) {
 }
 
 function fileQuery(text) {
-  return stripPrefix(text, new RegExp(`^(?:عن\\s+)?${AR_FILE}\\s+(?:(?:اسمه|باسم|بعنوان)\\s+)?`, 'i'),
-    /^(?:for\s+)?(?:the\s+)?files?\s+(?:(?:named|called)\s+)?/i, /^(?:عن|for)\s+/i);
+  text = stripPrefix(text, /^(?:عن|على|for)\s+/i);
+  return stripPrefix(text, new RegExp(`^${AR_FILE}\\s+(?:(?:اسمه|باسم|بعنوان)\\s+)?`, 'i'),
+    /^(?:for\s+)?(?:the\s+)?files?\s+(?:(?:named|called)\s+)?/i, /^(?:عن|على|for)\s+/i);
+}
+
+function contentScope(text) {
+  let value = searchText(text).replace(/^(?:محتوى\s+|contents?\s+of\s+)/i, '');
+  const normalized = commandText(value);
+  if (/^(?:(?:كل|جميع|اي)\s+)?(?:ال)?ملف(?:ات)?(?:\s+(?:موجود[ةه]?|الموجود[ةه]?))?(?:\s+(?:على|في)\s+(?:ال)?(?:قرص|كمبيوتر|جهاز))?$/.test(normalized) ||
+      /^(?:(?:any|all|the)\s+)?files?(?:\s+(?:on|in)\s+(?:the\s+)?(?:disk|drive|computer))?$/i.test(value)) return {};
+  value = value.replace(/^(?:(?:ال)?ملف(?:ات)?|(?:the\s+)?(?:files?))\s+/i, '')
+    .replace(/\s+(?:files?|ملفات)$/i, '').replace(/^(?:اسمه|باسم|بعنوان|named|called)\s+/i, '');
+  const type = commandText(searchText(value));
+  if (/^(?:وورد|ورد|word|microsoft word|docx?)$/.test(type)) return { fileTypes: ['docx', 'doc'] };
+  if (/^(?:pdf|بي دي اف|بي دي ايف)$/.test(type)) return { fileTypes: ['pdf'] };
+  if (/^(?:اكسل|اكسيل|excel|xlsx?)$/.test(type)) return { fileTypes: ['xlsx', 'xls'] };
+  return value ? { fileQuery: searchText(value) } : null;
+}
+
+function contentQuery(text) {
+  const value = text.replace(/^(?:عن|على|for)\s+/i, '');
+  if (/^(?:"[^"]*"|'[^']*'|«[^»]*»|“[^”]*”)$/.test(value)) return null;
+  const outsideQuote = position => {
+    let closing = '';
+    const pairs = { '"': '"', "'": "'", '«': '»', '“': '”' };
+    for (let index = 0; index < position; index++) {
+      const char = value[index];
+      if (value[index - 1] === '\\') continue;
+      if (closing) { if (char === closing) closing = ''; }
+      else if (pairs[char] && (char !== "'" || index === 0 || /\s/.test(value[index - 1]))) closing = pairs[char];
+    }
+    return !closing;
+  };
+  const queryText = text => searchText(text.replace(/^(?:نص|كلمة|عبارة|word|phrase|text)\s+/i, ''));
+  const make = (query, scope) => {
+    query = queryText(query);
+    const filter = scope ? contentScope(scope) : {};
+    return query && filter ? { action: 'find', query, searchContent: true, searchIn: 'content', ...filter } : null;
+  };
+  // Keep the literal query intact; only command words and a trailing scope are removed.
+  const within = /^(?:في|داخل|in|inside)\s+(.+?)\s+(?:عن|على|for)\s+(.+)$/i.exec(value);
+  if (within) return make(within[2], within[1]);
+  const scoped = /^(.+)\s+(?:داخل|في|in|inside)\s+(.+)$/i.exec(value);
+  if (scoped && outsideQuote(scoped[1].length) && !/^(?:(?:ال)?ملف(?:ات)?|(?:the\s+)?files?)\s+/i.test(value)) return make(scoped[1], scoped[2]);
+  const contains = /^(?:(?:ال)?ملفات|(?:the\s+)?files)\s+(?:تحتوي(?:\s+على)?|فيها|اللي\s+فيها|containing)\s+(.+)$/i.exec(value);
+  if (contains) return make(contains[1]);
+  const named = /^(.+?)\s+(?:يحتوي(?:\s+على)?|فيه|containing)\s+(.+)$/i.exec(value);
+  if (named && outsideQuote(named[1].length)) return make(named[2], named[1]);
+  if (/^(?:نص|كلمة|عبارة|word|phrase|text)\s+/i.test(value)) return make(value);
+  return null;
 }
 
 const fileReports = [
@@ -55,16 +103,14 @@ function localFiles(text, source) {
   }
 
   const search = stripPrefix(text, AR_SEARCH, EN_SEARCH);
-  if (source === 'files' && search !== text) {
-    const contentMatch = /^(?:(?:في|داخل) (?:محتوى )?الملفات (?:عن )?(.+)|عن (?:نص |كلمة )?(.+) (?:داخل|في) (?:محتوى )?الملفات|(?:in|inside) (?:the )?files for (.+)|(?:for )?files containing (.+))$/i.exec(search);
-    if (contentMatch) {
-      const query = searchText(contentMatch.slice(1).find(Boolean));
-      if (query) return { action: 'find', query, searchContent: true };
-      return null;
-    }
+  if (source === 'files' && (search !== text || /^(?:نص|كلمة|عبارة|word|phrase|text)\s+/i.test(text))) {
+    const content = contentQuery(search);
+    if (content) return content;
   }
 
-  const target = search !== text ? search : stripPrefix(text, /^(?:وين|اين|أين|وينه|where is)\s+/i);
+  const shown = stripPrefix(text, AR_SHOW, EN_SHOW);
+  const shownFile = shown !== text && /^(?:(?:عن|على)\s+)?(?:(?:ال)?ملف(?:ات)?|(?:the\s+)?files?)\s+/i.test(shown);
+  const target = search !== text ? search : shownFile ? shown : stripPrefix(text, /^(?:وين|اين|أين|وينه|where is)\s+/i);
   const name = searchText(target);
   const query = target !== text ? searchText(fileQuery(target))
     : /^[^\s:"<>|?*@]+\.[a-z0-9]{1,12}$/i.test(name) ? name : '';
