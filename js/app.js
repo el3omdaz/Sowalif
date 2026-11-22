@@ -12,16 +12,15 @@ import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } fro
 import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=39';
 import { prepareProjectPush, pushProject } from './project-github.js?v=39';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=39';
-import { localStatus, localAgentOrigin, projectAutoApprove, setProjectAutoApprove, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=48';
+import { localStatus, localAgentOrigin, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=39';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=39';
 import { planImage } from './image-plan.js?v=39';
-import { initOrganizer } from './organizer.js?v=47';
+import { initOrganizer } from './organizer.js?v=39';
 import { recommendModel } from './model-recommendation.js?v=39';
 import { reasoningLevels } from './reasoning.js?v=39';
 import { initMarket } from './market.js?v=39';
 import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
 import { requestText } from './text-dialog.js?v=39';
-import { planFileSearch as planLocalFileSearch } from './file-search-ai.js?v=47';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -75,13 +74,7 @@ function toast(text, ms = 2600) {
 // ---------- البداية ----------
 async function boot() {
   const fromMarket = new URL(location.href).searchParams.has('market');
-  initOrganizer({ localAgentOrigin, settings: db.settings, getAttachmentChat: attachmentChat, attachDocument, attachFile,
-    planFileSearch: ({ text, searchIn, signal }) => {
-      const model = S.model || S.defaultModel;
-      if (!db.settings.get(keySetting(providerOf(model)), '')) throw new Error('أضف مفتاح مزوّد نموذج المحادثة من الإعدادات لتفعيل البحث بالذكاء الاصطناعي.');
-      return planLocalFileSearch({ text, searchIn, model, signal });
-    },
-  });
+  initOrganizer({ localAgentOrigin, settings: db.settings, getAttachmentChat: attachmentChat, attachDocument, attachFile });
   initMarket({ local: localAgentOrigin(), analyze: analyzeMarket });
   const confirmation = await confirmCloudEmail();
   renderCodingSetup();
@@ -781,7 +774,6 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
-  $('#agentAutoApprove').checked = projectAutoApprove(S.chat);
   const extracting = S.mode === 'image' && S.promptMode;
   const image = !extracting && (S.mode === 'image' || S.imageMode);
   const video = S.mode === 'video' || S.videoMode;
@@ -1478,17 +1470,16 @@ $('#codingModel').onchange = (e) => {
   db.settings.set(spec.modelSetting, e.target.value.trim());
 };
 $('#codingBudget').onchange = (e) => { const value = Math.max(.1, Math.min(10, Number(e.target.value) || 2)); db.settings.set('codingBudget', value); e.target.value = value; };
-// The choice stays on this device for this account and project.
+// Never persist approval bypass in settings: every task must be opted into separately.
 $('#agentAutoApprove').addEventListener('change', (event) => {
+  if (!event.target.checked) return;
   if (!localAgentOrigin()) {
     event.target.checked = false;
     toast('التفويض التلقائي متاح من نسخة الكمبيوتر المحلية فقط');
     return;
   }
-  if (!setProjectAutoApprove(S.chat, event.target.checked)) {
-    event.target.checked = projectAutoApprove(S.chat);
-    toast('تعذّر حفظ اختيار الصلاحيات لهذا المشروع. جرّب مرة ثانية.');
-  }
+  const okay = window.confirm('تفويض كامل لأوامر هذه المهمة داخل Docker فقط. قد يعدّل المحرك ملفات المشروع أو يحذفها، ويستطيع تنفيذ أوامر تتصل بالإنترنت. لا يشمل التفويض جهاز ويندوز كاملًا أو مهامًا لاحقة. هل توافق؟');
+  if (!okay) event.target.checked = false;
 });
 function paintAgentActivity(run) {
   $('#agentActivity').classList.remove('hidden');
@@ -1590,14 +1581,15 @@ const selectedProjectFile = () => projectFiles().find(file => file.path === $('#
 function renderProjectCount() {
   const linked = linkedFolders.get(S.chat?.id);
   const direct = localAgentOrigin() && agentDirectory();
+  // يبقى زر ملفات المشروع ظاهراً في قسم الشغل مع أو بدون ربط مجلد الجهاز.
+  // الربط يضيف إجراءً منفصلاً ولا يستبدل زر الملفات.
+  $('#openProject').classList.remove('hidden');
   $('#agentGit').classList.toggle('hidden', !direct);
   if (direct) {
     $('#projectCount').textContent = direct.split(/[\\/]/).at(-1);
     $('#projectLinkTop').classList.remove('hidden');
-    $('#openProject').classList.add('hidden');
     return;
   }
-  $('#openProject').classList.remove('hidden');
   $('#projectCount').textContent = linked ? `مجلد الجهاز: ${linked.directory.name}`
     : projectFiles().length ? `نسخة سوالف · ${projectFiles().length} ملف` : 'مشروع جديد';
   $('#projectLinkTop').classList.toggle('hidden', !localAgentOrigin() && (Boolean(linked) || typeof window.showDirectoryPicker !== 'function'));
@@ -1682,13 +1674,15 @@ function renderProjectEditor(path = '') {
   $('#projectFiles').value = path;
   $('#projectExport').disabled = !files.length;
   const linked = linkedFolders.get(S.chat.id);
+  const direct = localAgentOrigin() && agentDirectory();
   $('#projectLinkFolder').classList.toggle('hidden', typeof window.showDirectoryPicker !== 'function');
   $('#projectLinkFolder').textContent = linked ? 'تحديث ربط المجلد' : 'ربط مجلد الجهاز';
   $('#projectWriteFolder').classList.toggle('hidden', !linked);
   $('#projectRefreshFolder').classList.toggle('hidden', !linked);
   $('#projectFolderHint').textContent = linked ? `مرتبط بمجلد «${linked.directory.name}». تطبيق التغييرات يحفظها في المجلد مباشرة.`
-    : typeof window.showDirectoryPicker === 'function' ? 'اربط مجلد الجهاز للتعديل على ملفاته مباشرة. الاستيراد يفتح نسخة داخل سوالف.'
-      : 'للتعديل المباشر على ملفات ويندوز، افتح سوالف من Chrome أو Edge على نفس الجهاز.';
+    : direct ? 'هذه النافذة تعرض الملفات المستوردة إلى نسخة سوالف. للوصول إلى ملفات مجلد الكمبيوتر المربوط، اطلب من محرك البرمجة قراءتها أو تعديلها.'
+      : typeof window.showDirectoryPicker === 'function' ? 'اربط مجلد الجهاز للتعديل على ملفاته مباشرة. الاستيراد يفتح نسخة داخل سوالف.'
+        : 'للتعديل المباشر على ملفات ويندوز، افتح سوالف من Chrome أو Edge على نفس الجهاز.';
   loadProjectEditor(selectedProjectFile());
 }
 
