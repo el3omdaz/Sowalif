@@ -9,7 +9,19 @@ const legacy = new Set(['doc', 'xls', 'ppt', 'pages', 'numbers', 'key', 'zip', '
 const imageExtensions = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tif', 'tiff', 'heic']);
 
 export const normalizeSearchText = value => String(value).normalize('NFKC').toLowerCase()
+  .replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '')
   .replace(/[\u064b-\u065f\u0670\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/\s+/g, ' ');
+const escapePattern = text => text.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+function literalMatch(text, query) {
+  const position = text.indexOf(query);
+  if (position >= 0) return { position, length: query.length };
+  // Separators may differ between Word paragraphs, PDF lines, and filenames.
+  // Keep every word intact: a phrase must not match joined or omitted words.
+  const words = query.split(/\s+/);
+  if (words.length < 2) return null;
+  const match = new RegExp(words.map(escapePattern).join('[\\s\\p{P}]+'), 'u').exec(text);
+  return match ? { position: match.index, length: match[0].length } : null;
+}
 export const streamsSearchText = name => {
   const extension = extname(name).slice(1).toLowerCase();
   return textExtensions.has(extension) && !/^(?:html?|xml|svg)$/.test(extension);
@@ -19,7 +31,7 @@ export function fileNameMatches(name, query) {
   const needle = normalizeSearchText(query).trim();
   const haystack = normalizeSearchText(name);
   if (!needle) return true;
-  if (!/[?*]/.test(needle)) return haystack.includes(needle);
+  if (!/[?*]/.test(needle)) return Boolean(literalMatch(haystack, needle));
   const expression = needle.split(/([?*])/).map(part => part === '*' ? '.*' : part === '?' ? '.' : part.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')).join('');
   return new RegExp('^' + expression + '$', 'u').test(haystack);
 }
@@ -84,8 +96,70 @@ function decoderFor(bytes) {
 function sampleResult(text, query, format, extra = {}, alternatives = []) {
   const normalized = normalizeSearchText(text);
   const found = [query, ...alternatives].map(value => normalizeSearchText(value).trim()).filter(Boolean)
-    .map(value => ({ value, position: normalized.indexOf(value) })).filter(item => item.position >= 0).sort((a, b) => a.position - b.position)[0];
-  return { matched: Boolean(found), ...(found ? { matchedQuery: found.value, snippet: normalized.slice(Math.max(0, found.position - 90), found.position + found.value.length + 140).trim() } : {}), format, ...extra };
+    .map(value => { const match = literalMatch(normalized, value); return match && { value, ...match }; }).filter(Boolean).sort((a, b) => a.position - b.position)[0];
+  if (!found) return { matched: false, format, ...extra };
+  // Map only a found range, without retaining a per-character index for huge
+  // documents. The snippet and offsets refer to the original extracted text.
+  const [offset, endOffset] = sourceBoundaries(text, found.position, found.position + found.length);
+  return { matched: true, matchedQuery: found.value, offset, endOffset,
+    snippet: text.slice(Math.max(0, offset - 90), endOffset + 140).trim(), format, ...extra };
+}
+
+function sourceBoundaries(text, start, end) {
+  let source = 0, normalized = 0, previousSpace = false, from, to;
+  while (source < text.length && to === undefined) {
+    let next = Math.min(source + 4096, text.length);
+    // Keep combining sequences together across coarse block boundaries.
+    while (next < text.length && /[\p{M}\u1100-\u11ff\uff9e\uff9f\udc00-\udfff]/u.test(text[next])) next++;
+    const raw = text.slice(source, next), folded = normalizeSearchText(raw);
+    const duplicateSpace = previousSpace && folded.startsWith(' ');
+    const length = folded.length - Number(duplicateSpace);
+    const boundary = (position, after) => {
+      let low = 0, high = raw.length;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        const prefix = normalizeSearchText(raw.slice(0, middle));
+        const size = prefix.length - Number(duplicateSpace && prefix.startsWith(' '));
+        if (after ? size < position : size <= position) low = middle + 1;
+        else high = middle;
+      }
+      return source + (after ? low : Math.max(0, low - 1));
+    };
+    if (from === undefined && start < normalized + length) from = boundary(start - normalized, false);
+    if (end <= normalized + length) to = boundary(end - normalized, true);
+    normalized += length;
+    if (folded) previousSpace = folded.endsWith(' ');
+    source = next;
+  }
+  return [from ?? text.length, to ?? text.length];
+}
+
+export function pdfItemsText(items) {
+  let text = '', previous;
+  for (const item of items || []) {
+    if (typeof item?.str !== 'string') continue;
+    if (previous && text && item.str && !/\s$/u.test(text) && !/^\s/u.test(item.str)) {
+      let separator = ' ';
+      const before = previous.transform, current = item.transform;
+      if (Array.isArray(before) && Array.isArray(current) && before.length >= 6 && current.length >= 6) {
+        const scale = Math.hypot(before[0], before[1]);
+        if (scale > 0 && Number.isFinite(previous.width) && Number.isFinite(item.width)) {
+          const x = before[0] / scale, y = before[1] / scale;
+          const fontSize = Math.max(scale, Math.hypot(current[0], current[1]), 1);
+          const lineDistance = Math.abs((current[4] - before[4]) * -y + (current[5] - before[5]) * x);
+          const start = before[4] * x + before[5] * y;
+          const next = current[4] * x + current[5] * y;
+          const gap = Math.max(next - (start + previous.width), start - (next + item.width));
+          separator = lineDistance > fontSize * .5 ? '\n' : gap > fontSize * .15 ? ' ' : '';
+        }
+      }
+      text += separator;
+    }
+    text += item.str;
+    if (item.hasEOL && !text.endsWith('\n')) text += '\n';
+    previous = item;
+  }
+  return text.trim();
 }
 
 async function bytesOf(file, size, signal, onBytes) {
@@ -137,7 +211,7 @@ async function pdfText(bytes, signal) {
       try {
         page = await document.getPage(number);
         const content = await page.getTextContent();
-        const text = content.items.filter(item => typeof item.str === 'string').map(item => item.str + (item.hasEOL ? '\n' : ' ')).join('').trim();
+        const text = pdfItemsText(content.items);
         out.push(`[صفحة ${number}]\n${text}`);
         const operators = await page.getOperatorList();
         const containsImage = operators.fnArray.some(operator => [pdf.OPS.paintImageXObject, pdf.OPS.paintInlineImageXObject, pdf.OPS.paintImageMaskXObject].includes(operator));
@@ -170,20 +244,25 @@ export async function searchKnownFile(file, options) {
   if (streamsSearchText(options.name)) {
     let decoder = options.resume?.decoder, tail = options.resume?.tail || '', result;
     let offset = options.resume?.offset || 0;
+    let characters = options.resume?.characters || 0;
     const query = normalizeSearchText(options.query).trim();
     const longest = Math.max(query.length, ...(options.queries || []).map(value => normalizeSearchText(value).length));
     for await (const chunk of file.createReadStream({ autoClose: false, start: offset, signal: options.signal })) {
       options.signal?.throwIfAborted();
       options.onBytes?.(chunk.length);
       decoder ||= decoderFor(chunk);
-      const text = tail + normalizeSearchText(decoder.decode(chunk, { stream: true }));
+      const decoded = decoder.decode(chunk, { stream: true });
+      const textStart = characters - tail.length;
+      const text = tail + decoded;
       result = sampleResult(text, query, extension, {}, options.queries);
-      if (result.matched) return result;
-      tail = text.slice(-Math.max(300, longest * 2));
+      if (result.matched) return { ...result, offset: result.offset + textStart, endOffset: result.endOffset + textStart };
+      characters += decoded.length;
+      tail = text.slice(-Math.max(4096, longest * 8));
       offset += chunk.length;
-      options.onProgress?.({ offset, tail, decoder });
+      options.onProgress?.({ offset, tail, decoder, characters });
     }
-    return sampleResult(tail + (decoder?.decode() || ''), query, extension, {}, options.queries);
+    result = sampleResult(tail + (decoder?.decode() || ''), query, extension, {}, options.queries);
+    return result.matched ? { ...result, offset: result.offset + characters - tail.length, endOffset: result.endOffset + characters - tail.length } : result;
   }
   const extracted = await extractKnownFileText(file, options);
   const { text, ...metadata } = extracted;

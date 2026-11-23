@@ -43,7 +43,7 @@ test('Word search reads late body text, split Arabic runs, optional filenames an
   assert.deepEqual(result.files.map(file => file.path), [report]);
   assert.equal(result.files[0].match.type, 'content');
   assert.equal(result.files[0].match.format, 'docx');
-  assert.match(result.files[0].match.snippet, /مطار الكويت late_word_sentinel/);
+  assert.match(result.files[0].match.snippet, /LATE_WORD_SENTINEL/);
   const preview = await service.read({ root, path: report });
   assert.equal(preview.format, 'docx');
   assert.equal(preview.partial, true, 'large previews are explicitly bounded');

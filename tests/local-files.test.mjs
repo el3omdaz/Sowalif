@@ -33,8 +33,9 @@ test('local file tools keep actions in approved folders and preserve deleted fil
     await rm(base, { recursive: true, force: true });
   });
   const origin = 'http://127.0.0.1:' + server.address().port;
-  const { csrf } = await (await fetch(origin + '/api/files/session')).json();
+  const { csrf, fileSearchVersion } = await (await fetch(origin + '/api/files/session')).json();
   assert.equal(typeof csrf, 'string');
+  assert.equal(fileSearchVersion, 2);
   assert.equal((await fetch(origin + '/api/files/session', { headers: { Origin: 'https://other.test' } })).status, 403);
   const headers = { Origin: origin, 'Content-Type': 'application/json', 'X-Sowalif-CSRF': csrf };
   const request = (route, params, overrides = {}) => fetch(origin + '/api/files/' + route, {

@@ -1,23 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initOrganizer } from '../js/organizer.js?v=47';
+import { initOrganizer } from '../js/organizer.js?v=49';
 
-function organizer(t, replies, { planFileSearch, saved = new Map() } = {}) {
+function organizer(t, replies, { planFileSearch, saved = new Map(), sessionVersion = 2, missingIds = [] } = {}) {
   const nodes = new Map();
+  const absent = new Set(missingIds);
   function element(tag = 'div') {
     const classes = new Set();
     return {
       tag, value: '', textContent: '', children: [],
       classList: { contains: name => classes.has(name), toggle(name, on) { if (on) classes.add(name); else classes.delete(name); }, add: name => classes.add(name) },
       get childElementCount() { return this.children.length; },
-      replaceChildren(...children) { this.children = children; if (tag === 'organizerRoot') this.value = children[0]?.value || ''; },
-      append(...children) { this.children.push(...children); },
-      insertBefore(child, before) { this.children.splice(Math.max(0, this.children.indexOf(before)), 0, child); },
+      replaceChildren(...children) { for (const child of this.children) child.parent = null; this.children = []; this.append(...children); if (tag === 'organizerRoot') this.value = children[0]?.value || ''; },
+      append(...children) { for (const child of children) child.parent = this; this.children.push(...children); },
+      insertBefore(child, before) { child.parent = this; this.children.splice(Math.max(0, this.children.indexOf(before)), 0, child); },
+      remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = null; },
       querySelector(selector) { return this.children.find(child => child.tag === selector) || null; },
       reset() {}, focus() {}, setAttribute() {},
     };
   }
-  const node = id => { if (!nodes.has(id)) nodes.set(id, element(id)); return nodes.get(id); };
+  const node = id => { if (absent.has(id)) return null; if (!nodes.has(id)) nodes.set(id, element(id)); return nodes.get(id); };
   const scans = [];
   const globals = {
     document: { getElementById: node, createElement: element },
@@ -25,7 +27,7 @@ function organizer(t, replies, { planFileSearch, saved = new Map() } = {}) {
     Option: class { constructor(text, value) { Object.assign(this, { text, value }); } },
     fetch: async (url, options = {}) => {
       if (url === '/api/files/roots') return Response.json({ roots: [{ path: 'C:\\Documents' }, { path: 'D:\\' }] });
-      if (url === '/api/files/session') return Response.json({ csrf: 'fixture-csrf' });
+      if (url === '/api/files/session') return Response.json({ csrf: 'fixture-csrf', fileSearchVersion: sessionVersion });
       assert.equal(url, '/api/files/scan');
       scans.push(JSON.parse(options.body));
       return Response.json(replies.shift());
@@ -37,7 +39,7 @@ function organizer(t, replies, { planFileSearch, saved = new Map() } = {}) {
     t.after(() => before ? Object.defineProperty(globalThis, name, before) : delete globalThis[name]);
   }
   node('organizerSource').value = 'files';
-  node('organizerSearchScope').value = 'both';
+  if (node('organizerSearchScope')) node('organizerSearchScope').value = 'both';
   initOrganizer({ localAgentOrigin: () => true, planFileSearch, settings: {
     get: (key, fallback) => saved.has(key) ? saved.get(key) : fallback,
     set: (key, value) => { saved.set(key, value); return true; },
@@ -53,6 +55,25 @@ function organizer(t, replies, { planFileSearch, saved = new Map() } = {}) {
   };
   return { node, scans, settled, search, saved };
 }
+
+test('cached markup without the newer AI controls still initializes and searches without blocking account startup', async t => {
+  const a = organizer(t, [{ files: [], scanned: 3, contentScanned: 3, exhausted: true }], {
+    missingIds: ['organizerAiSearch', 'organizerAiSearchRow', 'organizerSearchScope', 'organizerSearchScopeRow'],
+    saved: new Map([['organizerAiSearch', true]]),
+    planFileSearch: () => assert.fail('Missing AI control must not silently enable AI'),
+  });
+  assert.equal(a.node('organizerAiSearch'), null);
+  assert.equal(a.node('organizerSearchScope'), null);
+  a.node('openOrganizer').onclick(); await a.settled();
+  await a.search('مطار');
+  assert.equal(a.scans.length, 1);
+  assert.equal(a.scans[0].searchIn, 'both');
+  assert.equal(a.scans[0].searchContent, true);
+  assert.match(a.node('organizerStatus').textContent, /تم فحص 3 ملف/);
+  a.node('organizerSource').value = 'gmail';
+  a.node('organizerSource').onchange();
+  assert.equal(a.node('organizerSource').disabled, false);
+});
 
 test('plain local searches include content and continue a partial search without losing prior results', async t => {
   const a = organizer(t, [
@@ -89,6 +110,65 @@ test('explicit content commands retain the named file filter regardless of the s
   assert.match(a.node('organizerStatus').textContent, /تعذّرت قراءة محتوى 1 ملف/);
   assert.match(a.node('organizerStatus').textContent, /locked.docx: الملف مشفر/);
   assert.doesNotMatch(a.node('organizerStatus').textContent, /اكتمل فحصه/);
+});
+
+test('an exhausted search identifies the unreadable file without asking to narrow the folder', async t => {
+  const a = organizer(t, [{ files: [], scanned: 1, contentScanned: 1, contentSkipped: 1, contentUnsupported: 1, exhausted: true, partial: true,
+    issues: [{ path: 'C:\\Documents\\العقد.doc', reason: 'هذا الملف يحتاج قارئ Word القديم.' }] }]);
+  a.node('openOrganizer').onclick(); await a.settled();
+  await a.search('طه محمد القطان');
+  const status = a.node('organizerStatus').textContent;
+  assert.match(status, /تم فحص 1 ملف/);
+  assert.match(status, /لا يمكن نفي وجود الاسم أو العبارة داخلها/);
+  assert.match(status, /العقد\.doc: هذا الملف يحتاج قارئ Word القديم/);
+  assert.doesNotMatch(status, /حدّد مجلد|أصغر|متابعة البحث/);
+  assert.equal(a.node('organizerMore').classList.contains('hidden'), true);
+  const details = a.node('organizerResults').children[0];
+  assert.equal(details.tag, 'details');
+  assert.match(details.children[0].textContent, /الملفات التي لم تُقرأ وأسبابها/);
+  assert.match(details.children[1].children[0].textContent, /C:\\Documents\\العقد.doc/);
+});
+
+test('unread-file reasons remain available after later continuation pages and reset on a new search', async t => {
+  const a = organizer(t, [
+    { files: [], scanned: 1, contentSkipped: 1, contentErrors: 1, partial: true, nextCursor: 'next-errors', issues: [{ path: 'old-error.docx', reason: 'المستند مشفر.' }] },
+    { files: [], scanned: 2, contentScanned: 2, exhausted: true, partial: true, issues: [] },
+    { files: [], scanned: 3, contentScanned: 3, exhausted: true, partial: false, issues: [] },
+  ]);
+  a.node('openOrganizer').onclick(); await a.settled();
+  await a.search('القطان');
+  a.node('organizerMore').onclick(); await a.settled();
+  assert.match(a.node('organizerStatus').textContent, /تم فحص 3 ملف/);
+  assert.match(a.node('organizerStatus').textContent, /old-error\.docx: المستند مشفر/);
+  const details = a.node('organizerResults').children.find(child => child.tag === 'details');
+  assert.equal(details.children[1].children.length, 1);
+  assert.match(details.children[1].children[0].textContent, /old-error.docx/);
+  await a.search('بحث جديد');
+  assert.equal(a.node('organizerResults').childElementCount, 0);
+  assert.doesNotMatch(a.node('organizerStatus').textContent, /old-error|مشفر/);
+  assert.match(a.node('organizerStatus').textContent, /النطاق الذي اكتمل فحصه/);
+});
+
+test('unread-file details stay bounded and render returned paths as literal text', async t => {
+  const issues = Array.from({ length: 105 }, (_, index) => ({ path: index ? `file-${index}.docx` : '<img src=x onerror=alert(1)>.docx', reason: 'تعذّرت القراءة.' }));
+  const a = organizer(t, [{ files: [], scanned: 105, contentSkipped: 105, contentErrors: 105, exhausted: true, partial: true, issues }]);
+  a.node('openOrganizer').onclick(); await a.settled();
+  await a.search('القطان');
+  const details = a.node('organizerResults').children[0];
+  assert.equal(details.children[1].children.length, 100);
+  assert.equal(details.children[1].children[0].textContent, '<img src=x onerror=alert(1)>.docx: تعذّرت القراءة.');
+  assert.equal(details.children[1].children[0].innerHTML, undefined);
+  assert.match(details.children[2].textContent, /5 ملاحظات إضافية/);
+});
+
+test('an outdated file service is rejected before AI planning or submitting a search', async t => {
+  let planned = false;
+  const a = organizer(t, [], { sessionVersion: null, saved: new Map([['organizerAiSearch', true]]), planFileSearch: async () => { planned = true; assert.fail('Old service must be detected first'); } });
+  a.node('openOrganizer').onclick(); await a.settled();
+  await a.search('ابحث عن طه محمد القطان');
+  assert.equal(planned, false);
+  assert.equal(a.scans.length, 0);
+  assert.match(a.node('organizerStatus').textContent, /أعد تشغيل|تحديث/);
 });
 
 test('optional AI search understands the description once and resumes the same plan within the selected root', async t => {

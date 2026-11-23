@@ -43,15 +43,18 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   let localDirectory = '';
   let rootsAvailable = false;
   let localTotals = {};
+  let localIssues = new Map();
+  let omittedIssues = 0;
+  let issueDetails = null;
   let searchExplanation = '';
-  aiSearch.checked = settings.get('organizerAiSearch', false) === true;
+  if (aiSearch) aiSearch.checked = settings.get('organizerAiSearch', false) === true;
 
   const mode = () => source.value === 'files' ? 'files' : ['gmail', 'outlook'].includes(source.value) ? 'mail' : 'drive';
   const provider = () => ['gmail', 'gdrive'].includes(source.value) ? 'google' : 'microsoft';
   const accountList = () => accounts[provider()];
   const activeToken = () => accountList().get(selection[source.value])?.token;
   const api = () => connectedAccounts({ [provider() + 'Token']: activeToken() });
-  const visible = (item, show) => item.classList.toggle('hidden', !show);
+  const visible = (item, show) => item?.classList.toggle('hidden', !show);
 
   async function local(path, data) {
     if (!localAgentOrigin()) throw new Error('افتح نسخة سوالف للكمبيوتر على http://127.0.0.1:4781/ لإدارة ملفات الجهاز.');
@@ -71,7 +74,15 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       }
       return result;
     }
-    if (data === undefined) return request(path);
+    if (data === undefined) {
+      const result = await request(path);
+      if (path === 'session') {
+        if (!Number.isInteger(result.fileSearchVersion) || result.fileSearchVersion < 2) throw new Error('خدمة الكمبيوتر المفتوحة ما زالت تستخدم البحث القديم. أعد تشغيل خدمة سوالف المحلية بعد التحديث، ثم حدّث الصفحة وأعد البحث.');
+        csrf = result.csrf;
+        if (!csrf) throw new Error('تعذّر بدء جلسة ملفات الكمبيوتر.');
+      }
+      return result;
+    }
     if (!csrf) {
       ({ csrf } = await request('session'));
       if (!csrf) throw new Error('تعذّر بدء جلسة ملفات الكمبيوتر.');
@@ -84,8 +95,9 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     roots.disabled = busy || !selected;
     $('organizerLink').disabled = busy || !localAgentOrigin();
     $('organizerUnlink').disabled = $('organizerCreate').disabled = busy || !selected || roots.value === '*';
-    aiSearch.disabled = busy || !localAgentOrigin();
-    $('organizerSearchScope').disabled = busy;
+    if (aiSearch) aiSearch.disabled = busy || !localAgentOrigin();
+    const scope = $('organizerSearchScope');
+    if (scope) scope.disabled = busy;
   }
 
   async function action(fn, feedback = status) {
@@ -138,6 +150,9 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     nextPage = null;
     lastSearch = null;
     localTotals = {};
+    localIssues = new Map();
+    omittedIssues = 0;
+    issueDetails = null;
     searchExplanation = '';
     visible(more, false);
   }
@@ -278,8 +293,18 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
   }
 
   function renderLocal(result) {
+    issueDetails?.remove();
+    issueDetails = null;
     for (const key of ['scanned', 'skipped', 'contentScanned', 'contentSkipped', 'contentUnsupported', 'contentErrors']) {
       localTotals[key] = (localTotals[key] || 0) + (Number(result[key]) || 0);
+    }
+    for (const issue of result.issues || []) {
+      const path = String(issue.path || 'ملف غير محدد');
+      const reason = String(issue.reason || 'لم توضح الخدمة سبب تعذّر القراءة.');
+      const key = path + '\0' + reason;
+      if (localIssues.has(key)) continue;
+      if (localIssues.size < 100) localIssues.set(key, { path, reason });
+      else omittedIssues++;
     }
     localTotals.matches = (localTotals.matches || 0) + (result.files?.length || 0) + (result.groups || []).reduce((sum, group) => sum + group.files.length, 0);
     for (const file of result.files || []) renderLocalFile(file, results);
@@ -291,19 +316,45 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
       for (const file of group.files) renderLocalFile(file, section);
       results.append(section);
     }
+    if (localIssues.size) {
+      issueDetails = document.createElement('details');
+      issueDetails.className = 'organizer-search-issues';
+      issueDetails.setAttribute('aria-label', 'الملفات التي لم تُقرأ وأسبابها');
+      const summary = document.createElement('summary');
+      summary.textContent = `الملفات التي لم تُقرأ وأسبابها (${localIssues.size}${omittedIssues ? '+' : ''})`;
+      const list = document.createElement('ul');
+      for (const issue of localIssues.values()) {
+        const line = document.createElement('li');
+        line.dir = 'auto';
+        line.textContent = `${issue.path}: ${issue.reason}`;
+        list.append(line);
+      }
+      issueDetails.append(summary, list);
+      if (omittedIssues) {
+        const note = document.createElement('p');
+        note.textContent = `وردت ${omittedIssues} ملاحظات إضافية لم تُعرض لتبقى القائمة قابلة للقراءة.`;
+        issueDetails.append(note);
+      }
+      results.append(issueDetails);
+    }
+    const unread = Boolean(localTotals.skipped || localTotals.contentSkipped || localTotals.contentErrors || localTotals.contentUnsupported || localIssues.size);
+    const pending = Boolean(result.nextCursor);
     status.textContent = [
       searchExplanation && `فهم الطلب: ${searchExplanation}`,
-      localTotals.matches ? `عُثر على ${localTotals.matches} نتيجة بعد فحص ${localTotals.scanned} ملف.` :
-        result.partial || result.nextCursor || localTotals.skipped || localTotals.contentSkipped || localTotals.contentErrors || localTotals.contentUnsupported
-          ? 'ما ظهرت نتائج حتى الآن؛ البحث لم يشمل كل المحتوى.' : 'ما لقيت نتائج في النطاق الذي اكتمل فحصه.',
-      localTotals.contentScanned ? `تم البحث داخل ${localTotals.contentScanned} ملف.` : '',
+      localTotals.matches ? `عُثر على ${localTotals.matches} نتيجة.` : pending
+        ? 'ما ظهرت نتائج حتى الآن؛ البحث لم يشمل كل المحتوى.' : unread
+          ? 'انتهى فحص النطاق المتاح بدون تطابق، لكن تعذّرت قراءة بعض الملفات؛ لا يمكن نفي وجود الاسم أو العبارة داخلها.' : result.partial
+            ? 'توقّف الفحص قبل اكتمال النطاق؛ لا يمكن تأكيد عدم وجود نتائج.' : 'ما لقيت نتائج في النطاق الذي اكتمل فحصه.',
+      `تم فحص ${localTotals.scanned} ملف.`,
+      'contentScanned' in result || localTotals.contentSkipped ? `تم البحث داخل ${localTotals.contentScanned || 0} ملف.` : '',
       localTotals.skipped ? `تعذّر الوصول إلى ${localTotals.skipped} عنصر.` : '',
       localTotals.contentSkipped ? `لم يكتمل فحص محتوى ${localTotals.contentSkipped} ملف.` : '',
       localTotals.contentUnsupported ? `${localTotals.contentUnsupported} ملف بصيغة لا تتوفر لها قراءة نصية.` : '',
       localTotals.contentErrors ? `تعذّرت قراءة محتوى ${localTotals.contentErrors} ملف.` : '',
-      result.nextCursor ? 'اضغط «متابعة البحث» لفحص بقية النطاق.' : result.partial ? 'النتائج جزئية. حدّد مجلدًا أصغر وأعد البحث.' : '',
+      pending ? 'اضغط «متابعة البحث» لفحص بقية النطاق.' : unread
+        ? issueDetails ? 'افتح «الملفات التي لم تُقرأ وأسبابها» لمعرفة الملف والسبب.' : 'لم تُرجع الخدمة اسم الملف أو سبب تعذّر قراءته.' : result.partial ? 'النتائج ليست شاملة لكل النطاق.' : '',
       result.more && !result.nextCursor ? 'تم عرض أول النتائج ضمن حد العرض.' : '',
-      ...(result.issues || []).slice(0, 3).map(issue => `${issue.path}: ${issue.reason}`),
+      ...[...localIssues.values()].slice(0, 3).map(issue => `${issue.path}: ${issue.reason}`),
     ].filter(Boolean).join(' ');
   }
 
@@ -420,10 +471,11 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     if (!append) clearResults();
     await action(async () => {
       const kind = mode();
+      if (kind === 'files') await local('session');
       const input = task.value.trim();
       const scope = $('organizerSearchScope')?.value || 'both';
       let intent = append ? lastSearch : null;
-      if (!append && kind === 'files' && aiSearch.checked) {
+      if (!append && kind === 'files' && aiSearch?.checked) {
         if (!input) throw new Error('اكتب وصف الملف أو الشيء الذي تريد البحث عنه.');
         if (!localAgentOrigin()) throw new Error('افتح نسخة سوالف المحلية للبحث داخل ملفات الكمبيوتر.');
         if (!roots.value) throw new Error('أضف مجلدًا أو قرصًا أولًا.');
@@ -507,7 +559,7 @@ export function initOrganizer({ localAgentOrigin, settings, getAttachmentChat, a
     status.textContent = '';
   };
   $('organizerSearch').onsubmit = event => { event.preventDefault(); void runSearch(); };
-  aiSearch.onchange = () => {
+  if (aiSearch) aiSearch.onchange = () => {
     if (settings.set('organizerAiSearch', aiSearch.checked) === false) {
       aiSearch.checked = settings.get('organizerAiSearch', false) === true;
       status.textContent = 'تعذّر حفظ اختيار البحث بالذكاء الاصطناعي.';

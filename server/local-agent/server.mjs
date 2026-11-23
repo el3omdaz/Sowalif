@@ -12,6 +12,7 @@ import { openArtifact, listArtifacts } from './artifacts.mjs';
 import { stageInput, readInputMetadata, materializeInputs, inputManifestPrompt } from './inputs.mjs';
 import { DEPLOYMENT_GUIDANCE } from './agent-policy.mjs';
 import { createFileService } from './files.mjs';
+import { FILE_SEARCH_VERSION } from './search-capabilities.mjs';
 import { createMarketFeed } from '../market-feed.mjs';
 import { CODING_ENGINES, codingEngineById } from '../../js/agent-engines.js?v=39';
 
@@ -179,7 +180,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             return json(res, 403, { error: 'افتح الخدمة من واجهة سوالف المحلية' });
           }
           const action = url.pathname.slice('/api/files/'.length);
-          if (action === 'session' && req.method === 'GET') return json(res, 200, { csrf });
+          if (action === 'session' && req.method === 'GET') return json(res, 200, { csrf, fileSearchVersion: FILE_SEARCH_VERSION });
           if (action === 'roots' && req.method === 'GET') return json(res, 200, await files.readRoots());
           if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
           const input = await body(req, action === 'change' ? 7 * 1024 * 1024 : 32 * 1024);
@@ -199,7 +200,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (url.pathname === '/api/agent/status' && req.method === 'GET') {
           const image = await ready('claude');
           const engines = image === LEGACY_IMAGE ? LEGACY_ENGINES : image ? Object.keys(CODING_ENGINES) : [];
-          return json(res, 200, { local: true, ready: Boolean(image), csrf, engines, originalAttachments: true, documentTools: image === IMAGE });
+          return json(res, 200, { local: true, ready: Boolean(image), csrf, engines, originalAttachments: true, documentTools: image === IMAGE, fileSearchVersion: FILE_SEARCH_VERSION });
         }
         if (url.pathname === '/api/agent/link' && req.method === 'POST') {
           const { projectId, directory } = await body(req);
