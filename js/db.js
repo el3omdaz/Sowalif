@@ -237,7 +237,7 @@ export async function importDeviceData() {
       for (const id of blobIds(chat)) { const blob = await read('blobs', id); if (blob instanceof Blob) await tx('blobs', 'readwrite', store => store.put(blob, id)); }
       await saveChat(chat, false, false); count++;
     }
-    const { mergePersonalization } = await import('./memory.js?v=40');
+    const { mergePersonalization } = await import('./memory.js?v=50');
     const readOld = (key, fallback) => { try { return JSON.parse(localStorage.getItem('sc.' + key)) ?? fallback; } catch { return fallback; } };
     mergePersonalization({ instructions: readOld('customInstructions', ''), notes: readOld('personalNotes', ''), enabled: readOld('memoryEnabled', true), rules: readOld('sharedRules', []) });
     return count;
@@ -254,7 +254,7 @@ const toB64 = (blob) =>
   });
 
 export async function exportAll() {
-  const { readPersonalization } = await import('./memory.js?v=40');
+  const { readPersonalization } = await import('./memory.js?v=50');
   const chats = await tx('chats', 'readonly', (s) => s.getAll());
   const blobs = {};
   for (const c of chats) for (const id of blobIds(c)) {
@@ -281,7 +281,7 @@ export async function importAll(file) {
     }
   }
   if (data.personalization) {
-    const { mergePersonalization } = await import('./memory.js?v=40');
+    const { mergePersonalization } = await import('./memory.js?v=50');
     mergePersonalization(data.personalization);
   }
   return n;

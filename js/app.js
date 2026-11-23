@@ -1,29 +1,41 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
-import * as db from './db.js?v=39';
-import { fitViewport } from './viewport.js?v=39';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=39';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=39';
-import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=39';
-import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=39';
-import { mediaProvider } from './media.js?v=39';
-import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=39';
-import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=39';
-import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=39';
-import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=39';
-import { prepareProjectPush, pushProject } from './project-github.js?v=39';
-import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=39';
-import { localStatus, localAgentOrigin, projectAutoApprove, setProjectAutoApprove, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=46';
-import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=39';
-import { planImage } from './image-plan.js?v=39';
-import { initOrganizer } from './organizer.js?v=49';
-import { recommendModel } from './model-recommendation.js?v=39';
-import { reasoningLevels } from './reasoning.js?v=39';
-import { initMarket } from './market.js?v=39';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=39';
-import { requestText } from './text-dialog.js?v=39';
-import { planFileSearch as planLocalFileSearch } from './file-search-ai.js?v=48';
+import * as db from './db.js?v=50';
+import { fitViewport } from './viewport.js?v=50';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=50';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=50';
+import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=50';
+import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=50';
+import { mediaProvider } from './media.js?v=50';
+import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=50';
+import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=50';
+import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=50';
+import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=50';
+import { prepareProjectPush, pushProject } from './project-github.js?v=50';
+import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=50';
+import { localStatus, localAgentOrigin, projectAutoApprove, setProjectAutoApprove, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=50';
+import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=50';
+import { planImage } from './image-plan.js?v=50';
+import { initOrganizer } from './organizer.js?v=50';
+import { recommendModel } from './model-recommendation.js?v=50';
+import { reasoningLevels } from './reasoning.js?v=50';
+import { initMarket } from './market.js?v=50';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=50';
+import { requestText } from './text-dialog.js?v=50';
+import { planFileSearch as planLocalFileSearch } from './file-search-ai.js?v=50';
 
 const $ = (s) => document.querySelector(s);
+// Optional controls may be absent when the HTML and JS come from different cached versions.
+// The account transition must not crash just because a visual checkbox is unavailable.
+function setChecked(selector, value) {
+  const input = $(selector);
+  if (!input) {
+    console.warn(`[Sowalif] Checkbox ${selector} missing; reload the updated interface.`);
+    return false;
+  }
+  input.checked = Boolean(value);
+  return true;
+}
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 async function notifyCompletion(chat, reply) {
@@ -271,7 +283,7 @@ function applyWorkspace(mode) {
   renderProjectCount();
   $('#mediaReference').value = '';
   $('#videoReference').value = '';
-  $('#reuseMedia').checked = true;
+  setChecked('#reuseMedia', true);
   syncToggles();
 }
 
@@ -464,7 +476,7 @@ async function downloadAttachment(file, button) {
     let blob, name = file.originalName || file.name || 'attachment';
     if (file.localFile && !file.localText) blob = await db.getBlob(file.localFile);
     if (!(blob instanceof Blob) && file.originalStoragePath) {
-      const { resolveAttachmentOriginal } = await import('./cloud.js?v=39');
+      const { resolveAttachmentOriginal } = await import('./cloud.js?v=50');
       blob = await resolveAttachmentOriginal(file, { onProgress: text => toast(text) });
     }
     if (!(blob instanceof Blob) && file.kind === 'image' && file.blob) blob = await db.getBlob(file.blob);
@@ -573,7 +585,7 @@ $('#messages').addEventListener('click', async (e) => {
   } else if (e.target.closest('[data-use-prompt]')) {
     if (S.controller || input.value.trim() || S.attachments.length) return toast('أرسل المسودة الحالية أو امسحها أولاً');
     S.mode = 'image'; S.chat.mode = 'image'; S.chat.promptStudioMode = false;
-    applyWorkspace('image'); $('#reuseMedia').checked = false;
+    applyWorkspace('image'); setChecked('#reuseMedia', false);
     input.value = m.promptStudio.prompt; autosize(); input.focus(); return;
   } else if (e.target.closest('[data-prompt-change], [data-reset-prompt]')) {
     if (S.controller) return;
@@ -781,7 +793,7 @@ document.querySelectorAll('.sheet').forEach((s) =>
 
 // ---------- الأزرار ----------
 function syncToggles() {
-  $('#agentAutoApprove').checked = projectAutoApprove(S.chat);
+  setChecked('#agentAutoApprove', projectAutoApprove(S.chat));
   const extracting = S.mode === 'image' && S.promptMode;
   const image = !extracting && (S.mode === 'image' || S.imageMode);
   const video = S.mode === 'video' || S.videoMode;
@@ -1157,12 +1169,12 @@ async function send() {
   const videoReferenceUrl = S.mode === 'video' ? $('#videoReference').value.trim() : '';
   if (mediaReferenceUrl && !/^https?:\/\//i.test(mediaReferenceUrl)) return toast('استخدم رابط صورة يبدأ بـ https://');
   if (videoReferenceUrl && !/^https?:\/\//i.test(videoReferenceUrl)) return toast('استخدم رابط فيديو يبدأ بـ https://');
-  const reuseMedia = isMediaWorkspace() && $('#reuseMedia').checked;
+  const reuseMedia = isMediaWorkspace() && $('#reuseMedia')?.checked === true;
   S.chat.messages.push({ role: 'user', text, files, ...(localExecution ? { localExecution: true } : {}), ...(extracting ? { promptStudio: true } : {}), ...(mediaReferenceUrl ? { mediaReferenceUrl } : {}), ...(videoReferenceUrl ? { videoReferenceUrl } : {}), reuseMedia, at: Date.now() });
   if (S.execute) { S.execute = false; syncToggles(); }
   $('#mediaReference').value = '';
   $('#videoReference').value = '';
-  $('#reuseMedia').checked = true;
+  setChecked('#reuseMedia', true);
   history.replaceState(null, '', `#${S.chat.id}`);
   input.value = '';
   for (const attachment of S.attachments) if (attachment.preview) URL.revokeObjectURL(attachment.preview);
@@ -1205,7 +1217,7 @@ async function saveAccountDraft() {
     text: input.value, attachments: serializeAttachments(S.attachments),
     otherAttachments: [...attachmentDrafts].map(([id, items]) => [id, serializeAttachments(items)]),
     mediaReference: $('#mediaReference').value, videoReference: $('#videoReference').value,
-    reuseMedia: $('#reuseMedia').checked, model: S.model, imageMode: S.imageMode, videoMode: S.videoMode, reasoning: S.reasoning, execute: S.execute, search: S.search,
+    reuseMedia: $('#reuseMedia')?.checked !== false, model: S.model, imageMode: S.imageMode, videoMode: S.videoMode, reasoning: S.reasoning, execute: S.execute, search: S.search,
   });
 }
 
@@ -1230,7 +1242,7 @@ async function restoreAccountDraft() {
   if (typeof draft.reasoning === 'string') S.reasoning = draft.reasoning;
   $('#mediaReference').value = draft.mediaReference || '';
   $('#videoReference').value = draft.videoReference || '';
-  $('#reuseMedia').checked = draft.reuseMedia !== false;
+  setChecked('#reuseMedia', draft.reuseMedia !== false);
   input.value = draft.text || '';
   syncToggles(); autosize(); renderMessages(); renderChatList(); renderAttachments();
   if (S.chats.some(item => item.id === chat.id)) history.replaceState(null, '', `#${chat.id}`);
@@ -1590,14 +1602,15 @@ const selectedProjectFile = () => projectFiles().find(file => file.path === $('#
 function renderProjectCount() {
   const linked = linkedFolders.get(S.chat?.id);
   const direct = localAgentOrigin() && agentDirectory();
+  // يبقى زر ملفات المشروع ظاهراً في قسم الشغل مع أو بدون ربط مجلد الجهاز.
+  // الربط يضيف إجراءً منفصلاً ولا يستبدل زر الملفات.
+  $('#openProject').classList.remove('hidden');
   $('#agentGit').classList.toggle('hidden', !direct);
   if (direct) {
     $('#projectCount').textContent = direct.split(/[\\/]/).at(-1);
     $('#projectLinkTop').classList.remove('hidden');
-    $('#openProject').classList.add('hidden');
     return;
   }
-  $('#openProject').classList.remove('hidden');
   $('#projectCount').textContent = linked ? `مجلد الجهاز: ${linked.directory.name}`
     : projectFiles().length ? `نسخة سوالف · ${projectFiles().length} ملف` : 'مشروع جديد';
   $('#projectLinkTop').classList.toggle('hidden', !localAgentOrigin() && (Boolean(linked) || typeof window.showDirectoryPicker !== 'function'));
@@ -1682,13 +1695,15 @@ function renderProjectEditor(path = '') {
   $('#projectFiles').value = path;
   $('#projectExport').disabled = !files.length;
   const linked = linkedFolders.get(S.chat.id);
+  const direct = localAgentOrigin() && agentDirectory();
   $('#projectLinkFolder').classList.toggle('hidden', typeof window.showDirectoryPicker !== 'function');
   $('#projectLinkFolder').textContent = linked ? 'تحديث ربط المجلد' : 'ربط مجلد الجهاز';
   $('#projectWriteFolder').classList.toggle('hidden', !linked);
   $('#projectRefreshFolder').classList.toggle('hidden', !linked);
   $('#projectFolderHint').textContent = linked ? `مرتبط بمجلد «${linked.directory.name}». تطبيق التغييرات يحفظها في المجلد مباشرة.`
-    : typeof window.showDirectoryPicker === 'function' ? 'اربط مجلد الجهاز للتعديل على ملفاته مباشرة. الاستيراد يفتح نسخة داخل سوالف.'
-      : 'للتعديل المباشر على ملفات ويندوز، افتح سوالف من Chrome أو Edge على نفس الجهاز.';
+    : direct ? 'هذه النافذة تعرض الملفات المستوردة إلى نسخة سوالف. للوصول إلى ملفات مجلد الكمبيوتر المربوط، اطلب من محرك البرمجة قراءتها أو تعديلها.'
+      : typeof window.showDirectoryPicker === 'function' ? 'اربط مجلد الجهاز للتعديل على ملفاته مباشرة. الاستيراد يفتح نسخة داخل سوالف.'
+        : 'للتعديل المباشر على ملفات ويندوز، افتح سوالف من Chrome أو Edge على نفس الجهاز.';
   loadProjectEditor(selectedProjectFile());
 }
 
@@ -2349,7 +2364,7 @@ function loadPersonalSettings() {
   if (!personalizationDirty) {
     $('#customInstructions').value = config.instructions;
     $('#personalNotes').value = config.notes;
-    $('#memoryEnabled').checked = config.enabled;
+    setChecked('#memoryEnabled', config.enabled);
   }
   applyTypography();
   renderMemoryRules();
@@ -2359,7 +2374,7 @@ for (const id of ['customInstructions', 'personalNotes', 'memoryEnabled']) {
 }
 $('#savePersonalization').onclick = () => {
   try {
-    savePersonalization({ instructions: $('#customInstructions').value, notes: $('#personalNotes').value, enabled: $('#memoryEnabled').checked });
+    savePersonalization({ instructions: $('#customInstructions').value, notes: $('#personalNotes').value, enabled: $('#memoryEnabled')?.checked !== false });
     personalizationDirty = false;
     $('#personalizationMsg').textContent = '✓ محفوظة على هذا الجهاز، وتطبّق من الرسالة القادمة مع كل النماذج.';
   } catch (e) { $('#personalizationMsg').textContent = e.message; }
@@ -2368,13 +2383,13 @@ function resetRuleEditor() {
   editingRuleId = null;
   $('#memoryTrigger').value = '';
   $('#memoryAction').value = '';
-  $('#memorySearch').checked = true;
+  setChecked('#memorySearch', true);
   $('#saveMemoryRule').textContent = 'حفظ الاختصار';
   $('#cancelMemoryEdit').classList.add('hidden');
 }
 $('#saveMemoryRule').onclick = () => {
   try {
-    saveRule({ ...(editingRuleId ? { id: editingRuleId } : {}), trigger: $('#memoryTrigger').value, action: $('#memoryAction').value, search: $('#memorySearch').checked });
+    saveRule({ ...(editingRuleId ? { id: editingRuleId } : {}), trigger: $('#memoryTrigger').value, action: $('#memoryAction').value, search: $('#memorySearch')?.checked === true });
     resetRuleEditor();
     renderMemoryRules();
     $('#memoryRuleMsg').textContent = '✓ حُفظ الاختصار لكل المحادثات والنماذج. يعمل عند إرسال الكلمة وحدها والذاكرة مفعّلة.';
@@ -2390,7 +2405,7 @@ $('#memoryRules').addEventListener('click', (e) => {
     editingRuleId = rule.id;
     $('#memoryTrigger').value = rule.trigger;
     $('#memoryAction').value = rule.action;
-    $('#memorySearch').checked = rule.search;
+    setChecked('#memorySearch', rule.search);
     $('#saveMemoryRule').textContent = 'حفظ التعديل';
     $('#cancelMemoryEdit').classList.remove('hidden');
     $('#memoryAction').focus();
@@ -2433,7 +2448,7 @@ function openSettings(group) {
     for (const section of sheet.querySelectorAll('[data-settings]')) section.open = section.dataset.settings === group;
     sheet.querySelector('.sheet-card').scrollTop = 0;
   }
-  $('#completionNotifications').checked = db.settings.get('completionNotifications', false) && globalThis.Notification?.permission === 'granted';
+  setChecked('#completionNotifications', db.settings.get('completionNotifications', false) && globalThis.Notification?.permission === 'granted');
   $('#mediaProvider').value = db.settings.get('mediaProvider', 'auto');
   renderModelName();
   $('#mediaKieKeyState').textContent = db.settings.get('kieKey', '') ? '✓ مفتاح kie.ai محفوظ' : 'لا يوجد مفتاح kie.ai';

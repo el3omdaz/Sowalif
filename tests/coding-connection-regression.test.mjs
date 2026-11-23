@@ -15,11 +15,11 @@ test('connect button triggers real local check, not settings-only loop', () => {
 test('new engine selection checks local state, and only asks for key if absent', () => {
   assert.match(app, /if \(!agentCredentials\(\)\.key\) openSettings\('agent'\);\s*else void connectCodingEngine\(\);/);
 });
-test('project permissions and v44 sidebar preserved, cache version bumped', () => {
+test('project permissions and sidebar preserved, cache version bumped', () => {
   assert.match(app, /\$\('#agentAutoApprove'\)\.addEventListener\('change'/);
   assert.match(html, /id="historyCollapse"/);
-  assert.match(html, /js\/nav-layout\.js\?v=44/);
-  assert.match(html, /js\/app\.js\?v=49/);
-  assert.match(sw, /shell-v49/);
-  assert.match(sw, /js\/app\.js\?v=49/);
+  assert.match(html, /js\/nav-layout\.js\?v=50/);
+  assert.match(html, /js\/app\.js\?v=50/);
+  assert.match(sw, /shell-v50/);
+  assert.match(sw, /js\/app\.js\?v=50/);
 });

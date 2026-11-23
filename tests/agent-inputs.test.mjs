@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import { createLocalServer, IMAGE, snapshot } from '../server/local-agent/server.mjs';
-import { projectZip } from '../js/project.js?v=40';
+import { projectZip } from '../js/project.js?v=50';
 import { materializeInputs, stageInput } from '../server/local-agent/inputs.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');

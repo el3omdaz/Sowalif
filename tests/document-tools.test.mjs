@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDocumentTools } from '../js/document-tools.js?v=40';
-import { readZipEntries } from '../js/zip-text.js?v=40';
-import { projectZip } from '../js/project.js?v=40';
+import { createDocumentTools } from '../js/document-tools.js?v=50';
+import { readZipEntries } from '../js/zip-text.js?v=50';
+import { projectZip } from '../js/project.js?v=50';
 
 test('document tools paginate every character and every file beyond initial excerpts', () => {
   const text = Array.from({ length: 120 }, (_, i) => `[صفحة ${i + 1}]\n` + `Line ${i + 1} `.repeat(150)).join('\n');

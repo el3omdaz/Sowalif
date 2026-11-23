@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initHistoryLayout } from '../js/nav-layout.js';
+import { initHistoryLayout } from '../js/nav-layout.js?v=50';
 
 function fixture(initial = undefined) {
   const classes = new Set();

@@ -1,4 +1,4 @@
-import { runModel } from './kie.js?v=39';
+import { runModel } from './kie.js?v=50';
 
 const ACTIONS = new Set(['find', 'largest', 'duplicates', 'browse']);
 const SCOPES = new Set(['name', 'content', 'both']);

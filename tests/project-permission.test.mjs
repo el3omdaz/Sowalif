@@ -24,6 +24,7 @@ function localAgent({ storage = new Map(), profile = '', hostname = '127.0.0.1',
     document: { querySelector: () => assert.fail('Execution permissions must come from the selected project, not a shared checkbox') },
     fetch: async (url, options) => {
       if (url === '/api/agent/status') return Response.json({ local: true, ready: true, engines: ['codex'], csrf: 'fixture-csrf' });
+      if (url.startsWith('/api/agent/project?')) return Response.json({ revision: 0, files: [] });
       assert.equal(url, '/api/agent/runs');
       const body = JSON.parse(options.body);
       runs.push(body);

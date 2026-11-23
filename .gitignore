@@ -1,5 +1,6 @@
 node_modules/
 .local-agent/
+.sowalif-inputs/
 supabase/.temp/
 supabase/.branches/
 .env

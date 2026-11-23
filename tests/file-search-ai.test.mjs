@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planFileSearch } from '../js/file-search-ai.js';
+import { planFileSearch } from '../js/file-search-ai.js?v=50';
 
 const base = { action: 'find', query: 'مطار', searchIn: 'content', explanation: 'سأبحث عن كلمة مطار داخل الملفات.' };
 const plan = (value, options = {}) => planFileSearch({ text: 'ابحث عن كلمة مطار داخل أي ملف', model: 'or:chosen/model', run: async () => ({ text: JSON.stringify(value) }), ...options });

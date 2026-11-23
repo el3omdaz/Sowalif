@@ -82,7 +82,8 @@ export function initMarket({ local, analyze }) {
       return card;
     }));
     if (!fillForm) return;
-    $('marketEnabled').checked = config.enabled;
+    const enabledControl = $('marketEnabled');
+    if (enabledControl) enabledControl.checked = Boolean(config.enabled);
     $('marketAssets').value = config.assets.join(', ');
     $('marketInterval').value = config.intervalMinutes;
     $('marketLead').value = config.leadMinutes;

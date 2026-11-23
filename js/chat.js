@@ -1,19 +1,19 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
-import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=40';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=40';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=40';
-import { preparePersonalContext } from './memory.js?v=40';
-import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=40';
-import { resolveReferences } from './media-references.js?v=40';
-import { mediaProvider, kieMediaSpec } from './media.js?v=40';
-import { withMediaCallback } from './media-push.js?v=40';
-import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=40';
-import { PROMPT_STUDIO_SYSTEM, extractImagePrompt } from './prompt-studio.js?v=40';
-import { readZipEntries } from './zip-text.js?v=40';
-import { xlsxText } from './xlsx-text.js?v=40';
-import { DOCUMENT_DATA_NOTICE, SYNCED_TEXT_NOTICE, selectDocumentContext, selectProjectFileContext } from './docs-context.js?v=40';
-import { createDocumentTools } from './document-tools.js?v=40';
-import { selectPdfPreviewPages } from './pdf-preview.js?v=40';
+import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=50';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=50';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=50';
+import { preparePersonalContext } from './memory.js?v=50';
+import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=50';
+import { resolveReferences } from './media-references.js?v=50';
+import { mediaProvider, kieMediaSpec } from './media.js?v=50';
+import { withMediaCallback } from './media-push.js?v=50';
+import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=50';
+import { PROMPT_STUDIO_SYSTEM, extractImagePrompt } from './prompt-studio.js?v=50';
+import { readZipEntries } from './zip-text.js?v=50';
+import { xlsxText } from './xlsx-text.js?v=50';
+import { DOCUMENT_DATA_NOTICE, SYNCED_TEXT_NOTICE, selectDocumentContext, selectProjectFileContext } from './docs-context.js?v=50';
+import { createDocumentTools } from './document-tools.js?v=50';
+import { selectPdfPreviewPages } from './pdf-preview.js?v=50';
 
 const ASPECTS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 
@@ -82,7 +82,7 @@ async function attachmentOriginalBlob(file, signal, onProgress) {
   signal?.throwIfAborted();
   let blob = file.localFile ? await getBlob(file.localFile) : undefined;
   if (!(blob instanceof Blob) && file.originalStoragePath) {
-    const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
+    const { resolveAttachmentOriginal } = await import('./cloud.js?v=50');
     blob = await resolveAttachmentOriginal(file, { signal, onProgress });
   }
   if (!(blob instanceof Blob)) throw new Error('الأصل غير موجود على هذا الجهاز. أعد إرفاق الملف.');
@@ -155,7 +155,7 @@ async function readAttachmentDocument(file, { modelId, signal, onProgress, retry
     let originalError;
     if (!(original instanceof Blob) && file.originalStoragePath) {
       try {
-        const { resolveAttachmentOriginal } = await import('./cloud.js?v=40');
+        const { resolveAttachmentOriginal } = await import('./cloud.js?v=50');
         original = await resolveAttachmentOriginal(file, { signal, onProgress });
       } catch (error) { signal?.throwIfAborted(); originalError = error; }
     }

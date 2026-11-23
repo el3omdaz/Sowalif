@@ -267,8 +267,10 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
             const activeRun = active.get(id);
             return json(res, 200, { activeRun, activeEngine: runs.get(activeRun)?.engine });
           }
-          if (p.state.directory) return json(res, 200, { directory: p.state.directory, revision: p.state.revision, artifacts: await listArtifacts(p.workspace) });
-          return json(res, 200, { revision: p.state.revision, files: await snapshot(p.workspace), artifacts: await listArtifacts(p.workspace) });
+          const last = [...runs.values()].reverse().find(run => run.projectId === id);
+          const previous = last ? { lastRun: last.id, lastEngine: last.engine } : {};
+          if (p.state.directory) return json(res, 200, { ...previous, directory: p.state.directory, revision: p.state.revision, artifacts: await listArtifacts(p.workspace) });
+          return json(res, 200, { ...previous, revision: p.state.revision, files: await snapshot(p.workspace), artifacts: await listArtifacts(p.workspace) });
         }
         if (url.pathname === '/api/agent/recover' && req.method === 'POST') {
           const input = await body(req);
@@ -290,6 +292,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           if (!engine?.providers.includes(input.provider)) throw failure('اختر مزوّد محرك البرمجة الصحيح');
           if (typeof input.key !== 'string' || input.key.length < 8 || input.key.length > 512) throw failure('أدخل مفتاح المزوّد');
           if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 20_000) throw failure('اكتب طلباً ضمن 20 ألف حرف');
+          if (input.projectRevision !== undefined && (!Number.isSafeInteger(input.projectRevision) || input.projectRevision < 0)) throw failure('إصدار مشروع المتصفح غير صالح. افتح المحادثة من جديد.');
           if (input.model && (typeof input.model !== 'string' || input.model.length > 150 || /[\r\n\0]/.test(input.model))) throw failure('معرّف نموذج غير صالح');
           if (input.autoApprove !== undefined && typeof input.autoApprove !== 'boolean') throw failure('إعداد صلاحية التنفيذ غير صالح');
           if (!Array.isArray(input.files)) throw failure('ملفات غير صالحة');
@@ -320,7 +323,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           } finally { starting = false; }
           const id = randomUUID();
           const sessionKey = `${input.engine}:${input.provider}:${model || 'default'}`;
-          const run = { id, projectId: input.projectId, engine: input.engine, state: 'running', text: '', events: [], approvals: [], before: files, revision: p.state.revision, sessionKey, createdAt: Date.now() };
+          const run = { id, projectId: input.projectId, projectRevision: input.projectRevision, engine: input.engine, state: 'running', text: '', events: [], approvals: [], before: files, revision: p.state.revision, sessionKey, createdAt: Date.now() };
           runs.set(id, run); active.set(input.projectId, id);
           const clean = value => String(value || '').replaceAll(input.key, '[key]').slice(0, 12000);
           const emit = event => {

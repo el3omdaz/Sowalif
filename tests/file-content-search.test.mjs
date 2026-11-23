@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFileService } from '../server/local-agent/files.mjs';
-import { projectZip } from '../js/project.js?v=40';
+import { projectZip } from '../js/project.js?v=50';
 import { fileNameMatches, markupText, rtfText } from '../server/local-agent/content-search.mjs';
 
 async function fixture(t, options) {
-  const base = await mkdtemp(join(tmpdir(), 'sowalif-content-find-'));
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'sowalif-content-find-')));
   const root = join(base, 'documents');
   await mkdir(root);
   const service = createFileService(join(base, 'control'), options);

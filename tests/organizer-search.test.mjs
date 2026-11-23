@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initOrganizer } from '../js/organizer.js?v=49';
+import { initOrganizer } from '../js/organizer.js?v=50';
 
 function organizer(t, replies, { planFileSearch, saved = new Map(), sessionVersion = 2, missingIds = [] } = {}) {
   const nodes = new Map();

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { projectZip } from '../js/project.js?v=40';
+import { projectZip } from '../js/project.js?v=50';
 import { extractKnownFileText, fileNameMatches, normalizeSearchText, pdfItemsText, searchKnownFile } from '../server/local-agent/content-search.mjs';
 
 async function fixture(t, name, contents) {

@@ -1,4 +1,4 @@
-import { readZipEntries } from './zip-text.js?v=40';
+import { readZipEntries } from './zip-text.js?v=50';
 
 const relevantPart = /^xl\/(?:workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|worksheets\/[^/]+\.xml)$/u;
 const spreadsheetBase = new URL('https://xlsx.invalid/xl/workbook.xml');

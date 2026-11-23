@@ -5,8 +5,8 @@ import {
   readProjectFiles, mergeProjectFiles, projectFileBytes, projectFileFromBytes, projectFileSignature,
   isBinaryProjectFile, validProjectPath, projectZip, compressProjectZip,
   applyProjectProposal, extractProjectProposal,
-} from '../js/project.js?v=40';
-import { readProjectDirectory, writeProjectDirectory } from '../js/project-folder.js?v=40';
+} from '../js/project.js?v=50';
+import { readProjectDirectory, writeProjectDirectory } from '../js/project-folder.js?v=50';
 
 test('projects import large text and more than 40 files without the previous fixed caps', async () => {
   const large = '\ufeffسوالف\r\n'.repeat(70_000);
