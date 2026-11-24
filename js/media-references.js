@@ -1,5 +1,5 @@
 import { settings, getBlob, profileId } from './db.js?v=50';
-import { uploadFile } from './kie.js?v=50';
+import { uploadFile } from './kie.js?v=51';
 import { uploadCloudFile, signCloudFile } from './cloud.js?v=50';
 
 const dataUrl = blob => new Promise((resolve, reject) => {

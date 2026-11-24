@@ -24,7 +24,7 @@ globalThis.indexedDB = { open() {
   return request;
 } };
 const { savePersonalization, saveRule } = await import('../js/memory.js?v=50');
-const { respond } = await import('../js/chat.js?v=50');
+const { respond } = await import('../js/chat.js?v=51');
 
 test('prompt studio uses vision chat only, even in the image workspace with no media key', async () => {
   local.set('sc.openRouterKey', '"fake-or"');
@@ -139,7 +139,7 @@ test('OpenRouter chat routes video straight to PiAPI and resumes an existing tas
   assert.equal(reply.mediaTask.id, 'persistent-video');
   assert.match(reply.error, /status unavailable/);
   failPoll = false;
-  const { resumeMedia } = await import('../js/chat.js?v=50');
+  const { resumeMedia } = await import('../js/chat.js?v=51');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/result.mp4');
@@ -172,7 +172,7 @@ test('kie.ai media works under OpenRouter and resumed jobs retain their original
   assert.ok(reply.error);
   local.set('sc.mediaProvider', '"piapi"');
   failed = false;
-  const { resumeMedia } = await import('../js/chat.js?v=50');
+  const { resumeMedia } = await import('../js/chat.js?v=51');
   await resumeMedia(chat, reply, () => {});
   assert.equal(reply.error, undefined);
   assert.equal(reply.videos[0].url, 'https://cdn.test/kie.mp4');

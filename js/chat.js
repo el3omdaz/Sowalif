@@ -1,10 +1,10 @@
 // دورة الرد: يرسل المحادثة للنموذج، ينفذ أدوات البحث والرسم إن طلبها، ويبث كل شيء للواجهة
 import { saveChat, getBlob, putBlob, deleteBlob, settings } from './db.js?v=50';
-import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=50';
-import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=50';
+import { modelById, SEARCH_MODEL, OR_AUDIO_MODEL } from './models.js?v=51';
+import { runModel, ask, uploadFile, saveRemote, createKieMediaTask, readKieMediaTask } from './kie.js?v=51';
 import { preparePersonalContext } from './memory.js?v=50';
 import { mediaIntent, mediaSpec, referencePlan, createMedia, waitMedia } from './piapi.js?v=50';
-import { resolveReferences } from './media-references.js?v=50';
+import { resolveReferences } from './media-references.js?v=51';
 import { mediaProvider, kieMediaSpec } from './media.js?v=50';
 import { withMediaCallback } from './media-push.js?v=50';
 import { PROJECT_PROMPT, extractProjectProposal } from './project.js?v=50';

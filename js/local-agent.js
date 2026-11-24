@@ -1,7 +1,7 @@
 import { settings, saveChat, saveProject, profileId, getBlob } from './db.js?v=50';
 import { mergeProjectFiles, validProjectPath, isBinaryProjectFile, projectFileSignature } from './project.js?v=50';
 import { preparePersonalContext } from './memory.js?v=50';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=50';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName, codingModelConfig } from './agent-engines.js?v=51';
 
 let csrf = '';
 const projectId = chat => profileId ? `${profileId}-${chat.id}` : chat.id;
@@ -23,10 +23,13 @@ export const agentEngine = () => {
 export function agentCredentials() {
   const engine = agentEngine();
   const spec = codingEngineById(engine) || CODING_ENGINES.claude;
-  const preferred = settings.get('codingProvider', 'openrouter');
+  const providerSetting = `codingProvider.${engine}`;
+  const legacyProvider = engine === 'codex' ? spec.providers[0] : settings.get('codingProvider', spec.providers[0]);
+  const preferred = settings.get(providerSetting, legacyProvider);
   const provider = spec.providers.includes(preferred) ? preferred : spec.providers[0];
   const keyName = CODING_PROVIDERS[provider].key;
-  return { engine, provider, key: settings.get(keyName, ''), keyName, model: settings.get(spec.modelSetting, '') || spec.defaultModel || '' };
+  const modelConfig = codingModelConfig(spec, provider);
+  return { engine, provider, providerSetting, key: settings.get(keyName, ''), keyName, ...modelConfig, model: settings.get(modelConfig.modelSetting, '') || modelConfig.defaultModel };
 }
 async function api(path, data, signal) {
   if (!localAgentOrigin()) throw new Error('افتح نسخة الكمبيوتر: http://127.0.0.1:4781');
@@ -317,6 +320,7 @@ export async function respondLocal(chat, emit, signal, { research } = {}) {
     const config = agentCredentials();
     reply.agentEngine = config.engine;
     if (!status.engines?.includes(config.engine)) throw new Error(`جهّز ${codingEngineName(config.engine)} باستخدام npm run agent:setup وأعد تشغيل نسخة الكمبيوتر.`);
+    if (config.engine === 'codex' && config.provider === 'openrouter' && status.codexOpenRouter !== true) throw new Error('حدّث بيئة Codex لتشغيل OpenRouter باستخدام npm run agent:setup ثم أعد تشغيل خدمة سوالف المحلية.');
     if (!config.key) throw new Error('أضف مفتاح محرك البرمجة في الإعدادات');
     const personal = await preparePersonalContext(chat, user.text || '');
     const prior = chat.mode !== 'work' && chat.messages.slice(-7, -1).filter(message => message.text && !message.error)
@@ -352,7 +356,7 @@ export async function respondLocal(chat, emit, signal, { research } = {}) {
     try {
       run = await api('runs', { projectId: projectId(chat), prompt: sections.join('\n\n'), attachments, direct: Boolean(direct), files: direct ? [] : chat.project?.files || [],
         workspaceRevision: reply.agentBaseWorkspaceRevision, projectRevision: reply.agentBaseRevision,
-        ...config, keyName: undefined, budget: settings.get('codingBudget', 2), autoApprove }, signal);
+        ...config, providerSetting: undefined, keyName: undefined, modelSetting: undefined, defaultModel: undefined, budget: settings.get('codingBudget', 2), autoApprove }, signal);
     } catch (error) {
       if (!error.status) {
         try { if (await recoverSubmission(chat, reply, emit, signal)) return reply; }

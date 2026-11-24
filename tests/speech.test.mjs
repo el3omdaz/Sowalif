@@ -8,7 +8,7 @@ import vm from 'node:vm';
 import { applyProjectProposal, readProjectFiles, mergeProjectFiles, projectFileBytes } from '../js/project.js?v=50';
 import { writeProjectDirectory } from '../js/project-folder.js?v=50';
 import { reasoningLevels } from '../js/reasoning.js?v=50';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from '../js/agent-engines.js?v=50';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName, codingModelConfig } from '../js/agent-engines.js?v=51';
 
 function app({ navigator = {}, coarsePointer = false } = {}) {
   const nodes = new Map();
@@ -44,7 +44,7 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
     reasoningLevels,
     Option: class { constructor(text, value) { Object.assign(this, { text, value }); } },
     agentCredentials: () => ({ engine: 'off', provider: 'openrouter', key: '', model: '' }),
-    CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName,
+    CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName, codingModelConfig,
     localAgentOrigin: () => false,
     projectAutoApprove: () => false,
     setProjectAutoApprove: () => false,
@@ -60,6 +60,100 @@ function app({ navigator = {}, coarsePointer = false } = {}) {
   vm.runInContext(source, ctx);
   return { ctx, node, timers, documentEvents, speech: () => speech, run: (s) => vm.runInContext(s, ctx) };
 }
+
+function reasoningApp() {
+  const a = app();
+  const models = {
+    maximum: { id: 'maximum', api: 'responses', effort: ['low', 'high', 'max'] },
+    claude: { id: 'claude', api: 'anthropic' },
+    gemini: { id: 'gemini', api: 'chat' },
+    fixed: { id: 'fixed', provider: 'openrouter', reasoning: false },
+  };
+  a.ctx.modelById = id => models[id] || models.maximum;
+  return a;
+}
+
+test('thinking defaults to the highest supported level and preserves maximum intent across models', () => {
+  const a = reasoningApp();
+  assert.equal(a.run('S.reasoning'), 'max');
+  for (const [model, selected, disabled] of [
+    ['maximum', 'max', false], ['claude', 'deep', false], ['gemini', 'deep', false],
+    ['fixed', 'normal', true], ['maximum', 'max', false],
+  ]) {
+    a.run(`S.model='${model}'; syncReasoning(false);`);
+    assert.equal(a.node('#deepBtn').value, selected, model);
+    assert.equal(a.node('#deepBtn').disabled, disabled, model);
+    assert.equal(a.run('S.reasoning'), 'max', 'a model fallback must not erase the maximum preference');
+  }
+});
+
+test('manual normal and deep thinking choices remain available after the maximum default', () => {
+  const a = reasoningApp();
+  a.run("S.model='maximum'; syncReasoning(false);");
+  for (const level of ['normal', 'deep']) {
+    a.node('#deepBtn').onchange({ target: { value: level } });
+    assert.equal(a.run('S.reasoning'), level);
+    for (const model of ['claude', 'maximum']) {
+      a.run(`S.model='${model}'; syncReasoning(false);`);
+      assert.equal(a.node('#deepBtn').value, level);
+    }
+  }
+});
+
+test('new and existing conversations use the maximum thinking default', async () => {
+  const a = reasoningApp();
+  a.ctx.db.newChat = model => ({ id: 'fresh', title: 'New chat', model, messages: [] });
+  a.ctx.db.getChat = async id => ({ id, title: 'Older conversation', model: 'claude', messages: [] });
+  a.ctx.db.settings.set = () => true;
+  a.ctx.hydrateCloudChat = async () => {};
+  a.ctx.history = { replaceState() {} };
+  a.ctx.location = { pathname: '/' };
+  a.run("S.defaultModel='maximum'; renderAttachments=()=>{}; renderMessages=()=>{}; renderChatList=()=>{}; checkPendingMedia=()=>{}; renderModelName=()=>syncReasoning(false);");
+  a.run('newChat();');
+  assert.equal(a.node('#deepBtn').value, 'max');
+  await a.run("openChat('older');");
+  assert.equal(a.node('#deepBtn').value, 'deep');
+  assert.equal(a.run('S.reasoning'), 'max');
+});
+
+test('Codex model editing uses the selected provider setting and displays its own default', () => {
+  const a = app();
+  const saved = new Map([['codingProvider', 'openrouter'], ['codingCodexModel', 'native-choice']]);
+  a.ctx.db.settings = { get: (key, fallback) => saved.has(key) ? saved.get(key) : fallback, set: (key, value) => { saved.set(key, value); return true; } };
+  a.ctx.agentCredentials = () => {
+    const providerSetting = 'codingProvider.codex';
+    const provider = saved.get(providerSetting) || 'openai';
+    const config = codingModelConfig('codex', provider);
+    return { engine: 'codex', provider, providerSetting, key: 'fixture-key', ...config, model: saved.get(config.modelSetting) || config.defaultModel };
+  };
+  a.run('renderCodingSetup();');
+  assert.equal(a.node('#codingModel').value, 'native-choice');
+  assert.equal(a.node('#codingProvider').disabled, false);
+  a.node('#codingProvider').onchange({ target: { value: 'openrouter' } });
+  assert.equal(saved.get('codingProvider.codex'), 'openrouter');
+  assert.equal(saved.get('codingProvider'), 'openrouter');
+  assert.equal(a.node('#codingModel').placeholder, 'openai/gpt-5.3-codex');
+  assert.equal(a.node('#codingModel').value, 'openai/gpt-5.3-codex');
+  a.node('#codingModel').onchange({ target: { value: ' openai/router-choice ' } });
+  assert.equal(saved.get('codingCodexOpenRouterModel'), 'openai/router-choice');
+  assert.equal(saved.get('codingCodexModel'), 'native-choice');
+  a.node('#codingProvider').onchange({ target: { value: 'openai' } });
+  assert.equal(a.node('#codingModel').value, 'native-choice');
+  assert.equal(a.node('#codingModel').placeholder, 'اتركه فارغاً للاختيار التلقائي');
+  a.node('#codingProvider').onchange({ target: { value: 'openrouter' } });
+  assert.equal(a.node('#codingModel').value, 'openai/router-choice');
+});
+
+test('Codex on OpenRouter reports an old engine environment without claiming it is ready', async () => {
+  const a = app();
+  a.ctx.localAgentOrigin = () => true;
+  a.ctx.agentCredentials = () => ({ engine: 'codex', provider: 'openrouter', key: 'fixture-key' });
+  a.ctx.localStatus = async () => ({ local: true, ready: true, engines: ['codex'], codexOpenRouter: false });
+  await a.run('connectCodingEngine();');
+  assert.match(a.node('#toast').textContent, /npm run agent:setup/);
+  assert.match(a.node('#codingStatus').textContent, /OpenRouter/);
+  assert.doesNotMatch(a.node('#toast').textContent, /جاهز على الكمبيوتر/);
+});
 
 test('project permission toggles immediately and restores its own state when changing projects', () => {
   const a = app();

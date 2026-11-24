@@ -14,9 +14,10 @@ import { DEPLOYMENT_GUIDANCE } from './agent-policy.mjs';
 import { createFileService } from './files.mjs';
 import { FILE_SEARCH_VERSION } from './search-capabilities.mjs';
 import { createMarketFeed } from '../market-feed.mjs';
-import { CODING_ENGINES, codingEngineById } from '../../js/agent-engines.js?v=39';
+import { CODING_ENGINES, codingEngineById, codingModelConfig } from '../../js/agent-engines.js?v=51';
 
-export const IMAGE = 'sowalif-coding-agent:3';
+export const IMAGE = 'sowalif-coding-agent:4';
+const DOCUMENT_IMAGE = 'sowalif-coding-agent:3';
 const PREVIOUS_IMAGE = 'sowalif-coding-agent:2';
 const LEGACY_IMAGE = 'sowalif-coding-agent:1';
 const LEGACY_ENGINES = ['claude', 'codex'];
@@ -45,8 +46,10 @@ async function command(binary, args) {
     child.on('close', () => clearTimeout(timeout));
   });
 }
-async function installedImage(engine) {
-  for (const image of LEGACY_ENGINES.includes(engine) ? [IMAGE, PREVIOUS_IMAGE, LEGACY_IMAGE] : [IMAGE, PREVIOUS_IMAGE]) {
+async function installedImage(engine, provider) {
+  const compatible = engine === 'codex' && provider === 'openrouter' ? [IMAGE]
+    : LEGACY_ENGINES.includes(engine) ? [IMAGE, DOCUMENT_IMAGE, PREVIOUS_IMAGE, LEGACY_IMAGE] : [IMAGE, DOCUMENT_IMAGE, PREVIOUS_IMAGE];
+  for (const image of compatible) {
     try {
       await command('docker', ['image', 'inspect', image, '--format', '{{.Id}}']);
       return image;
@@ -54,7 +57,7 @@ async function installedImage(engine) {
   }
   return false;
 }
-export async function dockerReady(engine = 'claude') { return Boolean(await installedImage(engine)); }
+export async function dockerReady(engine = 'claude', provider) { return Boolean(await installedImage(engine, provider)); }
 
 export function launchDocker({ workspace, sessions, config, emit, done, image = IMAGE }) {
   const name = `sowalif-agent-${randomUUID()}`;
@@ -200,7 +203,7 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
         if (url.pathname === '/api/agent/status' && req.method === 'GET') {
           const image = await ready('claude');
           const engines = image === LEGACY_IMAGE ? LEGACY_ENGINES : image ? Object.keys(CODING_ENGINES) : [];
-          return json(res, 200, { local: true, ready: Boolean(image), csrf, engines, originalAttachments: true, documentTools: image === IMAGE, fileSearchVersion: FILE_SEARCH_VERSION });
+          return json(res, 200, { local: true, ready: Boolean(image), csrf, engines, originalAttachments: true, documentTools: [IMAGE, DOCUMENT_IMAGE].includes(image), codexOpenRouter: image === IMAGE, fileSearchVersion: FILE_SEARCH_VERSION });
         }
         if (url.pathname === '/api/agent/link' && req.method === 'POST') {
           const { projectId, directory } = await body(req);
@@ -301,10 +304,13 @@ export function createLocalServer({ root = ROOT, dataDir = join(ROOT, '.local-ag
           let p;
           let image;
           let originalInputs = [];
-          const model = input.model || engine.defaultModel;
+          const model = input.model || codingModelConfig(engine, input.provider).defaultModel;
           try {
-            image = await ready(input.engine);
+            image = await ready(input.engine, input.provider);
             if (!image) throw failure('بيئة Docker لهذا المحرك غير جاهزة؛ شغّل إعداد المحرك أولاً', 503);
+            if (input.engine === 'codex' && input.provider === 'openrouter' && typeof image === 'string' && image !== IMAGE) {
+              throw failure('ربط Codex مع OpenRouter يحتاج تحديث بيئة المحرك: شغّل npm run agent:setup ثم أعد تشغيل خدمة سوالف.', 503);
+            }
             p = await project(input.projectId);
             if (Boolean(input.direct) !== Boolean(p.state.directory)) throw failure('أعد ربط مجلد المشروع من قسم الشغل.', 409);
             if (p.state.directory && await realpath(p.state.directory) !== p.state.directory) throw failure('تغيّر مسار المجلد. اربطه من جديد.');

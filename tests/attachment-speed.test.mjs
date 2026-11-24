@@ -6,7 +6,7 @@ globalThis.indexedDB = new IDBFactory();
 const storage = new Map([['sc.openRouterKey', '"mock-key"'], ['sc.memoryEnabled', 'false']]);
 globalThis.localStorage = { getItem: key => storage.get(key) ?? null };
 const { getBlob, putBlob } = await import('../js/db.js?v=50');
-const { makeAttachment, readAttachmentDocuments, respond } = await import('../js/chat.js?v=50');
+const { makeAttachment, readAttachmentDocuments, respond } = await import('../js/chat.js?v=51');
 const { createDocumentTools } = await import('../js/document-tools.js?v=50');
 const { projectZip } = await import('../js/project.js?v=50');
 

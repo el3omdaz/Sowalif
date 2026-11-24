@@ -6,7 +6,7 @@ globalThis.localStorage = { getItem: key => local.get(key) ?? null, setItem: (ke
 globalThis.indexedDB = new IDBFactory();
 globalThis.location = { hostname: 'example.test', port: '' };
 const { settings, putBlob } = await import('../js/db.js?v=50');
-const { resolveReferences } = await import('../js/media-references.js?v=50');
+const { resolveReferences } = await import('../js/media-references.js?v=51');
 const { mediaSpec, createMedia } = await import('../js/piapi.js?v=50');
 
 test('all uploaded references reach Veo and upload credentials stay separate from generation credentials', async () => {

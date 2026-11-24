@@ -64,7 +64,7 @@ test('work header retains button, handler and merged cache version', () => {
   assert.match(html, /id="openProject"[^>]*>ملفات المشروع<\/button>/);
   assert.match(app, /\$\('#openProject'\)\.onclick = \(\) => \{/);
   assert.match(app, /\$\('#projectBar'\)\.classList\.toggle\('hidden', mode !== 'work'\)/);
-  assert.match(html, /js\/app\.js\?v=50/);
-  assert.match(sw, /shell-v50/);
-  assert.match(sw, /js\/app\.js\?v=50/);
+  assert.match(html, /js\/app\.js\?v=51/);
+  assert.match(sw, /shell-v51/);
+  assert.match(sw, /js\/app\.js\?v=51/);
 });

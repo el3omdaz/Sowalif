@@ -1,6 +1,6 @@
 // الاتصال بـ kie.ai من المتصفح مباشرة: ثلاث صيغ للمحادثة (Anthropic · Responses · Chat Completions) + الرفع + توليد الصور
 import { settings, putBlob } from './db.js?v=50';
-import { modelById } from './models.js?v=50';
+import { modelById } from './models.js?v=51';
 import { reasoningEffort } from './reasoning.js?v=50';
 
 // sc.base / sc.upload لتجربة التطبيق على خادم وهمي فقط
@@ -307,7 +307,7 @@ async function runChat(model, { system, messages, search, deep, reasoningLevel, 
 
 export async function runModel(modelId, opts) {
   const model = modelById(modelId);
-  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=50')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
+  const fn = model.provider === 'openrouter' ? (await import('./openrouter.js?v=51')).runOpenRouter : model.api === 'anthropic' ? runAnthropic : model.api === 'responses' ? runResponses : runChat;
   const started = Date.now();
   const connection = { model: model.id, provider: model.provider || 'kie', phase: 'preparing', firstTextMs: null };
   const onTransport = (state) => {

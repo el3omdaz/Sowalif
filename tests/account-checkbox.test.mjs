@@ -52,9 +52,9 @@ test('coding permissions come from the selected project without reading or reset
 });
 
 test('HTML and cached source versions are in sync', () => {
-  assert.match(html, /js\/app\.js\?v=50/);
-  assert.match(sw, /shell-v50/);
-  assert.match(sw, /js\/app\.js\?v=50/);
-  assert.match(sw, /js\/local-agent\.js\?v=50/);
+  assert.match(html, /js\/app\.js\?v=51/);
+  assert.match(sw, /shell-v51/);
+  assert.match(sw, /js\/app\.js\?v=51/);
+  assert.match(sw, /js\/local-agent\.js\?v=51/);
   assert.match(sw, /js\/market\.js\?v=50/);
 });

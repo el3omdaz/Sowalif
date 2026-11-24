@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mergeProjectFiles, projectFileSignature, isBinaryProjectFile, validProjectPath } from '../js/project.js?v=50';
 import { createLocalServer } from '../server/local-agent/server.mjs';
+import { codingModelConfig } from '../js/agent-engines.js?v=51';
 
 // Exercise the browser client against a strict in-memory implementation of the
 // host protocol. No Docker process, provider request or paid API is involved.
@@ -61,7 +62,7 @@ function fixture({ stopTimeout = 200, direct = false, fetchOverride } = {}) {
     profileId: '', location: { hostname: '127.0.0.1', port: '4781' },
     settings: { get: (key, fallback) => settings.has(key) ? settings.get(key) : fallback, set: (key, value) => settings.set(key, value) },
     CODING_ENGINES: { claude: engine }, CODING_PROVIDERS: { openai: { key: 'codingOpenAIKey' } },
-    codingEngineById: id => id === 'codex' || id === 'claude' ? engine : null, codingEngineName: id => id,
+    codingEngineById: id => id === 'codex' || id === 'claude' ? engine : null, codingEngineName: id => id, codingModelConfig,
     mergeProjectFiles, projectFileSignature, isBinaryProjectFile, validProjectPath,
     preparePersonalContext: async (_chat, text) => ({ expanded: text, prompt: '' }),
     saveChat: async value => { stored.set(value.id, structuredClone(value)); return value; },

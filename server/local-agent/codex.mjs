@@ -1,21 +1,50 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 
-export async function runCodex(config, { send, approve, signal }) {
-  const child = spawn('/opt/sowalif-agent/node_modules/.bin/codex', ['app-server'], {
-    cwd: '/workspace', env: { ...process.env, CODEX_HOME: '/sessions/codex' }, stdio: ['pipe', 'pipe', 'pipe'],
+// CLI overrides stay outside the project and never contain credentials.
+export function codexProviderArgs(provider) {
+  if (!['openai', 'openrouter'].includes(provider)) throw new Error('مزوّد Codex غير مدعوم');
+  const settings = [`model_provider="${provider}"`];
+  if (provider === 'openrouter') settings.push(
+    'model_providers.openrouter.name="OpenRouter"',
+    'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+    'model_providers.openrouter.wire_api="responses"',
+    'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+    'model_providers.openrouter.requires_openai_auth=false',
+  );
+  return settings.flatMap(value => ['-c', value]);
+}
+
+export async function runCodex(config, { send, approve, signal }, {
+  spawnAgent = spawn, removeAuth = rm, binary = '/opt/sowalif-agent/node_modules/.bin/codex',
+  workspace = '/workspace', home = '/sessions/codex', timeout = 60_000,
+} = {}) {
+  const provider = config.provider || 'openai';
+  const args = ['app-server', ...codexProviderArgs(provider)];
+  const key = String(config.key || '');
+  const model = String(config.model || '').trim();
+  if (!key) throw new Error(`أدخل مفتاح ${provider === 'openrouter' ? 'OpenRouter' : 'OpenAI'} قبل تشغيل Codex`);
+  if (provider === 'openrouter' && !/^[^/\s]+\/[^\s]+$/.test(model)) throw new Error('اختر معرّف نموذج OpenRouter الكامل، مثل openai/gpt-5.3-codex');
+  if (signal?.aborted) throw new Error('تم الإيقاف');
+  const env = { ...process.env, CODEX_HOME: home };
+  delete env.OPENAI_API_KEY;
+  delete env.OPENROUTER_API_KEY;
+  if (provider === 'openrouter') env.OPENROUTER_API_KEY = key;
+  const child = spawnAgent(binary, args, {
+    cwd: workspace, env, stdio: ['pipe', 'pipe', 'pipe'],
   });
   const pending = new Map();
   let id = 0;
   let finish;
   let fail;
   const done = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
-  const redact = value => String(value || '').replaceAll(config.key || '\0', '[key]').slice(0, 12000);
+  const redact = value => String(value || '').replaceAll(key, '[key]').slice(0, 12000);
   const write = message => child.stdin.write(JSON.stringify(message) + '\n');
   const rpc = (method, params) => new Promise((resolve, reject) => {
     const next = ++id;
-    const timer = setTimeout(() => { pending.delete(next); reject(new Error(`Codex: ${method} timed out`)); }, 60_000);
+    const timer = setTimeout(() => { pending.delete(next); reject(new Error(`Codex: ${method} timed out`)); }, timeout);
     pending.set(next, { resolve: x => { clearTimeout(timer); resolve(x); }, reject: e => { clearTimeout(timer); reject(e); } });
     write({ id: next, method, params });
   });
@@ -64,11 +93,13 @@ export async function runCodex(config, { send, approve, signal }) {
   try {
     await rpc('initialize', { clientInfo: { name: 'sowalif', title: 'Sowalif', version: '1.0.0' } });
     write({ method: 'initialized', params: {} });
-    await rpc('account/login/start', { type: 'apiKey', apiKey: config.key });
-    const options = { cwd: '/workspace', approvalPolicy: 'on-request', ...(config.model ? { model: config.model } : {}) };
+    // An OpenRouter key belongs only to its custom provider, never OpenAI login.
+    if (provider === 'openai') await rpc('account/login/start', { type: 'apiKey', apiKey: key });
+    const options = { cwd: workspace, modelProvider: provider, approvalPolicy: 'on-request', ...(model ? { model } : {}) };
     const thread = await rpc(config.sessionId ? 'thread/resume' : 'thread/start', config.sessionId ? { ...options, threadId: config.sessionId } : options);
+    if ((thread.modelProvider && thread.modelProvider !== provider) || (thread.thread.modelProvider && thread.thread.modelProvider !== provider)) throw new Error('تعذر تأكيد مزوّد Codex المختار؛ أعد ربط المحرك');
     threadId = thread.thread.id;
-    send('session', { id: threadId, model: config.model || 'Codex' });
+    send('session', { id: threadId, model: model || 'Codex' });
     const turn = await rpc('turn/start', { threadId, input: [{ type: 'text', text: config.prompt }], sandboxPolicy: { type: 'externalSandbox', networkAccess: 'enabled' } });
     turnId = turn.turn.id;
     await done;
@@ -78,6 +109,6 @@ export async function runCodex(config, { send, approve, signal }) {
     lines.close();
     for (const waiter of pending.values()) waiter.reject(new Error('Closed'));
     // Keep conversation history, remove the API key file created by login/start.
-    await rm('/sessions/codex/auth.json', { force: true }).catch(() => {});
+    if (provider === 'openai') await removeAuth(join(home, 'auth.json'), { force: true }).catch(() => {});
   }
 }

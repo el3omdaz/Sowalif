@@ -1,27 +1,27 @@
 // واجهة «المحادثة الذكية» — كل شيء يشتغل في المتصفح، والمحادثات محفوظة على هذا الجهاز
 import * as db from './db.js?v=50';
 import { fitViewport } from './viewport.js?v=50';
-import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=50';
-import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=50';
-import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=50';
+import { MODELS, DEFAULT_MODEL, modelById, OR_DEFAULT_MODEL, OR_AUDIO_MODEL, modelsFor, providerOf } from './models.js?v=51';
+import { checkOpenRouterKey, refreshOpenRouterModels } from './openrouter.js?v=51';
+import { respond, resumeMedia, transcribe, makeAttachment, researchWeb } from './chat.js?v=51';
 import { mediaIntent, IMAGE_MODELS, VIDEO_MODELS } from './piapi.js?v=50';
 import { mediaProvider } from './media.js?v=50';
-import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=50';
+import { credits, CREDIT_USD, diagnoseModels, runModel } from './kie.js?v=51';
 import { readPersonalization, savePersonalization, saveRule, removeRule, clearSavedMemory } from './memory.js?v=50';
 import { prepareMediaPush, enableCompletionNotifications, disableMediaPush } from './media-push.js?v=50';
 import { applyProjectProposal, mergeProjectFiles, projectPreview, compressProjectZip, readProjectFiles, projectFileBytes, projectFileSignature, isBinaryProjectFile } from './project.js?v=50';
 import { prepareProjectPush, pushProject } from './project-github.js?v=50';
 import { readProjectDirectory, writeProjectDirectory } from './project-folder.js?v=50';
-import { localStatus, localAgentOrigin, projectAutoApprove, setProjectAutoApprove, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=50';
+import { localStatus, localAgentOrigin, projectAutoApprove, setProjectAutoApprove, agentCredentials, respondLocal, collectAgentRun, answerAgent, recoverLocalProject, agentArtifactUrl, linkAgentDirectory, agentGit } from './local-agent.js?v=51';
 import { cloud, cloudConfirmationUrl, initCloud, cloudUser, syncCloud, hydrateCloudChat, memoryConflict, resolveMemoryConflict } from './cloud.js?v=50';
 import { planImage } from './image-plan.js?v=50';
 import { initOrganizer } from './organizer.js?v=50';
 import { recommendModel } from './model-recommendation.js?v=50';
 import { reasoningLevels } from './reasoning.js?v=50';
 import { initMarket } from './market.js?v=50';
-import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName } from './agent-engines.js?v=50';
+import { CODING_ENGINES, CODING_PROVIDERS, codingEngineById, codingEngineName, codingModelConfig } from './agent-engines.js?v=51';
 import { requestText } from './text-dialog.js?v=50';
-import { planFileSearch as planLocalFileSearch } from './file-search-ai.js?v=50';
+import { planFileSearch as planLocalFileSearch } from './file-search-ai.js?v=51';
 
 const $ = (s) => document.querySelector(s);
 // Optional controls may be absent when the HTML and JS come from different cached versions.
@@ -69,7 +69,7 @@ const S = {
   chats: [],
   attachments: [], // { id, name, kind, preview, meta, loading }
   search: db.settings.get('search', false),
-  reasoning: 'normal',
+  reasoning: 'max',
   execute: false,
   imageMode: false,
   videoMode: false,
@@ -838,7 +838,7 @@ const thinkingLabels = { normal: 'عادي', deep: 'عميق', max: 'أقصى' }
 function syncReasoning(media = !!selectedMediaKind()) {
   const select = $('#deepBtn');
   const levels = reasoningLevels(modelOf(S.model));
-  const selected = levels.includes(S.reasoning) ? S.reasoning : 'normal';
+  const selected = levels.includes(S.reasoning) ? S.reasoning : levels.at(-1) || 'normal';
   select.replaceChildren(...levels.map(level => new Option(`التفكير: ${thinkingLabels[level]}`, level)));
   select.value = selected;
   select.classList.toggle('on', selected !== 'normal' && !media);
@@ -1412,7 +1412,7 @@ function renderCodingSetup() {
   provider.value = config.provider;
   provider.disabled = spec.providers.length < 2;
   $('#codingModel').value = config.model;
-  $('#codingModel').placeholder = spec.defaultModel || 'اتركه فارغاً للاختيار التلقائي';
+  $('#codingModel').placeholder = codingModelConfig(spec, config.provider).defaultModel || 'اتركه فارغاً للاختيار التلقائي';
   $('#codingBudget').value = db.settings.get('codingBudget', 2);
   $('#codingBudgetFields').classList.toggle('hidden', config.engine !== 'claude');
   $('#codingKeyHint').textContent = `مفتاح ${CODING_PROVIDERS[config.provider].label} · ${config.key ? 'محفوظ' : 'غير محفوظ'}`;
@@ -1421,12 +1421,14 @@ function renderCodingSetup() {
 async function refreshCodingStatus() {
   try {
     const status = await localStatus();
-    const engine = agentCredentials().engine;
+    const config = agentCredentials();
+    const engine = config.engine;
     const available = status.engines || [];
     $('#codingStatus').textContent = !status.local ? 'افتح نسخة الكمبيوتر لتشغيل المحركات.'
       : status.ready && (engine === 'off' || available.includes(engine)) ? `المحركات الجاهزة · ${available.map(codingEngineName).join('، ')}`
         : 'جهّز المحرك بأمر npm run agent:setup على الكمبيوتر، ثم أعد تشغيل نسخة سوالف.';
-    if (status.ready && status.documentTools === false) $('#codingStatus').textContent += ' · حدّث بيئة المحرك لتفعيل أدوات PDF وOCR والأرشيفات.';
+    if (status.local && config.engine === 'codex' && config.provider === 'openrouter' && status.codexOpenRouter !== true) $('#codingStatus').textContent = 'حدّث بيئة Codex باستخدام npm run agent:setup وأعد تشغيل خدمة سوالف لتفعيل OpenRouter.';
+    else if (status.ready && status.documentTools === false) $('#codingStatus').textContent += ' · حدّث بيئة المحرك لتفعيل أدوات PDF وOCR والأرشيفات.';
   } catch { $('#codingStatus').textContent = 'تعذّر الاتصال بخدمة الكمبيوتر. شغّل Start-Sowalif.cmd.'; }
 }
 // «ربط المحرك» يختبر الخدمة فعلاً على الكمبيوتر، ولا يعيد فتح الإعدادات بلا سبب.
@@ -1451,6 +1453,8 @@ async function connectCodingEngine() {
       toast('خدمة سوالف تعمل، لكن بيئة Docker غير جاهزة. شغّل npm run agent:setup.', 8000);
     } else if (!(status.engines || []).includes(engine)) {
       toast(`محرك ${codingEngineName(engine)} غير مجهز. شغّل npm run agent:setup ثم أعد تشغيل سوالف.`, 8000);
+    } else if (engine === 'codex' && agentCredentials().provider === 'openrouter' && status.codexOpenRouter !== true) {
+      toast('حدّث بيئة Codex باستخدام npm run agent:setup ثم أعد تشغيل خدمة سوالف لتفعيل OpenRouter.', 8000);
     } else {
       toast(`✓ ${codingEngineName(engine)} جاهز على الكمبيوتر. اكتب طلبك في قسم الشغل.`, 6500);
     }
@@ -1475,7 +1479,8 @@ $('#codingEngine').onchange = (e) => {
 $('#codingSetup').onclick = () => { void connectCodingEngine(); };
 $('#codingProvider').onchange = (e) => {
   if (S.controller) return;
-  db.settings.set('codingProvider', e.target.value); $('#codingKey').value = ''; renderCodingSetup();
+  const config = agentCredentials();
+  db.settings.set(config.providerSetting || `codingProvider.${config.engine}`, e.target.value); $('#codingKey').value = ''; renderCodingSetup();
 };
 $('#saveCodingKey').onclick = () => {
   const config = agentCredentials();
@@ -1486,8 +1491,8 @@ $('#saveCodingKey').onclick = () => {
 };
 $('#forgetCodingKey').onclick = () => { db.settings.set(agentCredentials().keyName, ''); $('#codingKey').value = ''; renderCodingSetup(); };
 $('#codingModel').onchange = (e) => {
-  const spec = codingEngineById(agentCredentials().engine) || CODING_ENGINES.claude;
-  db.settings.set(spec.modelSetting, e.target.value.trim());
+  const config = agentCredentials();
+  db.settings.set(config.modelSetting || codingModelConfig(config.engine, config.provider).modelSetting, e.target.value.trim());
 };
 $('#codingBudget').onchange = (e) => { const value = Math.max(.1, Math.min(10, Number(e.target.value) || 2)); db.settings.set('codingBudget', value); e.target.value = value; };
 // The choice stays on this device for this account and project.

@@ -19,7 +19,7 @@ test('project permissions and sidebar preserved, cache version bumped', () => {
   assert.match(app, /\$\('#agentAutoApprove'\)\.addEventListener\('change'/);
   assert.match(html, /id="historyCollapse"/);
   assert.match(html, /js\/nav-layout\.js\?v=50/);
-  assert.match(html, /js\/app\.js\?v=50/);
-  assert.match(sw, /shell-v50/);
-  assert.match(sw, /js\/app\.js\?v=50/);
+  assert.match(html, /js\/app\.js\?v=51/);
+  assert.match(sw, /shell-v51/);
+  assert.match(sw, /js\/app\.js\?v=51/);
 });

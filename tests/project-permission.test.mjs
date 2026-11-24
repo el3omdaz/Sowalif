@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { codingModelConfig } from '../js/agent-engines.js?v=51';
 
 function localAgent({ storage = new Map(), profile = '', hostname = '127.0.0.1', port = '4781', failWrites = false, failedRuns = 0, desktop = false } = {}) {
   const defaults = new Map([['codingEngine', 'codex'], ['codingProvider', 'openai'], ['codingOpenAIKey', 'fixture-key']]);
@@ -15,7 +16,7 @@ function localAgent({ storage = new Map(), profile = '', hostname = '127.0.0.1',
       get: (key, fallback) => storage.has(key) ? storage.get(key) : defaults.has(key) ? defaults.get(key) : fallback,
       set(key, value) { if (failWrites) return false; storage.set(key, value); return true; },
     },
-    CODING_ENGINES: { claude: engine },
+    CODING_ENGINES: { claude: engine }, codingModelConfig,
     CODING_PROVIDERS: { openai: { key: 'codingOpenAIKey' } },
     codingEngineById: id => id === 'codex' ? engine : null,
     codingEngineName: id => id,

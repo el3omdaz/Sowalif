@@ -149,6 +149,50 @@ test('the new engine image supports Carbon and Kimi, with legacy fallback for Co
   }
 });
 
+test('Codex OpenRouter requires its updated runtime, keeps document tools and separates provider sessions', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'sowalif-codex-provider-'));
+  let image = 'sowalif-coding-agent:3';
+  const launches = [], checks = [];
+  const server = createLocalServer({ dataDir, ready: async (...args) => { checks.push(args); return image; }, launch(options) {
+    launches.push(options); return { stop() {} };
+  } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(dataDir, { recursive: true, force: true }); });
+  const status = () => fetch(origin + '/api/agent/status').then(response => response.json());
+  const before = await status();
+  assert.equal(before.documentTools, true);
+  assert.equal(before.codexOpenRouter, false);
+  const post = (provider, workspaceRevision = 0) => fetch(origin + '/api/agent/runs', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: origin, 'X-Sowalif-CSRF': before.csrf },
+    body: JSON.stringify({ projectId: 'codex-project', engine: 'codex', provider, key: 'fixture-provider-key',
+      prompt: 'Inspect project', files: [], workspaceRevision }),
+  });
+  const unavailable = await post('openrouter');
+  assert.equal(unavailable.status, 503);
+  assert.match((await unavailable.json()).error, /npm run agent:setup/);
+  assert.equal(launches.length, 0);
+  assert.deepEqual(checks.at(-1), ['codex', 'openrouter']);
+
+  image = IMAGE;
+  assert.equal((await status()).codexOpenRouter, true);
+  for (const [provider, revision, expectedSession] of [['openrouter', 0], ['openai', 1], ['openrouter', 2, 'or-session']]) {
+    const response = await post(provider, revision);
+    assert.equal(response.status, 202);
+    const job = launches.at(-1);
+    assert.equal(job.config.provider, provider);
+    assert.equal(job.config.model || '', provider === 'openrouter' ? 'openai/gpt-5.3-codex' : '');
+    assert.equal(job.config.sessionId, expectedSession);
+    assert.equal(job.image, IMAGE);
+    job.emit({ type: 'session', id: provider === 'openrouter' ? 'or-session' : 'openai-session' });
+    job.emit({ type: 'result' });
+    await job.done(null);
+    const output = await fetch(origin + '/api/agent/runs/' + (await response.json()).id).then(res => res.json());
+    assert.equal(output.state, 'completed');
+    assert.equal(JSON.stringify(output).includes('fixture-provider-key'), false);
+  }
+});
+
 test('project run transfers large text, binary and archive files without the former JSON/file limits', async t => {
   const dataDir = await mkdtemp(join(tmpdir(), 'sowalif-large-project-'));
   let job;

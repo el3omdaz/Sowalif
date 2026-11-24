@@ -161,6 +161,7 @@ export const IMAGE_MODEL = 'nano-banana-2-1';
 export const OR_DEFAULT_MODEL = 'or:anthropic/claude-sonnet-5.5';
 export const OR_AUDIO_MODEL = 'or:google/gemini-3.8-flash';
 const starters = [
+  ['openai/gpt-5.3-codex', 'GPT-5.3-Codex', ['text', 'image', 'file'], ['xhigh', 'high', 'medium', 'low']],
   ['openai/gpt-6-astra', 'GPT-6 Astra', ['text', 'image'], ['max', 'high', 'low']],
   ['anthropic/claude-fable-5.2', 'Claude Fable 5.2', ['text', 'image'], ['max', 'high', 'low']],
   ['google/gemini-4-carbon', 'Gemini 4 Carbon', ['text', 'image', 'audio']],
